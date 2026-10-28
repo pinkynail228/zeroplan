@@ -1,0 +1,57 @@
+s9a1-run-reader — 0.5 item S9 (docs/RELEASE_0.5_SCOPE.md S9 row), child 1 of 3 of the umbrella devtools/zeroshot/tasks/s9a-run-view.md. Owns parsing, scrub, execution attribution and cancellable reader mechanics: the data the run view (s9a2-run-view) shows as the scrubbed worker tail, last progress and observation interval. No screen, no selector, no refresh scheduling here. DeepSeek worker, sol reviewers.
+
+Base: main with run-failure-cause (S4), s2c-agent-usage (S2c) and dogfood-polish-04 merged. Record the base commit in the receipt. The audit is on 0186e38; re-check every line number on the base before editing, and stop and re-gate if a premise no longer holds.
+
+Audit (0186e38):
+- `live.tail` live.py:231-298 reads `zeroshot logs` with bounded bytes, a deadline (TAIL_DEADLINE = 6 s, live.py:24), its own session, and kills only the reader process; it returns raw JSONL envelopes. It strips CSI only (live.py:297), then `scrub` (live.py:362). OSC, other ESC and C1 sequences survive until `cli.safe` (cli.py:40-42) turns them into "?".
+- Observers keep `live.nodes` (current [node, execution] pairs) and `executions` (ids only, live.py:21, :148-152); no execution-to-node history exists. `execution_task` live.py:124-138 proves a task from an execution id.
+- Upstream logs contract: `zeroshot logs RUN [--after CURSOR] [--execution REF]` (upstream/zeroshot/src/native_v2_cli/parser.rs:666-677) emits {cursor, timestamp (Unix ms, producer clock), execution? (opaque), record:{level, target, message}} (crates/openengine-cluster-protocol/src/native_v2_observation.rs:304-313); no node. `level` is trace|debug|info|warn|error (crates/openengine-cluster-protocol/src/lifecycle.rs:66-75). The command follows live (execution.rs:325-342): on an active run only the reader's deadline ends it. Watch gives {execution, node} only (projection.rs:29-62).
+- The worker role binding of a node comes from the existing milestone graph role map (locate it on the base; do not add a second table). Final repair is bound to the worker role there.
+
+Read: live.py (all); runs.py :20-70 (live validation); cli.py :40-42; catalog.py (families); upstream files above; tests/test_live*.py and the tail tests.
+
+Rules:
+- R-1 Execution map. The optional live key is execution_nodes: at most EXECUTIONS_LIMIT [node, execution] pairs of nonempty strings, unique by execution and ordered by first observation. Replaying an execution does not reorder it; conflicting associations are ignored. Absence means no known associations. Existing live validation remains unchanged for every other key.
+  - Only observers write it, from watch activeExecutions; `live` stays written only by observers (live.py:1-7). Legacy records without the key stay valid.
+- R-2 Streams and grammar.
+  - Each stream is identified by (plan_revision, milestone, attempt, run_id, execution-or-null). Its result contains records, cursor, latest_timestamp, malformed and error. Records retain structured cursor, timestamp, execution, level and scrubbed text. cursor is the last valid record's cursor in stream order; latest_timestamp is the maximum representable timestamp of valid retained records, including records whose scrubbed text is empty. Rendering drops empty text without discarding its cursor/time metadata. Changing stream identity resets its buffer and cursor. Errors pass R-3 before display.
+  - Grammar. Input: the reader's retained bytes (live.tail buffer and partial-first-line rules unchanged), cut on "\n" only. A line is a record iff it is one JSON object with: `cursor` a nonempty str; `timestamp` an int 0..2**53-1, bools rejected; `execution` absent or a str; `record` an object with `level` in the five values and `message` a str. Every other line is malformed: never shown, parsed for lifecycle or classified; `malformed` counts it, and when N > 0 one line "нераспознанных строк: N" follows that stream. A record renders as "HH:MM:SS  <tag><text>": local time of `timestamp`; tag "" for info, "ошибка: " for error, "предупреждение: " for warn, "служебное: " for debug/trace. Keep the last TAIL_LINES (40) records per stream, oldest first. No records: "Журнал пока пуст: Zeroshot ещё ничего не записал."; reader failure: "Журнал недоступен: <summary>".
+  - Totality. JSON decoding, timestamp conversion and rendering are total over arbitrary retained bytes. Invalid UTF-8, excessive JSON nesting and invalid Unicode scalar values never escape as exceptions. A valid record with an unrenderable timestamp retains its message and shows "время: нет данных"; that timestamp is excluded from latest_timestamp.
+- R-3 Scrub of worker text (closed). Permitted output form: printable characters only, one line, at most TAIL_TEXT (300) characters plus "…". Steps, in order, on the decoded `message`:
+  1. Remove terminal sequences. CSI = ESC [ or U+009B, parameter bytes 0x30-0x3F, intermediate bytes 0x20-0x2F, one final byte 0x40-0x7E; an unfinished CSI, or a recognized CSI prefix followed by syntax outside this grammar, discards the remainder. OSC/DCS/APC/PM/SOS = ESC ] P _ ^ X or U+009D U+0090 U+009F U+009E U+0098, up to BEL or ST (ESC \ or U+009C); unterminated discards the remainder. Any other ESC removes itself and the next character.
+  2. Credential masking: `live.scrub`. Credential guarantees cover live.scrub's documented field/token grammar, not arbitrary secrets in prose.
+  3. After credential masking, replace every character for which str.isprintable() is false with one space, collapse spaces and strip, then truncate (300 characters, "…" when cut); drop an empty result. Keep the existing sequence-removal-before-masking order.
+  Text is never returned for display before steps 1-3. A credential split by a removed sequence (`api_key=\x1b[0mSECRET`) is masked because step 2 runs after step 1.
+- R-4 Attribution and worker stream. Preserve execution as structured metadata. Only a watch-proven execution-to-node association (R-1) may identify worker output; message prefixes and log levels are not identity evidence.
+  - Select the newest mapped execution whose node is bound to the worker role by the existing milestone graph role map, including final repair. Do not duplicate that role map. If no retained association proves a worker execution, use the unattributed run-wide fallback.
+  - With a worker execution, its stream is read through `--execution`; the run-wide stream stays available for activity/time and is labelled "Вывод прогона; принадлежность исполнителю не подтверждена", never worker output.
+- R-5 Reader. Reuse the `live.tail` mechanics: bounded bytes, deadline, its own session, only the reader process is killed. One call reads the requested streams (`logs RUN`, plus `logs RUN --execution REF` per R-4); a stream with a cursor reads with `--after <cursor>` and appends, keeping the last 40. The call takes a cancellation handle and a time budget: cancel kills and reaps the reader processes within the given budget and returns no result. It never calls stop, force-stop, resume, a model, sqlite or HTTP history, and writes nothing to the run record.
+- R-6 New text through the catalog; REFERENCE regenerated.
+
+Acceptance criteria (deterministic fixtures, no provider or network; a fake `zeroshot` script for `logs` records its argv and emits scripted JSONL per `--execution`; synchronization with Events, never fixed sleeps; production entry points: the reader and observer functions):
+- A-4 Grammar and totality: each level; every malformed kind in R-2 (timestamp bool, float, -1, 2**53; 2**53-1 accepted; empty cursor; `record` not an object; unknown level; non-str message; non-JSON; truncated last line; partial first line after a buffer overflow; invalid UTF-8; deeply nested JSON; a lone surrogate escape) is hidden and counted or rendered per R-2 without an exception; empty output; 41 records -> last 40; messages of 299/300/301 characters; a record whose scrubbed text is empty advances cursor and latest_timestamp but renders nothing; an unrenderable timestamp keeps the message and is excluded from latest_timestamp.
+- A-5 Scrub: CSI and C1 CSI; malformed CSI; OSC 8 terminated by BEL and by ST; unterminated OSC and CSI; bare ESC; NUL, DEL, CR, LF, TAB; U+2028/U+2029, U+061C and each bidi character; escaped controls in the JSON message; Rich markup; an HTML body; `api_key=\x1b[0mSECRET`; JSON-in-message with a secret field; `Bearer`/`sk-` tokens; a reader failure summary carrying ESC and a secret. A bounded generator (fixed seed, <= 200 cases) concatenates printable text, sequences, controls and one planted secret from live.scrub's grammar. Oracle: every output character isprintable(), no ESC, no planted secret, length <= 301. Tested through the reader result, not the helper alone (s9a2 repeats it through run_view in its path check).
+- A-6a Reader (spy on the fake):
+  - open without `--after`; with a known worker execution, a separate `--execution` stream; a second read uses each stream's own last cursor;
+  - worker output followed by verbose reviewers still selects the worker stream; a legacy record without execution_nodes gives the unattributed label;
+  - A final repair execution replaces the earlier task-worker stream; its first read has no inherited cursor.
+  - execution_nodes: replay keeps order, a conflicting association is ignored, the EXECUTIONS_LIMIT bound holds, a record with an invalid map is rejected while other live keys validate as on the base;
+  - changing stream identity (other attempt or run_id) resets buffer and cursor;
+  - a reader blocked in a real subprocess is cancelled and reaped within the given budget; no stop/force-stop/resume call.
+- A-9 Regressions: production-entry regression tests must reach the intended behavioral assertion on the named base. New-helper unit tests are excluded from base replay and covered by targeted mutations. The receipt maps each acceptance criterion to base replay or candidate-only mutation coverage. Base replay must use inputs supported by the base and reach the intended behavioral assertion; import, missing-symbol, unsupported-config and setup failures are not behavioral evidence. Candidate-only coverage names the killed mutation and assertion. Mutations:
+  - show the raw JSON envelope;
+  - skip OSC removal;
+  - mask before sequence removal;
+  - drop the isprintable step;
+  - read without `--after` when a cursor exists;
+  - label run-wide output as worker output;
+  - select by node name `worker` only (final repair ignored);
+  - carry a cursor across a stream identity change;
+  - reorder execution_nodes on replay;
+  - leave the reader running after cancel.
+  Record the commands and base failures. Existing panel, journal and tail tests stay green, or are updated only where R-2 changes the tail rendering (list them in the receipt).
+
+Size: ~380 lines (production ~150, tests ~230).
+Order: Required release order: dogfood-polish-04 -> 0.4.0 tag -> S4/S5a -> S2a -> S2b -> S2c -> s9a1 -> s9a2 -> s9b1. S9a1 requires S4, S2c and dogfood-polish-04 merged. No child starts before its own gate passes.
+Out of scope: the run view, its fields, attempt selector, refresh scheduling, close/Ctrl+Q wiring, plain UI and docs/USER_FLOW.md (s9a2-run-view); budget (s9b1-run-budget); Ctrl+Q limit and exception log (deferred S9b2); `zeroshot ui`; sqlite reads; a persisted log cursor; upstream changes (node in log records, per-visit model record).
+critic s9-task: round 3 GO (session 01a150fd-4cce-72d2-9d50-595b08e1a2b8)

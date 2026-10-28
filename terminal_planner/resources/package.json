@@ -1,0 +1,8 @@
+{
+  "name": "planning-kit-native-tools",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@openai/codex": "0.162.1"
+  }
+}

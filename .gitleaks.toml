@@ -1,0 +1,7 @@
+# gitleaks (release check R2): the default rules, minus the synthetic secrets the redaction tests feed in.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "synthetic secrets of the redaction tests"
+paths = ['''(^|/)tests/test_(live|task_gate_record|tui_planning|ux)\.py$''']

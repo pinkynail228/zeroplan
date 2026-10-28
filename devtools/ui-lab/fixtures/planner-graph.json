@@ -1,0 +1,113 @@
+{
+ "kind": "seq",
+ "name": "planning",
+ "children": [
+  {
+   "kind": "loop",
+   "name": "review_loop",
+   "maxIterations": 3,
+   "body": {
+    "kind": "seq",
+    "name": "review_iteration",
+    "children": [
+     {
+      "kind": "step",
+      "name": "planner",
+      "worker": "builtin.agent.software-worker@1"
+     },
+     {
+      "kind": "choice",
+      "name": "planner_result",
+      "otherwise": {
+       "kind": "verifier",
+       "name": "critic",
+       "worker": "builtin.agent.acceptance-verifier@1"
+      },
+      "branches": [
+       {
+        "node": {
+         "kind": "fail",
+         "name": "planner_failed"
+        },
+        "when": {
+         "kind": "in",
+         "value": {
+          "name": "planner",
+          "source": "error",
+          "field": null
+         },
+         "labels": [
+          "timeout",
+          "crash",
+          "malformed",
+          "refusal"
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "kind": "choice",
+   "name": "review_result",
+   "branches": [
+    {
+     "node": {
+      "kind": "fail",
+      "name": "critic_failed"
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "critic",
+       "source": "error",
+       "field": null
+      },
+      "labels": [
+       "timeout",
+       "crash",
+       "malformed",
+       "refusal"
+      ]
+     }
+    },
+    {
+     "node": {
+      "kind": "succeed",
+      "name": "accepted_review"
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "review_loop",
+       "source": "group",
+       "field": "terminated"
+      },
+      "labels": [
+       "converged"
+      ]
+     }
+    },
+    {
+     "node": {
+      "kind": "succeed",
+      "name": "exhausted_review"
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "review_loop",
+       "source": "group",
+       "field": "terminated"
+      },
+      "labels": [
+       "exhausted"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

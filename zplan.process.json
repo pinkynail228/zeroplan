@@ -1,0 +1,43 @@
+{
+  "preset": "zplan.default/1",
+  "rules": [
+    "AGENTS.md"
+  ],
+  "roles": {
+    "planner": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "critic": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "worker": {
+      "model": "gpt-6.1-sol",
+      "effort": "medium"
+    },
+    "reviewer": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "steward": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    },
+    "architect": {
+      "model": "gpt-6.1-sol",
+      "effort": "high"
+    }
+  },
+  "gates": {
+    "plan": "required",
+    "task": "off",
+    "merge": "off"
+  },
+  "limits": {
+    "plan_rounds": 3,
+    "task_rounds": 2,
+    "merge_rounds": 2
+  },
+  "checks": []
+}

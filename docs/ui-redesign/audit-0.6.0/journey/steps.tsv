@@ -1,0 +1,44 @@
+NN	slug	t_zplan_s	keys	user_tried	screen_said	dead_end	ru_in_en
+01	install-py	-	19	python3 install.py in the extracted v0.6.0 checkout (system python3 is 3.9.6)	silently re-ran under python3.13; pip log; "zplan 0.6.0"; "Установлен .../zplan. Команда zplan готова; следующий шаг: zplan setup."	no	yes
+02	zplan-first-run	4	6	cd empty; zplan (skipped setup, as a hasty newcomer)	line mode, not full screen: "<path> — не Git-проект с commit. Git-проект (путь):"; no offer to run git init	no	yes
+03	enter-on-empty-path	10	1	Enter on the empty path prompt	"Путь не указывает на Git-проект с commit. Укажите другой путь." and the same prompt again	yes	yes
+04	type-folder-name	17	6	typed the folder name "empty"	same error, same prompt	yes	yes
+05	type-dot	19	2	typed "."	same error, same prompt	yes	yes
+06	ctrl-c	25	1	Ctrl+C	"Сессия закрыта. План и запущенные milestones сохранены; прогон не отменён. Вернуться: zplan" (no plan or run ever existed)	no	yes
+07	ctrl-d	30	7	zplan again, Ctrl+D	same prompt; same misleading "plan and milestones saved" close line	no	yes
+08	zplan-help	40	13	zplan --help	all Russian; lists setup/doctor/login; says "? on any screen shows the keys" (the shell has no letter keys); points to docs/REFERENCE.md (not installed); nothing about git init	no	yes
+09	doctor-before-setup	47	13	zplan doctor	5 BLOCKED, mixed RU/EN: socket path 109>=104 bytes (sandbox path artifact), zeroshot not installed, codex missing, no login ("выполните zplan login или нажмите [l]"), Git identity	no	yes
+10	setup	82	12	zplan setup	~24 s; "Загрузка Zeroshot 10.16.0; проверка pinned SHA256 ... Вход: zplan login; затем zplan doctor."	no	yes
+11	doctor-after-setup	89	13	zplan doctor	tools OK; still BLOCKED: socket path, no login, Git identity	no	yes
+12	login-device-code	103	12	zplan login	Codex device-code screen in English (URL + one-time code, masked here)	no	no
+13	login-ctrl-c	111	1	Ctrl+C before opening the browser	"Сессия закрыта. План и запущенные milestones сохранены; прогон не отменён." after a login	no	yes
+14	git-init-commit	128	45	product never offered git init; user ran git init && git commit --allow-empty -m init	commit created with a git-guessed identity (git warning); zplan doctor still says identity missing	no	no
+15	zplan-git-no-login	139	6	zplan	full-screen shell; "Interface language" modal (English preselected); behind it the chat in Russian: "Нет входа Codex в <path>; выполните zplan login или задайте CODEX_HOME ... [код: readiness.auth]"	no	yes
+16	language-english	150	1	Enter (English)	next modal fully Russian: "Профиль процесса проекта (zplan.default/2)", roles planner/critic/worker/reviewer/steward with model ids, "принять / позже"	no	yes
+16b	profile-modal-80x24	157	0	resize to 80x24	same modal, wrapped, still Russian	no	yes
+17	profile-accepted-main	166	1	Enter (принять, the default)	main screen; zplan.process.json written uncommitted; chat: Russian no-login error; right pane: "Плана нет. Дальше: напиши цель архитектору в чат" (contradicts the no-login error)	no	yes
+18	slash-palette	172	1	typed /	palette: /plan /run /diff /open /status /language /setup; no /login, no /help	no	no
+19	slash-arrow-down	178	2	Down x2	no visible change; no row is highlighted	yes	no
+20	slash-tab	179	1	Tab	focus silently moved to the right pane (only a border colour changes); palette still shown; no completion	yes	no
+21	tab-again	~190	1	Tab	focus back to the chat; the "/" in the input is gone	no	no
+22	slash-log-filter	215	3	typed "log" (expecting /login)	input shows "log" without the slash; palette closed	yes	no
+23	slash-log-retyped	222	7	Backspace x3, typed /log	only "/log — show the tail of the run"; there is no /login	yes	no
+24a	slash-setup-typed	~228	5	replaced with /setup	"/setup  set up the project and si…" (truncated)	no	no
+24	slash-setup	232	1	Enter	"Настройки" screen fully Russian: readiness list, "Кнопка «войти» запускает вход Codex", buttons установить/войти/проверить/роли	no	yes
+25	setup-login-button	252	2	Tab (lands on войти), Enter	TUI suspends; Codex device-code screen in the terminal (code masked)	no	no
+26	login-cancel-back	261	1	Ctrl+C before the browser step	whole zplan exits to the shell, no message; does not return to Setup	yes	no
+27	relaunch-no-login	288	6	zplan	main screen again; Russian no-login error in the chat	no	yes
+28	goal-without-login	296	31	typed the goal, Enter	nothing: text stays in the input, no message, no error	yes	yes
+29	ctrl-q-quit	302	1	Ctrl+Q	clean exit to the shell, no message	no	no
+30	doctor-with-login	314	25	REAL USER: finish zplan login in a browser (12 keys + browser); SANDBOX: export CODEX_HOME=<dev login>; then zplan doctor	auth OK ("login-файл есть"); new BLOCKED: origin is not GitHub, zplan.process.json not committed, Git identity; 20-line Russian profile dump	no	yes
+31	zplan-logged-in-main	325	6	zplan	chat header shows model id, provider, CODEX_HOME path; right pane Russian "Плана нет. Дальше: напиши цель архитектору в чат"	no	yes
+31b	main-80x24	330	0	resize to 80x24	right column hidden; title "Conversation · ←→ tabs"; header path in full	no	no
+32	goal-sent	339	31	typed "Add a README line saying hello", Enter	"думает… 0:03" shown above the user's message; times 06:02 are UTC (local 09:02 MSK)	no	yes
+33	first-architect-reply	365	0	waited (reply arrived <=26 s after send)	reply in Russian: "README пока отсутствует. Черновик цели для planner → verifier → approval: ответ 1 · арх · черновик цели: Создать README.md с единственной строкой hello."; card "Draft a plan from this? yes, draft the plan / no"; new right tab "Goal draft · not sent yet" with Russian goal	no	yes
+33b	reply-80x24	382	0	resize to 80x24	reply and card fit	no	yes
+34	slash-new-typed	389	4	typed /new	"/new  a fresh architect session…"	no	yes
+35	slash-new-result	397	1	Enter	"Сохраняю передачу дел и начинаю новый диалог…" at the top of the chat; old conversation stays	no	yes
+36	new-session-done	706	0	waited (finished by 06:04 per its own timestamp; capture late)	turns 3; chat shows the internal bootstrap prompt incl. raw JSON "Снимок экрана: {"branch": ...}" and "Коротко скажи, где мы и что делать дальше."; architect repeats the same draft; tab strip shows "Goal draft  Goal draft" twice	no	yes
+37	new-session-pgup	713	1	PgUp	internal handoff STATE (## Next / ## Open / ## Decisions, dated) printed into the user's chat	no	yes
+37b	after-new-80x24	721	0	resize to 80x24	raw JSON snapshot visible above the input	no	yes
+38	quit	725	1	Ctrl+Q	clean exit	no	no

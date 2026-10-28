@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.egg-info/
+build/
+node_modules/
+upstream/
+.tools/
+.dev-runs/
+.env
+.env.*
+*.pem
+*.key
+# run.sh copies the agent settings into each run worktree; Claude Code writes its own locks here
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock

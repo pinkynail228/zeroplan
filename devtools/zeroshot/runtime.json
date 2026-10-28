@@ -1,0 +1,10 @@
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "size": "medium",
+  "nodes": {
+    "worker": {"kind": "agent", "model": "claude-sonnet-5-5", "effort": "high"},
+    "acceptance": {"kind": "agent", "model": "claude-opus-5-5", "effort": "high"},
+    "code": {"kind": "agent", "model": "claude-opus-5-5", "effort": "high"}
+  }
+}

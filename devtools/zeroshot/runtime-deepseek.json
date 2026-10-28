@@ -1,0 +1,10 @@
+{
+  "harness": "codex",
+  "provider": "openai",
+  "size": "medium",
+  "nodes": {
+    "worker": {"kind": "agent", "lane": {"harness": "codex", "provider": "gateway"}, "model": "deepseek-v4.1-flash", "effort": "high", "sessionScope": "execution"},
+    "acceptance": {"kind": "agent", "model": "gpt-6.1-sol", "effort": "high"},
+    "code": {"kind": "agent", "model": "gpt-6.1-sol", "effort": "high"}
+  }
+}

@@ -1,0 +1,2023 @@
+file	line	kind	text
+terminal_planner/agent_profile.py	176	code	не удалось подобрать имя для временной ссылки
+terminal_planner/agent_profile.py	90	code	пакетный профиль без маркера версии
+terminal_planner/agent_profile.py	133	code	Профиль агента не записан: %s не является обычным файлом.
+terminal_planner/agent_profile.py	196	code	Не удалось записать профиль агента в %s: %s.
+terminal_planner/agent_profile.py	103	code	Другой zplan обновляет профиль в %s; повторите.
+terminal_planner/architect.py	102	code	Записанный CODEX_HOME %s недоступен (%s). Нажмите Ctrl+R («новый диалог»), чтобы начать новый диалог в текущем home.
+terminal_planner/architect.py	104	code	папка не найдена
+terminal_planner/architect.py	105	code	нет входа Codex (auth.json)
+terminal_planner/architect.py	106	code	не задана переменная входа
+terminal_planner/architect.py	108	code	Ход отменён владельцем.
+terminal_planner/architect.py	109	code	Сессия архитектора потеряна (Codex не нашёл сохранённый диалог). Начните новый диалог (reset).
+terminal_planner/architect.py	110	code	Codex отклонил авторизацию: выполните zplan login и повторите сообщение.
+terminal_planner/architect.py	145	code	Python interpreter path неизвестен; MCP-сервер архитектора не может быть заморожен.
+terminal_planner/architect.py	170	code	Некорректная модель или effort архитектора.
+terminal_planner/architect.py	176	code	Некорректный thread id архитектора.
+terminal_planner/architect.py	206	code	неожиданная форма ответа
+terminal_planner/architect.py	574	code	…[обрезано]
+terminal_planner/architect.py	784	code	Не задана переменная %s для provider %s; задайте её и запустите zplan снова.
+terminal_planner/architect.py	188	code	Не удалось проверить MCP-серверы Codex (%s); ход архитектора не запущен.
+terminal_planner/architect.py	199	code	код выхода %d
+terminal_planner/architect.py	203	code	ответ не JSON
+terminal_planner/architect.py	221	code	MCP-сервер zplan не виден Codex у архитектора; ход не запущен.
+terminal_planner/architect.py	773	code	Codex config %s выбирает profile %r; архитектор не запускает профиль — уберите profile из файла.
+terminal_planner/architect.py	782	code	Нет входа Codex в %s; выполните zplan login или задайте CODEX_HOME с вашим login.
+terminal_planner/architect.py	830	code	Архитектор отвечает: сначала отмените ход.
+terminal_planner/architect.py	886	code	Пустое сообщение архитектору.
+terminal_planner/architect.py	168	code	Некорректный параметр архитектора: %s.
+terminal_planner/architect.py	195	code	таймаут %g с
+terminal_planner/architect.py	220	code	У архитектора включены посторонние MCP-серверы Codex: %s; ход не запущен.
+terminal_planner/architect.py	513	code	Файл сессии архитектора повреждён: %s. Удалите его, чтобы начать новый диалог.
+terminal_planner/architect.py	708	code	Codex config %s не читается (%s); исправьте файл или уберите его, чтобы вернуть defaults Codex.
+terminal_planner/architect.py	744	code	Codex config %s не читается (%s); исправьте файл или уберите его, чтобы вернуть defaults Codex.
+terminal_planner/architect.py	795	code	Проект не найден: %s.
+terminal_planner/architect.py	838	code	Новый диалог: прежний thread id забыт.
+terminal_planner/architect.py	898	code	Архитектор уже отвечает.
+terminal_planner/architect.py	925	code	Другой процесс zplan уже разговаривает с архитектором этого проекта.
+terminal_planner/architect.py	992	code	Не удалось запустить Codex: %s.
+terminal_planner/architect.py	1086	code	Codex сообщил об ошибке хода: 
+terminal_planner/architect.py	1088	code	Codex прерван сигналом %d до конца хода.
+terminal_planner/architect.py	1092	code	Codex завершился без результата хода.
+terminal_planner/architect.py	1090	code	Codex завершился с кодом %d до конца хода.
+terminal_planner/authority.py	374	code	проверки плана
+terminal_planner/authority.py	375	code	Утвердить нельзя: проверка устарела — настройки процесса или правила изменились после проверки %s. [r] доработать пересоберёт план и проверит его заново.
+terminal_planner/authority.py	377	code	Проект изменился после планирования: утвердить нельзя. Дальше: [r] доработать — пересоберёт план и проверит его заново.
+terminal_planner/authority.py	71	code	Несовместимое planning state/envelope.
+terminal_planner/authority.py	381	code	плана
+terminal_planner/authority.py	933	code	плана
+terminal_planner/authority.py	1013	code	Несовместимое planning state/envelope.
+terminal_planner/authority.py	193	code	Нет рабочей ветки для submission.
+terminal_planner/authority.py	255	code	brief: поля
+terminal_planner/authority.py	263	code	brief: write_set — относительные пути репозитория без .. и повторов
+terminal_planner/authority.py	295	code	поля roadmap
+terminal_planner/authority.py	328	code	каждое requirement должно иметь одного slice owner
+terminal_planner/authority.py	941	code	Причина override некорректна.
+terminal_planner/authority.py	947	code	Нет однозначного native receipt; submission_unknown.
+terminal_planner/authority.py	956	code	Неподдерживаемый source.remote.
+terminal_planner/authority.py	962	code	Неподдерживаемый source.remote.forge.
+terminal_planner/authority.py	1033	code	Неподдерживаемый observation envelope.
+terminal_planner/authority.py	137	code	Git common directory недоступен.
+terminal_planner/authority.py	150	code	assume-unchanged/skip-worktree запрещены для planning freshness.
+terminal_planner/authority.py	170	code	Не удалось прочитать Git-проект; нужен существующий commit.
+terminal_planner/authority.py	211	code	Workspace %s пересекается с native state %s; Zeroshot 10.12 это запрещает. Задайте --native-state-dir вне рабочих деревьев и не направляйте XDG_DATA_HOME внутрь native state.
+terminal_planner/authority.py	290	code	размер списка
+terminal_planner/authority.py	333	code	цикл или неизвестная dependency
+terminal_planner/authority.py	455	code	Git common directory изменился; возобновление запрещено.
+terminal_planner/authority.py	457	code	Git directory object заменён; возобновление запрещено.
+terminal_planner/authority.py	480	code	State принадлежит другой authority/Git directory object; возобновление запрещено.
+terminal_planner/authority.py	508	code	Неизвестная execution-версия плана.
+terminal_planner/authority.py	528	code	Замороженные правила больше предела.
+terminal_planner/authority.py	571	code	Revision worktree/common-dir изменился.
+terminal_planner/authority.py	573	code	Fixture и production evidence несовместимы.
+terminal_planner/authority.py	582	code	Некорректный запрос остановки планировщика.
+terminal_planner/authority.py	674	code	Output не соответствует execution-версии плана.
+terminal_planner/authority.py	707	code	Frozen native input утрачен.
+terminal_planner/authority.py	709	code	Frozen native input изменён.
+terminal_planner/authority.py	712	code	Frozen source identity отсутствует.
+terminal_planner/authority.py	731	code	State mutation требует session lock.
+terminal_planner/authority.py	794	code	Fixture authority не может submit native runs.
+terminal_planner/authority.py	898	code	У плана первой версии нет проверки, вопреки которой его можно утвердить.
+terminal_planner/authority.py	905	code	Нет отклонённой проверки плана.
+terminal_planner/authority.py	920	code	Plan требует frozen target worktree.
+terminal_planner/authority.py	929	code	Нужна причина: одна строка, от %d до %d символов.
+terminal_planner/authority.py	943	code	Override не соответствует проверке %s.
+terminal_planner/authority.py	1058	code	Неподдерживаемый observation envelope.
+terminal_planner/authority.py	1066	code	Неподдерживаемый observation envelope.
+terminal_planner/authority.py	1097	code	Некорректная дискуссия %s: %s
+terminal_planner/authority.py	1113	code	неизвестная версия или поля
+terminal_planner/authority.py	1129	code	последний раунд не совпадает с итоговыми вердиктом, замечаниями и ответом
+terminal_planner/authority.py	68	code	Некорректный JSON envelope.
+terminal_planner/authority.py	92	code	%s effort %s не принимается native; выберите: %s.
+terminal_planner/authority.py	139	code	Git common directory недоступен; возобновление запрещено.
+terminal_planner/authority.py	292	code	поля записи
+terminal_planner/authority.py	397	code	Нужен явный fixture ID.
+terminal_planner/authority.py	401	code	Production --state-dir запрещён; используется canonical Git authority.
+terminal_planner/authority.py	472	code	Неизвестная schema planning.json (%s): этот zplan читает только planning-only schema 2 в store v3; файл не изменён.
+terminal_planner/authority.py	564	code	Правка плана требует проверки плана второй версии.
+terminal_planner/authority.py	586	code	Receipt требует ранее сохранённый prepared intent.
+terminal_planner/authority.py	603	code	Frozen goal/configuration/source изменены.
+terminal_planner/authority.py	641	code	Stopped plan без запроса остановки.
+terminal_planner/authority.py	777	code	Milestone %s ещё выполняется; новая revision плана после его завершения или остановки.
+terminal_planner/authority.py	782	code	Правка плана требует проверки плана второй версии.
+terminal_planner/authority.py	801	code	Планировщик этого плана уже отправлен; откройте [p] план, чтобы наблюдать его.
+terminal_planner/authority.py	833	code	Нет сохранённого плана. Выберите Plan.
+terminal_planner/authority.py	866	code	Можно утвердить только текущую предложенную revision.
+terminal_planner/authority.py	873	code	Нет принятой проверки плана.
+terminal_planner/authority.py	896	code	Утвердить вопреки проверке можно только текущий план, который проверка не приняла.
+terminal_planner/authority.py	1106	code	больше %d КБ
+terminal_planner/authority.py	1110	code	не JSON
+terminal_planner/authority.py	1116	code	раундов должно быть от 1 до %d
+terminal_planner/authority.py	240	code	Неподдерживаемый untracked-файл в проекте.
+terminal_planner/authority.py	284	code	Невалидное предложение: 
+terminal_planner/authority.py	357	code	Невалидное предложение: milestone %s содержит %s задач, driver выполняет не больше %s; разбейте milestone.
+terminal_planner/authority.py	1092	code	Неизвестная native phase.
+terminal_planner/authority.py	1119	code	поля раунда %d
+terminal_planner/authority.py	1121	code	номера раундов идут не подряд (раунд %d)
+terminal_planner/authority.py	1123	code	вердикт раунда %d
+terminal_planner/authority.py	434	code	Другой терминал уже управляет планом этого проекта.
+terminal_planner/authority.py	550	code	Замороженные правила %s не совпадают со своим хешем; запуск запрещён. Начните новую revision плана.
+terminal_planner/authority.py	852	code	Frozen source/configuration устарели.
+terminal_planner/authority.py	1126	code	%s раунда %d: текст больше %d символов
+terminal_planner/bridge.py	267	code	Живой Controller недоступен: socket не задан.
+terminal_planner/bridge.py	283	code	Controller не ответил.
+terminal_planner/bridge.py	289	code	Ответ Controller не объект.
+terminal_planner/bridge.py	233	code	Пустой запрос.
+terminal_planner/bridge.py	242	code	Нужен объект {id, tool, args}.
+terminal_planner/bridge.py	287	code	Ответ Controller не разобран.
+terminal_planner/bridge.py	164	code	Путь к socket архитектора слишком длинный: %s.
+terminal_planner/bridge.py	235	code	Строка запроса длиннее %d байт.
+terminal_planner/bridge.py	239	code	Запрос не JSON.
+terminal_planner/bridge.py	245	code	Нужен id запроса: непустая строка до %d символов.
+terminal_planner/bridge.py	275	code	Живой Controller недоступен: %s.
+terminal_planner/bridge.py	173	code	Controller не смог открыть socket: %s.
+terminal_planner/bridge.py	218	code	Ответ длиннее %d байт.
+terminal_planner/catalog.py	22	catalog	Дальше:
+terminal_planner/catalog.py	23	catalog	Журнал
+terminal_planner/catalog.py	24	catalog	Журнал попытки пуст: наблюдение ещё ничего не записало.
+terminal_planner/catalog.py	25	catalog	Готово: всё в порядке.
+terminal_planner/catalog.py	26	catalog	Нет результатов проверки.
+terminal_planner/catalog.py	27	catalog	Проверка не выполнена: 
+terminal_planner/catalog.py	30	catalog	Если вход по коду устройства для аккаунта выключен, включите его в настройках безопасности аккаунта ChatGPT.
+terminal_planner/catalog.py	436	catalog	Enter или q — назад.
+terminal_planner/catalog.py	38	catalog	запустите `zplan doctor` с коротким путём к сокету
+terminal_planner/catalog.py	39	catalog	выполните `zplan setup` в терминале
+terminal_planner/catalog.py	40	catalog	выполните `zplan setup` в терминале
+terminal_planner/catalog.py	41	catalog	исправьте CODEX_HOME и запустите `zplan doctor`
+terminal_planner/catalog.py	42	catalog	выполните `zplan login` в терминале
+terminal_planner/catalog.py	43	catalog	установите Git и запустите `zplan doctor`
+terminal_planner/catalog.py	44	catalog	задайте git config --global user.name и user.email
+terminal_planner/catalog.py	45	catalog	выполните `zplan roles`
+terminal_planner/catalog.py	46	catalog	перейдите в Git-проект (cd) или укажите --project
+terminal_planner/catalog.py	47	catalog	переключитесь на ветку: git switch <ветка>
+terminal_planner/catalog.py	48	catalog	укажите origin на GitHub
+terminal_planner/catalog.py	49	catalog	закоммитьте или уберите изменения
+terminal_planner/catalog.py	57	catalog	задайте переменную окружения провайдера и запустите zplan снова
+terminal_planner/catalog.py	493	catalog	план
+terminal_planner/catalog.py	493	catalog	открыть план: описать цель, утвердить или доработать
+terminal_planner/catalog.py	494	catalog	пересмотреть
+terminal_planner/catalog.py	494	catalog	доработать утверждённый план
+terminal_planner/catalog.py	495	catalog	настройки
+terminal_planner/catalog.py	495	catalog	модель и effort ролей
+terminal_planner/catalog.py	496	catalog	подробнее
+terminal_planner/catalog.py	496	catalog	полная запись плана и прогонов, команды диагностики
+terminal_planner/catalog.py	497	catalog	выход
+terminal_planner/catalog.py	497	catalog	закрыть zplan; прогоны продолжаются
+terminal_planner/catalog.py	498	catalog	наблюдать
+terminal_planner/catalog.py	498	catalog	следить за выполняющимся milestone
+terminal_planner/catalog.py	499	catalog	проверить
+terminal_planner/catalog.py	499	catalog	сверить неподтверждённую отправку или остановку с Zeroshot
+terminal_planner/catalog.py	500	catalog	запустить
+terminal_planner/catalog.py	500	catalog	запустить готовый milestone (с предпросмотром и подтверждением)
+terminal_planner/catalog.py	501	catalog	продолжить
+terminal_planner/catalog.py	501	catalog	продолжить ту же попытку после сбоя (resume)
+terminal_planner/catalog.py	502	catalog	новая попытка
+terminal_planner/catalog.py	502	catalog	начать новую попытку остановленного или упавшего milestone
+terminal_planner/catalog.py	503	catalog	открыть
+terminal_planner/catalog.py	503	catalog	экран итога milestone, требующего внимания
+terminal_planner/catalog.py	504	catalog	журнал
+terminal_planner/catalog.py	504	catalog	последние строки журнала Zeroshot (по запросу): выполняющийся или упавший прогон
+terminal_planner/catalog.py	506	catalog	установить инструменты
+terminal_planner/catalog.py	506	catalog	установить закреплённые Zeroshot и Codex
+terminal_planner/catalog.py	507	catalog	войти
+terminal_planner/catalog.py	507	catalog	войти в Codex в этом терминале
+terminal_planner/catalog.py	508	catalog	изменения
+terminal_planner/catalog.py	508	catalog	показать незакоммиченные изменения (ничего не меняет)
+terminal_planner/catalog.py	509	catalog	проверить снова
+terminal_planner/catalog.py	509	catalog	повторить проверку после исправления
+terminal_planner/catalog.py	510	catalog	подробнее
+terminal_planner/catalog.py	510	catalog	инструкции по каждому замечанию
+terminal_planner/catalog.py	511	catalog	назад
+terminal_planner/catalog.py	511	catalog	вернуться
+terminal_planner/catalog.py	512	catalog	выход
+terminal_planner/catalog.py	512	catalog	выйти из zplan
+terminal_planner/catalog.py	514	catalog	принять
+terminal_planner/catalog.py	514	catalog	записать zplan.process.json и принять профиль
+terminal_planner/catalog.py	515	catalog	позже
+terminal_planner/catalog.py	515	catalog	работать с предложением без записи в проект
+terminal_planner/catalog.py	516	catalog	выход
+terminal_planner/catalog.py	516	catalog	выйти, ничего не решив
+terminal_planner/catalog.py	518	catalog	запустить планировщик
+terminal_planner/catalog.py	518	catalog	проверить готовность и отправить цель планировщику
+terminal_planner/catalog.py	519	catalog	настройки
+terminal_planner/catalog.py	519	catalog	изменить роли перед запуском
+terminal_planner/catalog.py	520	catalog	назад
+terminal_planner/catalog.py	520	catalog	оставить цель несохранённой и вернуться
+terminal_planner/catalog.py	522	catalog	запустить планировщик
+terminal_planner/catalog.py	522	catalog	проверить готовность и отправить цель; устаревший неотправленный план сначала пересобирается на текущем проекте
+terminal_planner/catalog.py	524	catalog	подготовить новый план на текущем проекте
+terminal_planner/catalog.py	524	catalog	та же цель на текущем состоянии проекта; модель не запускается
+terminal_planner/catalog.py	526	catalog	подробнее
+terminal_planner/catalog.py	526	catalog	полная запись и команды диагностики
+terminal_planner/catalog.py	527	catalog	журнал
+terminal_planner/catalog.py	527	catalog	последние строки журнала Zeroshot (по запросу) планировщика
+terminal_planner/catalog.py	528	catalog	наблюдать
+terminal_planner/catalog.py	528	catalog	следить за планировщиком
+terminal_planner/catalog.py	529	catalog	остановить планирование
+terminal_planner/catalog.py	529	catalog	остановить работающего планировщика
+terminal_planner/catalog.py	530	catalog	утвердить
+terminal_planner/catalog.py	530	catalog	утвердить план; реализация не запускается
+terminal_planner/catalog.py	531	catalog	доработать
+terminal_planner/catalog.py	531	catalog	написать, что изменить, и перепланировать
+terminal_planner/catalog.py	532	catalog	отказаться
+terminal_planner/catalog.py	532	catalog	не утверждать предложение
+terminal_planner/catalog.py	533	catalog	требования и проверки
+terminal_planner/catalog.py	533	catalog	полный план: требования, задачи, проверки
+terminal_planner/catalog.py	534	catalog	утвердить вопреки проверке
+terminal_planner/catalog.py	534	catalog	утвердить план, который проверка не приняла; нужна причина
+terminal_planner/catalog.py	536	catalog	запустить планировщик заново
+terminal_planner/catalog.py	536	catalog	новая ревизия той же цели
+terminal_planner/catalog.py	537	catalog	проверить готовность и запустить заново
+terminal_planner/catalog.py	537	catalog	проверить готовность и отправить новую ревизию
+terminal_planner/catalog.py	538	catalog	обновить вход
+terminal_planner/catalog.py	538	catalog	войти в Codex заново
+terminal_planner/catalog.py	539	catalog	назад
+terminal_planner/catalog.py	539	catalog	вернуться на главный экран
+terminal_planner/catalog.py	541	catalog	остановить
+terminal_planner/catalog.py	541	catalog	k и Enter: остановить попытку (после подтверждения)
+terminal_planner/catalog.py	542	catalog	отключиться
+terminal_planner/catalog.py	542	catalog	выйти; прогон продолжается
+terminal_planner/catalog.py	543	catalog	справка
+terminal_planner/catalog.py	543	catalog	эта справка
+terminal_planner/catalog.py	544	catalog	журнал
+terminal_planner/catalog.py	544	catalog	последние строки журнала Zeroshot (по запросу)
+terminal_planner/catalog.py	546	catalog	проверить
+terminal_planner/catalog.py	546	catalog	сверить с Zeroshot без повторной отправки
+terminal_planner/catalog.py	547	catalog	назад
+terminal_planner/catalog.py	547	catalog	вернуться
+terminal_planner/catalog.py	548	catalog	влить в %s
+terminal_planner/catalog.py	548	catalog	git merge --no-ff результата после подтверждения
+terminal_planner/catalog.py	549	catalog	показать изменения результата
+terminal_planner/catalog.py	550	catalog	позже
+terminal_planner/catalog.py	550	catalog	вернуться, ничего не меняя
+terminal_planner/catalog.py	551	catalog	повторить слияние
+terminal_planner/catalog.py	551	catalog	повторить merge (после ручного разбора)
+terminal_planner/catalog.py	552	catalog	показать изменения результата
+terminal_planner/catalog.py	553	catalog	позже
+terminal_planner/catalog.py	553	catalog	вернуться, ничего не меняя
+terminal_planner/catalog.py	554	catalog	принять
+terminal_planner/catalog.py	554	catalog	принять предложение steward
+terminal_planner/catalog.py	555	catalog	ответить
+terminal_planner/catalog.py	555	catalog	ответить и начать новую попытку
+terminal_planner/catalog.py	556	catalog	остановить
+terminal_planner/catalog.py	556	catalog	оставить без ответа
+terminal_planner/catalog.py	557	catalog	назад
+terminal_planner/catalog.py	557	catalog	вернуться
+terminal_planner/catalog.py	558	catalog	ответить и перезапустить
+terminal_planner/catalog.py	558	catalog	ответить и начать новую попытку
+terminal_planner/catalog.py	559	catalog	план
+terminal_planner/catalog.py	559	catalog	пересмотреть план
+terminal_planner/catalog.py	560	catalog	назад
+terminal_planner/catalog.py	560	catalog	вернуться
+terminal_planner/catalog.py	561	catalog	продолжить
+terminal_planner/catalog.py	561	catalog	продолжить ту же попытку в её worktree
+terminal_planner/catalog.py	562	catalog	новая попытка
+terminal_planner/catalog.py	562	catalog	начать попытку с текущего HEAD
+terminal_planner/catalog.py	563	catalog	план
+terminal_planner/catalog.py	563	catalog	пересмотреть план
+terminal_planner/catalog.py	564	catalog	назад
+terminal_planner/catalog.py	564	catalog	вернуться
+terminal_planner/catalog.py	565	catalog	новая попытка
+terminal_planner/catalog.py	565	catalog	начать попытку с текущего HEAD
+terminal_planner/catalog.py	566	catalog	план
+terminal_planner/catalog.py	566	catalog	пересмотреть план
+terminal_planner/catalog.py	567	catalog	назад
+terminal_planner/catalog.py	567	catalog	вернуться
+terminal_planner/catalog.py	568	catalog	новая попытка
+terminal_planner/catalog.py	568	catalog	начать попытку с текущего HEAD
+terminal_planner/catalog.py	569	catalog	план
+terminal_planner/catalog.py	569	catalog	пересмотреть план
+terminal_planner/catalog.py	570	catalog	назад
+terminal_planner/catalog.py	570	catalog	вернуться
+terminal_planner/catalog.py	572	catalog	панель
+terminal_planner/catalog.py	572	catalog	перейти к панели плана
+terminal_planner/catalog.py	573	catalog	отправить
+terminal_planner/catalog.py	573	catalog	отправить сообщение архитектору одним ходом
+terminal_planner/catalog.py	575	catalog	отменить ход
+terminal_planner/catalog.py	575	catalog	прервать ход архитектора (milestone не трогает)
+terminal_planner/catalog.py	577	catalog	новый диалог
+terminal_planner/catalog.py	577	catalog	начать новый диалог с архитектором
+terminal_planner/catalog.py	579	catalog	настройки
+terminal_planner/catalog.py	579	catalog	открыть настройки
+terminal_planner/catalog.py	580	catalog	клавиши
+terminal_planner/catalog.py	580	catalog	справка по командам этого экрана
+terminal_planner/catalog.py	582	catalog	выход
+terminal_planner/catalog.py	582	catalog	выйти
+terminal_planner/catalog.py	583	catalog	ввод
+terminal_planner/catalog.py	583	catalog	вернуться к полю ввода
+terminal_planner/catalog.py	584	catalog	план
+terminal_planner/catalog.py	584	catalog	открыть план: цель, ход, предложение (плана нет — /plan <цель>)
+terminal_planner/catalog.py	585	catalog	черновик ответа
+terminal_planner/catalog.py	586	catalog	открыть новейший черновик ответа milestone в форме ответа
+terminal_planner/catalog.py	591	catalog	запустить
+terminal_planner/catalog.py	591	catalog	старт выбранного готового milestone
+terminal_planner/catalog.py	593	catalog	продолжить
+terminal_planner/catalog.py	593	catalog	продолжить ту же попытку в её worktree
+terminal_planner/catalog.py	595	catalog	новая попытка
+terminal_planner/catalog.py	595	catalog	новая попытка остановленного или упавшего milestone
+terminal_planner/catalog.py	597	catalog	проверить
+terminal_planner/catalog.py	597	catalog	сверить неподтверждённую отправку или остановку с Zeroshot
+terminal_planner/catalog.py	599	catalog	остановить
+terminal_planner/catalog.py	599	catalog	остановить выполняющийся прогон
+terminal_planner/catalog.py	601	catalog	открыть
+terminal_planner/catalog.py	601	catalog	итог прогона milestone; идущий прогон снова под наблюдением
+terminal_planner/catalog.py	603	catalog	подробнее
+terminal_planner/catalog.py	603	catalog	итог, план, диагностика
+terminal_planner/catalog.py	605	catalog	журнал
+terminal_planner/catalog.py	605	catalog	последние строки журнала Zeroshot (по запросу)
+terminal_planner/catalog.py	606	catalog	выбор
+terminal_planner/catalog.py	606	catalog	выбрать milestone
+terminal_planner/catalog.py	607	catalog	история выше
+terminal_planner/catalog.py	607	catalog	листать историю чата к началу (PgUp)
+terminal_planner/catalog.py	609	catalog	история ниже
+terminal_planner/catalog.py	609	catalog	листать историю чата к концу (PgDn)
+terminal_planner/catalog.py	611	catalog	настройки
+terminal_planner/catalog.py	611	catalog	открыть настройки
+terminal_planner/catalog.py	612	catalog	клавиши
+terminal_planner/catalog.py	612	catalog	эта справка
+terminal_planner/catalog.py	613	catalog	выход
+terminal_planner/catalog.py	613	catalog	выйти
+terminal_planner/catalog.py	614	catalog	к кнопке
+terminal_planner/catalog.py	614	catalog	перейти к следующей кнопке (Tab, ←/→ — между кнопками)
+terminal_planner/catalog.py	615	catalog	нажать
+terminal_planner/catalog.py	615	catalog	нажать кнопку в фокусе; ↑↓ PgUp PgDn листают итог
+terminal_planner/catalog.py	616	catalog	влить
+terminal_planner/catalog.py	616	catalog	влить результат в ветку назначения
+terminal_planner/catalog.py	618	catalog	изменения
+terminal_planner/catalog.py	618	catalog	показать изменения результата
+terminal_planner/catalog.py	619	catalog	принять
+terminal_planner/catalog.py	619	catalog	принять предложение стюарда
+terminal_planner/catalog.py	621	catalog	ответить
+terminal_planner/catalog.py	621	catalog	ответ в заметке: новая попытка с ней
+terminal_planner/catalog.py	623	catalog	новая попытка
+terminal_planner/catalog.py	623	catalog	заметка по желанию
+terminal_planner/catalog.py	625	catalog	в план
+terminal_planner/catalog.py	625	catalog	запрос уйдёт в пересмотр плана
+terminal_planner/catalog.py	627	catalog	продолжить
+terminal_planner/catalog.py	627	catalog	продолжить ту же попытку в её worktree
+terminal_planner/catalog.py	628	catalog	проверить
+terminal_planner/catalog.py	628	catalog	сверить с Zeroshot, без повтора
+terminal_planner/catalog.py	630	catalog	журнал
+terminal_planner/catalog.py	630	catalog	последние строки журнала Zeroshot (по запросу)
+terminal_planner/catalog.py	631	catalog	подробнее
+terminal_planner/catalog.py	631	catalog	журнал попытки: сохранённые записи наблюдения
+terminal_planner/catalog.py	633	catalog	оставить
+terminal_planner/catalog.py	633	catalog	оставить без ответа
+terminal_planner/catalog.py	634	catalog	закрыть
+terminal_planner/catalog.py	634	catalog	закрыть; ничего не меняется
+terminal_planner/catalog.py	636	catalog	прокрутка
+terminal_planner/catalog.py	636	catalog	листать изменения
+terminal_planner/catalog.py	637	catalog	закрыть
+terminal_planner/catalog.py	637	catalog	вернуться к итогу прогона
+terminal_planner/catalog.py	638	catalog	прокрутка
+terminal_planner/catalog.py	638	catalog	листать подробности
+terminal_planner/catalog.py	639	catalog	закрыть
+terminal_planner/catalog.py	639	catalog	вернуться на главный экран
+terminal_planner/catalog.py	640	catalog	к кнопке
+terminal_planner/catalog.py	640	catalog	из поля текста перейти к кнопке «отправить»
+terminal_planner/catalog.py	641	catalog	отправить
+terminal_planner/catalog.py	641	catalog	Enter на кнопке «отправить»: отправить текст (пустой ответ ничего не запускает)
+terminal_planner/catalog.py	642	catalog	назад
+terminal_planner/catalog.py	642	catalog	закрыть без изменений
+terminal_planner/catalog.py	643	catalog	к кнопке
+terminal_planner/catalog.py	643	catalog	из поля текста перейти к кнопке «начать попытку»
+terminal_planner/catalog.py	644	catalog	начать попытку
+terminal_planner/catalog.py	644	catalog	Enter на кнопке «начать попытку»: начать новую попытку (заметка необязательна)
+terminal_planner/catalog.py	646	catalog	назад
+terminal_planner/catalog.py	646	catalog	закрыть без изменений: попытка не начнётся
+terminal_planner/catalog.py	648	catalog	к кнопке
+terminal_planner/catalog.py	648	catalog	перейти к следующей кнопке (Tab, ←/→ — между кнопками)
+terminal_planner/catalog.py	649	catalog	нажать
+terminal_planner/catalog.py	649	catalog	нажать кнопку в фокусе; ↑↓ PgUp PgDn листают план
+terminal_planner/catalog.py	650	catalog	запустить планировщик
+terminal_planner/catalog.py	650	catalog	проверить готовность и отправить цель; устаревший неотправленный план сначала пересобирается на текущем проекте
+terminal_planner/catalog.py	653	catalog	новая ревизия
+terminal_planner/catalog.py	653	catalog	та же цель на текущем проекте
+terminal_planner/catalog.py	655	catalog	войти
+terminal_planner/catalog.py	655	catalog	войти в Codex заново (терминал приостанавливается)
+terminal_planner/catalog.py	657	catalog	наблюдать
+terminal_planner/catalog.py	657	catalog	следить за планировщиком
+terminal_planner/catalog.py	658	catalog	журнал
+terminal_planner/catalog.py	658	catalog	последние строки журнала Zeroshot (по запросу) планировщика
+terminal_planner/catalog.py	659	catalog	утвердить
+terminal_planner/catalog.py	659	catalog	утвердить план; реализация не запускается
+terminal_planner/catalog.py	660	catalog	утвердить вопреки проверке
+terminal_planner/catalog.py	660	catalog	утвердить план, который проверка не приняла; нужна причина
+terminal_planner/catalog.py	662	catalog	доработать
+terminal_planner/catalog.py	662	catalog	написать, что изменить, и перепланировать
+terminal_planner/catalog.py	664	catalog	отказаться
+terminal_planner/catalog.py	664	catalog	не утверждать предложение
+terminal_planner/catalog.py	665	catalog	подробнее
+terminal_planner/catalog.py	665	catalog	требования и проверки; для сбоя — диагностика
+terminal_planner/catalog.py	667	catalog	назад
+terminal_planner/catalog.py	667	catalog	вернуться на главный экран
+terminal_planner/catalog.py	668	catalog	выход
+terminal_planner/catalog.py	668	catalog	выйти
+terminal_planner/catalog.py	669	catalog	к кнопке
+terminal_planner/catalog.py	669	catalog	из поля текста перейти к кнопке «отправить доработку»
+terminal_planner/catalog.py	670	catalog	отправить доработку
+terminal_planner/catalog.py	670	catalog	Enter на кнопке «отправить доработку»: перепланировать с этим текстом
+terminal_planner/catalog.py	672	catalog	назад
+terminal_planner/catalog.py	672	catalog	закрыть без изменений
+terminal_planner/catalog.py	673	catalog	да
+terminal_planner/catalog.py	673	catalog	перейти к кнопке «да» (Tab, ←/→ — между кнопками)
+terminal_planner/catalog.py	673	catalog	Move to the «да» button (Tab, Left/Right switch buttons).
+terminal_planner/catalog.py	674	catalog	нажать
+terminal_planner/catalog.py	674	catalog	нажать кнопку в фокусе; фокус сначала на «нет», при запуске на «да»
+terminal_planner/catalog.py	674	catalog	Press the focused button; it starts on «нет», on «да» for a run start.
+terminal_planner/catalog.py	675	catalog	запустить
+terminal_planner/catalog.py	675	catalog	«да» уже в фокусе: Enter сразу запускает
+terminal_planner/catalog.py	675	catalog	«да» is already focused: Enter starts at once.
+terminal_planner/catalog.py	676	catalog	нет
+terminal_planner/catalog.py	676	catalog	отменить; ничего не меняется
+terminal_planner/catalog.py	677	catalog	принять
+terminal_planner/catalog.py	677	catalog	кнопка «принять» (в фокусе сразу): записать zplan.process.json и принять профиль
+terminal_planner/catalog.py	677	catalog	The «принять» button, focused at once: accept the proposed profile (writes the file).
+terminal_planner/catalog.py	678	catalog	позже
+terminal_planner/catalog.py	678	catalog	перейти к кнопке «позже» (Tab, ←/→): работать с предложением без записи в проект
+terminal_planner/catalog.py	678	catalog	Move to the «позже» button: postpone; the snapshot is used and the header says so.
+terminal_planner/catalog.py	679	catalog	выход
+terminal_planner/catalog.py	679	catalog	выйти, ничего не решив
+terminal_planner/catalog.py	680	catalog	к кнопке
+terminal_planner/catalog.py	680	catalog	перейти к следующей кнопке (Tab, ←/→ — между кнопками)
+terminal_planner/catalog.py	681	catalog	нажать
+terminal_planner/catalog.py	681	catalog	нажать кнопку в фокусе
+terminal_planner/catalog.py	682	catalog	установить
+terminal_planner/catalog.py	682	catalog	установить инструменты
+terminal_planner/catalog.py	683	catalog	войти
+terminal_planner/catalog.py	683	catalog	войти в Codex (терминал приостанавливается)
+terminal_planner/catalog.py	684	catalog	проверить
+terminal_planner/catalog.py	684	catalog	проверить готовность снова
+terminal_planner/catalog.py	685	catalog	роли
+terminal_planner/catalog.py	685	catalog	показать роли
+terminal_planner/catalog.py	686	catalog	назад
+terminal_planner/catalog.py	686	catalog	вернуться на главный экран
+terminal_planner/catalog.py	687	catalog	выход
+terminal_planner/catalog.py	687	catalog	выйти
+terminal_planner/catalog.py	688	catalog	закрыть
+terminal_planner/catalog.py	688	catalog	закрыть справку
+terminal_planner/catalog.py	368	catalog	Ctrl+R «новый диалог» (new dialog) starts a new thread in the current home.
+terminal_planner/catalog.py	574	catalog	отпр.
+terminal_planner/catalog.py	576	catalog	отмена
+terminal_planner/catalog.py	578	catalog	новый
+terminal_planner/catalog.py	579	catalog	настр.
+terminal_planner/catalog.py	590	catalog	ответ
+terminal_planner/catalog.py	596	catalog	нов. попытка
+terminal_planner/catalog.py	600	catalog	стоп
+terminal_planner/catalog.py	604	catalog	подр.
+terminal_planner/catalog.py	605	catalog	жур.
+terminal_planner/catalog.py	611	catalog	настр.
+terminal_planner/catalog.py	624	catalog	новая
+terminal_planner/catalog.py	626	catalog	план
+terminal_planner/catalog.py	630	catalog	жур.
+terminal_planner/catalog.py	632	catalog	подр.
+terminal_planner/catalog.py	645	catalog	начать
+terminal_planner/catalog.py	652	catalog	запустить
+terminal_planner/catalog.py	654	catalog	новая
+terminal_planner/catalog.py	658	catalog	жур.
+terminal_planner/catalog.py	661	catalog	вопреки
+terminal_planner/catalog.py	663	catalog	доработ.
+terminal_planner/catalog.py	664	catalog	отказ
+terminal_planner/catalog.py	666	catalog	подр.
+terminal_planner/catalog.py	671	catalog	отправить
+terminal_planner/catalog.py	879	catalog	 [код: %s]
+terminal_planner/catalog.py	438	catalog	Главный экран
+terminal_planner/catalog.py	439	catalog	Enter открывает то, что названо в «Дальше» (запуск и проверка — только своей буквой); Ctrl-D — выйти.
+terminal_planner/catalog.py	440	catalog	Готовность
+terminal_planner/catalog.py	441	catalog	Профиль процесса
+terminal_planner/catalog.py	442	catalog	Принять — записать профиль; позже — работать со снимком; q — выйти, ничего не решив.
+terminal_planner/catalog.py	443	catalog	Цель сохранена
+terminal_planner/catalog.py	444	catalog	План
+terminal_planner/catalog.py	445	catalog	Наблюдение
+terminal_planner/catalog.py	446	catalog	Ctrl-C — отключиться: прогон продолжается.
+terminal_planner/catalog.py	447	catalog	Прогон: статус неизвестен
+terminal_planner/catalog.py	448	catalog	Прогон: готово, ждёт слияния
+terminal_planner/catalog.py	449	catalog	Прогон: конфликт слияния
+terminal_planner/catalog.py	450	catalog	Прогон: нужен ответ
+terminal_planner/catalog.py	451	catalog	Прогон: заблокирован
+terminal_planner/catalog.py	452	catalog	Прогон: сбой, можно продолжить
+terminal_planner/catalog.py	453	catalog	Прогон: сбой
+terminal_planner/catalog.py	454	catalog	Прогон: остановлен
+terminal_planner/catalog.py	455	catalog	Полноэкранный режим: поле ввода
+terminal_planner/catalog.py	456	catalog	Буквы в поле ввода — текст; enter — отправить ход, esc — отменить его; действия — команды с «/» (палитра ниже), tab — панель плана.
+terminal_planner/catalog.py	458	catalog	Полноэкранный режим: панель плана
+terminal_planner/catalog.py	459	catalog	Фокус в панели: стрелки выбирают milestone; все действия — команды с «/» в поле ввода.
+terminal_planner/catalog.py	461	catalog	Полноэкранный режим: план
+terminal_planner/catalog.py	462	catalog	Открытие экрана ничего не отправляет: планировщик запускает только [g].
+terminal_planner/catalog.py	463	catalog	Полноэкранный режим: доработка плана
+terminal_planner/catalog.py	464	catalog	Пустая заметка план не меняет.
+terminal_planner/catalog.py	465	catalog	Полноэкранный режим: итог прогона
+terminal_planner/catalog.py	466	catalog	Показаны только действия, которые разрешены для этого итога; изменившийся прогон экран обновляет.
+terminal_planner/catalog.py	467	catalog	Полноэкранный режим: изменения
+terminal_planner/catalog.py	468	catalog	Просмотр ничего не меняет.
+terminal_planner/catalog.py	469	catalog	Полноэкранный режим: подробности
+terminal_planner/catalog.py	470	catalog	Сначала итог, затем план; идентификаторы и команды — в конце под отметкой «Для диагностики».
+terminal_planner/catalog.py	471	catalog	Полноэкранный режим: новая попытка
+terminal_planner/catalog.py	472	catalog	Новая попытка начинается с текущего HEAD; заметка необязательна. Esc закрывает форму.
+terminal_planner/catalog.py	473	catalog	Полноэкранный режим: ответ или заметка
+terminal_planner/catalog.py	474	catalog	Пустой ответ ничего не запускает.
+terminal_planner/catalog.py	475	catalog	Полноэкранный режим: подтверждение
+terminal_planner/catalog.py	476	catalog	Полноэкранный режим: подтверждение запуска
+terminal_planner/catalog.py	477	catalog	TUI confirmation of a run start: «да» is focused at once.
+terminal_planner/catalog.py	478	catalog	Полноэкранный режим: профиль процесса
+terminal_planner/catalog.py	479	catalog	Решение принимается один раз для проекта.
+terminal_planner/catalog.py	480	catalog	Полноэкранный режим: настройки
+terminal_planner/catalog.py	481	catalog	Полноэкранный режим: справка
+terminal_planner/catalog.py	864	catalog	Клавиши · 
+terminal_planner/catalog.py	910	catalog	<ветка>
+terminal_planner/cli.py	31	code	Отключился; прогон продолжается. Вернуться: zplan
+terminal_planner/cli.py	32	code	Чат архитектора только в полноэкранном режиме: запустите zplan на терминале (без --plain).
+terminal_planner/cli.py	97	code	Runtime: Codex / OpenAI. Модель и effort задаются отдельно для каждой роли.
+terminal_planner/cli.py	768	code	Заметка для новой попытки (необязательно)
+terminal_planner/cli.py	936	code	Role defaults сохранены вне project lifecycle state.
+terminal_planner/cli.py	89	code	Git-проект (путь)
+terminal_planner/cli.py	328	code	Читаю журнал Zeroshot…
+terminal_planner/cli.py	408	code	Не запущено: сначала исправьте отмеченное выше.
+terminal_planner/cli.py	422	code	Роли (модель / effort):
+terminal_planner/cli.py	432	code	Цель
+terminal_planner/cli.py	482	code	Планировщик работает; Ctrl-C — выйти (планирование продолжится, вернуться: [p] план).
+terminal_planner/cli.py	572	code	Что изменить в плане
+terminal_planner/cli.py	586	code	Причина, по которой план утверждается вопреки проверке (одна строка, 10–500 символов)
+terminal_planner/cli.py	614	code	Что изменить в плане
+terminal_planner/cli.py	632	code	Enter оставляет текущее значение.
+terminal_planner/cli.py	634	code	Роли сохранены; действуют для следующего планирования и запуска milestone.
+terminal_planner/cli.py	777	code	Что изменить в плане
+terminal_planner/cli.py	790	code	Ответ
+terminal_planner/cli.py	938	code	Профиль этого проекта отложен: его роли взяты из снимка и не изменились. Принять профиль: zplan profile init.
+terminal_planner/cli.py	958	code	fixture ID должен быть непустым и состоять из букв, цифр, «-» или «_»
+terminal_planner/cli.py	964	code	setup/doctor/login/update/roles не используют fixture namespace
+terminal_planner/cli.py	174	code	Клавиши этого экрана перечислены в меню выше.
+terminal_planner/cli.py	196	code	д
+terminal_planner/cli.py	196	code	да
+terminal_planner/cli.py	199	code	 (несколько строк; пустая строка — конец):
+terminal_planner/cli.py	333	code	 (последние строки):
+terminal_planner/cli.py	460	code	Цель сохранена: план r%s ещё не отправлен. Отправить: [p] план, затем [g].
+terminal_planner/cli.py	473	code	Не запущено: сначала исправьте отмеченное выше.
+terminal_planner/cli.py	551	code	Подготовлен план r%s на текущем проекте; цель и настройки те же. Модель не запускалась.
+terminal_planner/cli.py	574	code	Пустой текст: план не изменён.
+terminal_planner/cli.py	581	code	План r%s утверждён. Реализация не запускалась; запуск — [g] на главном экране.
+terminal_planner/cli.py	588	code	Пустой текст: план не изменён.
+terminal_planner/cli.py	595	code	План r%s утверждён вопреки проверке. Реализация не запускалась; запуск — [g] на главном экране.
+terminal_planner/cli.py	601	code	Предложение r%s не утверждено; ничего не запускалось.
+terminal_planner/cli.py	612	code	Плана ещё нет: [p] план.
+terminal_planner/cli.py	616	code	Пустой текст: план не изменён.
+terminal_planner/cli.py	679	code	Наблюдение %s · %s — Ctrl-C: отключиться (прогон продолжается) · k + Enter: остановить
+terminal_planner/cli.py	759	code	Слияние не выполнялось.
+terminal_planner/cli.py	779	code	Пустой текст: план не изменён.
+terminal_planner/cli.py	803	code	Предложение меняет план: создана revision r%s; её нужно утвердить.
+terminal_planner/cli.py	933	code	Роли этого проекта живут в %s: правьте файл; roles.json не менялся.
+terminal_planner/cli.py	962	code	%s не принимает аргумент %s
+terminal_planner/cli.py	1000	code	Инструменты zplan не установлены: [u] на экране готовности или zplan setup.
+terminal_planner/cli.py	1002	code	Нужен существующий executable по абсолютному пути; установленный server binary не используется.
+terminal_planner/cli.py	1078	code	⏎Сессия закрыта. План и запущенные milestones сохранены; прогон не отменён. Вернуться: zplan
+terminal_planner/cli.py	87	code	%s — не Git-проект с commit.
+terminal_planner/cli.py	93	code	Путь не указывает на Git-проект с commit. Укажите другой путь.
+terminal_planner/cli.py	108	code	Нужен model ID и effort: 
+terminal_planner/cli.py	192	code	Неизвестная команда «%s». Доступно (? — справка):
+terminal_planner/cli.py	298	code	Профиль не решён: новые планы и запуски недоступны, пока вы его не примете (zplan или zplan profile init).
+terminal_planner/cli.py	330	code	Журнал %s · попытка %s
+terminal_planner/cli.py	445	code	Цель не сохранена; план не создан.
+terminal_planner/cli.py	558	code	Подготовлен план r%s на текущем проекте; цель и настройки те же. Модель не запускалась.
+terminal_planner/cli.py	630	code	Роли и проверки правятся в %s и действуют на следующий запуск.
+terminal_planner/cli.py	652	code	Не запущено.
+terminal_planner/cli.py	801	code	Предложение принято: 
+terminal_planner/cli.py	910	code	Профиль демо уже принят: profile init его не перезаписывает.
+terminal_planner/cli.py	913	code	Профиль демо принят: действует в fixture-состоянии; %s не создаётся.
+terminal_planner/cli.py	915	code	Создан %s. Закоммитьте его, чтобы профиль был общим.
+terminal_planner/cli.py	180	code	Выбор
+terminal_planner/cli.py	223	code	HEAD отсоединён
+terminal_planner/cli.py	224	code	есть изменения
+terminal_planner/cli.py	287	code	Профиль демо принят: действует в fixture-состоянии; %s не создаётся.
+terminal_planner/cli.py	289	code	Профиль принят: %s. %s
+terminal_planner/cli.py	296	code	Профиль отложен: действуют показанные значения (%s).
+terminal_planner/cli.py	362	code	Незакоммиченные изменения (git status --short):
+terminal_planner/cli.py	365	code	Закоммитьте или уберите их сами, затем [g] проверить снова.
+terminal_planner/cli.py	386	code	HEAD отсоединён
+terminal_planner/cli.py	489	code	Не выполнено: 
+terminal_planner/cli.py	539	code	Не выполнено: 
+terminal_planner/cli.py	568	code	Не выполнено: 
+terminal_planner/cli.py	593	code	Не выполнено: 
+terminal_planner/cli.py	907	code	%s уже существует: profile init его не перезаписывает. Проверьте файл и запустите zplan.
+terminal_planner/cli.py	264	code	Не выполнено: 
+terminal_planner/cli.py	541	code	Не выполнено: инструменты zplan не установлены — сначала [u].
+terminal_planner/cli.py	543	code	Не выполнено: не удалось выполнить действие; подробности — [i].
+terminal_planner/cli.py	658	code	Не запущено: 
+terminal_planner/cli.py	1028	code	Вход не завершён; повторите zplan login. 
+terminal_planner/cli.py	1057	code	Вход не завершён; повторите [l] или zplan login. 
+terminal_planner/cli.py	290	code	Закоммитьте его, чтобы профиль был общим.
+terminal_planner/cli.py	291	code	Файл не изменён.
+terminal_planner/cli.py	707	code	  Во время наблюдения: k + Enter — остановить, e + Enter — журнал, Ctrl-C — отключиться, ? — справка.
+terminal_planner/cli.py	1066	code	Полноэкранный режим недоступен (%s); продолжаю в построчном: zplan --plain.
+terminal_planner/cli.py	705	code	  остановка запрошена; жду подтверждения Zeroshot.
+terminal_planner/commands.py	104	code	zplan — план и milestones поверх Zeroshot.
+terminal_planner/commands.py	13	code	zplan [--plain] [--project ПУТЬ]
+terminal_planner/commands.py	14	code	открыть план и milestones текущего Git-проекта
+terminal_planner/commands.py	15	code	Интерактивный режим: в терминале — полноэкранный интерфейс, иначе (или с --plain, TERM=dumb) — построчный. Проект берётся из текущего каталога или --project. Клавиши экрана: ? (список текущего экрана)
+terminal_planner/commands.py	22	code	zplan status [--project ПУТЬ]
+terminal_planner/commands.py	23	code	показать главный экран один раз, без вопросов
+terminal_planner/commands.py	24	code	Печатает план и состояние milestones и выходит; ничего не запускает и не меняет. Подходит для скриптов и проверки со стороны.
+terminal_planner/commands.py	31	code	установить закреплённые Zeroshot и Codex в каталог данных zplan
+terminal_planner/commands.py	32	code	Скачивает и проверяет по контрольным суммам пакет Zeroshot, ставит Codex из зафиксированного lockfile (нужны Node.js >= 16 и npm). Уже установленное не заменяется. Модель не запускается.
+terminal_planner/commands.py	37	code	zplan doctor [--project ПУТЬ]
+terminal_planner/commands.py	38	code	проверить готовность: инструменты, вход, Git, проект
+terminal_planner/commands.py	39	code	Сначала строка Toolchain: версии Zeroshot, Codex и restic этого релиза и каталог tools; затем одна строка на проверку: OK, WARN или BLOCKED с указанием исправления. Код выхода 0, когда ничего не BLOCK
+terminal_planner/commands.py	48	code	войти в Codex (device auth) в каталоге CODEX_HOME
+terminal_planner/commands.py	49	code	Запускает вход установленного Codex в терминале; zplan не читает и не сохраняет учётные данные. Каталог входа — собственный home zplan; свой каталог Codex: CODEX_HOME=... zplan login.
+terminal_planner/commands.py	55	code	обновить zplan до новейшего релиза
+terminal_planner/commands.py	56	code	Читает теги релизов (vX.Y.Z) у репозитория и ставит новейший тем же install.py, что и первая установка: новая версия рядом со старой, store копируется перед переключением launcher. --check только печа
+terminal_planner/commands.py	63	code	zplan roles [--project ПУТЬ]
+terminal_planner/commands.py	64	code	выбрать модель и effort для каждой роли
+terminal_planner/commands.py	65	code	Спрашивает model и effort для planner, plan_verifier, worker, reviewer, steward; Enter оставляет значение. Сохраняется вне состояния проекта и действует на следующее планирование и запуск. Если в прое
+terminal_planner/commands.py	71	code	zplan profile [init] [--project ПУТЬ]
+terminal_planner/commands.py	72	code	показать профиль процесса проекта или создать zplan.process.json
+terminal_planner/commands.py	73	code	Без аргумента печатает действующий профиль: состояние, путь файла, короткий digest, роли с источниками, проверки (gates), проверки качества. Ничего не спрашивает и не запускает. init записывает предло
+terminal_planner/commands.py	84	code	построчный режим без полноэкранного интерфейса (так же при выводе не в терминал)
+terminal_planner/commands.py	86	code	ПУТЬ
+terminal_planner/commands.py	86	code	Git-проект (по умолчанию текущий каталог)
+terminal_planner/commands.py	88	code	КАТАЛОГ
+terminal_planner/commands.py	88	code	только для fixture: корень изолированного состояния
+terminal_planner/commands.py	90	code	изолированная демонстрация без модели; нативные запуски запрещены
+terminal_planner/commands.py	92	code	ПУТЬ
+terminal_planner/commands.py	92	code	явный изолированный исполняемый файл Zeroshot (разработка)
+terminal_planner/commands.py	94	code	КАТАЛОГ
+terminal_planner/commands.py	94	code	постоянная история Zeroshot; короткий путь для Unix-сокетов
+terminal_planner/commands.py	96	code	только показать версии, ничего не менять (для update)
+terminal_planner/commands.py	98	code	показать версию
+terminal_planner/commands.py	99	code	показать справку
+terminal_planner/commands.py	123	code	Использование: zplan [команда] [опции]
+terminal_planner/commands.py	123	code	Команды:
+terminal_planner/commands.py	130	code	Опции запуска (zplan [опции]):
+terminal_planner/commands.py	134	code	Общие опции:
+terminal_planner/commands.py	138	code	Подробнее: zplan help <команда> или zplan <команда> --help; справочник — docs/REFERENCE.md.
+terminal_planner/commands.py	139	code	Клавиши: ? на любом экране показывает клавиши этого экрана.
+terminal_planner/commands.py	163	code	Нет справки по «%s». Команды: %s.
+terminal_planner/commands.py	19	code	zplan --plain                  построчный режим без полноэкранного интерфейса
+terminal_planner/commands.py	20	code	zplan --project ~/work/app     открыть другой проект
+terminal_planner/commands.py	21	code	zplan --fixture demo --state-dir /tmp/zplan-demo   демонстрация без модели в изолированном каталоге
+terminal_planner/commands.py	27	code	zplan status                   план и milestones текущего проекта
+terminal_planner/commands.py	35	code	zplan setup                    установить инструменты
+terminal_planner/commands.py	36	code	zplan setup && zplan login     затем войти в Codex
+terminal_planner/commands.py	44	code	zplan doctor                   проверить текущий проект
+terminal_planner/commands.py	46	code	zplan doctor || zplan setup    установить, если чего-то не хватает
+terminal_planner/commands.py	52	code	zplan login                    войти в собственный home zplan
+terminal_planner/commands.py	53	code	CODEX_HOME=$HOME/.codex zplan login   войти в свой каталог Codex
+terminal_planner/commands.py	61	code	zplan update                   обновить до новейшего релиза
+terminal_planner/commands.py	62	code	zplan update --check           показать текущую и новейшую версию
+terminal_planner/commands.py	70	code	zplan roles                    показать и изменить роли
+terminal_planner/commands.py	78	code	zplan profile                  профиль текущего проекта
+terminal_planner/commands.py	79	code	zplan profile init             записать предложенный zplan.process.json
+terminal_planner/commands.py	148	code	Опции:
+terminal_planner/commands.py	151	code	Примеры:
+terminal_planner/commands.py	125	code	(без команды)
+terminal_planner/commands.py	129	code	справка: zplan help <команда>
+terminal_planner/delivery.py	49	code	Проверка merge остановила слияние: 
+terminal_planner/delivery.py	82	code	Новая попытка стартует с HEAD %s; прежние невлитые результаты не переносятся.
+terminal_planner/delivery.py	83	code	Пустой ответ: новая попытка не запускалась.
+terminal_planner/delivery.py	108	code	В одном из выполнений зафиксировано: 
+terminal_planner/delivery.py	80	code	запускаю %s…
+terminal_planner/delivery.py	80	code	останавливаю %s…
+terminal_planner/delivery.py	80	code	вливаю %s…
+terminal_planner/delivery.py	81	code	начинаю новую попытку %s…
+terminal_planner/delivery.py	81	code	продолжаю %s…
+terminal_planner/delivery.py	81	code	проверяю %s…
+terminal_planner/delivery.py	84	code	утверждён
+terminal_planner/delivery.py	84	code	предложен, ждёт утверждения
+terminal_planner/delivery.py	85	code	планирование остановилось
+terminal_planner/delivery.py	85	code	план не принят zplan
+terminal_planner/delivery.py	86	code	проверка не приняла план
+terminal_planner/delivery.py	86	code	не отправлен
+terminal_planner/delivery.py	87	code	отправка не подтверждена
+terminal_planner/delivery.py	87	code	планировщик работает
+terminal_planner/delivery.py	88	code	планировщик работает
+terminal_planner/delivery.py	88	code	наблюдение прервано
+terminal_planner/delivery.py	89	code	остановлен вами
+terminal_planner/delivery.py	90	code	ждёт
+terminal_planner/delivery.py	90	code	готов
+terminal_planner/delivery.py	90	code	выполняется
+terminal_planner/delivery.py	90	code	нужен ответ
+terminal_planner/delivery.py	91	code	заблокирован
+terminal_planner/delivery.py	91	code	сбой · можно продолжить
+terminal_planner/delivery.py	92	code	сбой · нельзя продолжить
+terminal_planner/delivery.py	92	code	ждёт слияния
+terminal_planner/delivery.py	92	code	конфликт
+terminal_planner/delivery.py	93	code	влит
+terminal_planner/delivery.py	93	code	остановлен
+terminal_planner/delivery.py	93	code	останавливается
+terminal_planner/delivery.py	97	code	подготовка
+terminal_planner/delivery.py	97	code	отправка не подтверждена
+terminal_planner/delivery.py	97	code	отправлен
+terminal_planner/delivery.py	98	code	выполняется
+terminal_planner/delivery.py	98	code	остановка
+terminal_planner/delivery.py	98	code	возобновление не подтверждено
+terminal_planner/delivery.py	99	code	завершён
+terminal_planner/delivery.py	99	code	сбой
+terminal_planner/delivery.py	99	code	остановлен
+terminal_planner/delivery.py	100	code	готово
+terminal_planner/delivery.py	100	code	нужен ответ
+terminal_planner/delivery.py	100	code	заблокирован
+terminal_planner/delivery.py	101	code	некорректный результат
+terminal_planner/delivery.py	102	code	не экспортирован
+terminal_planner/delivery.py	102	code	экспорт
+terminal_planner/delivery.py	102	code	ждёт слияния
+terminal_planner/delivery.py	103	code	конфликт слияния
+terminal_planner/delivery.py	103	code	влит
+terminal_planner/delivery.py	109	code	Лимит провайдера; проверьте лимиты аккаунта и повторите позже.
+terminal_planner/delivery.py	110	code	Квота аккаунта исчерпана; пополните счёт и повторите позже.
+terminal_planner/delivery.py	111	code	Сервис отклонил авторизацию; [l] обновите вход (`zplan login`) и повторите попытку.
+terminal_planner/delivery.py	112	code	Доступ запрещён (403 Forbidden); проверьте аккаунт или регион и повторите.
+terminal_planner/delivery.py	113	code	Нет связи с сервисом модели; повторите позже.
+terminal_planner/delivery.py	58	code	замечаний нет
+terminal_planner/delivery.py	165	code	Заняты все %s слотов (%s): новый запуск, продолжение и новая попытка ждут. [w] наблюдать, [g] проверить.
+terminal_planner/delivery.py	182	code	этапа
+terminal_planner/delivery.py	182	code	этапов
+terminal_planner/delivery.py	199	code	попытка или план изменились
+terminal_planner/delivery.py	365	code	Требования:
+terminal_planner/delivery.py	128	code	лимит провайдера; сброс: 
+terminal_planner/delivery.py	343	code	План r%s · %s
+terminal_planner/delivery.py	344	code	Цель: 
+terminal_planner/delivery.py	348	code	Проект: совпадает с базой плана
+terminal_planner/delivery.py	355	code	Роли: 
+terminal_planner/delivery.py	363	code	Намерение сохранено; предложение ещё не принято.
+terminal_planner/delivery.py	376	code	Реализация не запускалась; это только план.
+terminal_planner/delivery.py	530	code	[o] открыть %s — %s
+terminal_planner/delivery.py	704	code	Запустить %s?
+terminal_planner/delivery.py	709	code	Запустить %s · %s?⏎План r%s · попытка %s. Будут созданы рабочее дерево и ветка результата; прогон идёт в фоне и переживает выход из zplan.
+terminal_planner/delivery.py	716	code	Остановить прогон %s (попытка %s)?⏎Незавершённая работа попытки не будет принята; план и уже влитое не меняются. Позже можно начать новую попытку.
+terminal_planner/delivery.py	737	code	Профиль процесса не привязан: проверка задач запрещена.
+terminal_planner/delivery.py	748	code	Проверить задачи можно только у утверждённой revision плана.
+terminal_planner/delivery.py	883	code	  сейчас: %s
+terminal_planner/delivery.py	980	code	Остановить %s? Незавершённая работа попытки не будет принята.
+terminal_planner/delivery.py	1014	code	  Причина: 
+terminal_planner/delivery.py	1044	code	  Прогон: %s · итог: %s · доставка: %s
+terminal_planner/delivery.py	1090	code	остановлен
+terminal_planner/delivery.py	1110	code	нужен ответ владельца
+terminal_planner/delivery.py	1124	code	Влить результат %s в %s?
+terminal_planner/delivery.py	1418	code	%s остаётся без ответа; попытка завершена, ничего не выполняется. Вернуться: [o] %s
+terminal_planner/delivery.py	201	code	Состояние изменилось (%s): экран обновлён, проверьте и повторите действие.
+terminal_planner/delivery.py	346	code	Доработка: 
+terminal_planner/delivery.py	354	code	Проект: ИЗМЕНИЛСЯ — требуется доработка плана
+terminal_planner/delivery.py	360	code	Учебный план: только демонстрация; настоящий запуск запрещён.
+terminal_planner/delivery.py	369	code	%s — %s · после: %s
+terminal_planner/delivery.py	410	code	ждёт 
+terminal_planner/delivery.py	412	code	выполняется
+terminal_planner/delivery.py	419	code	статус отправки неизвестен
+terminal_planner/delivery.py	419	code	прервано · нужна проверка
+terminal_planner/delivery.py	422	code	влит %s
+terminal_planner/delivery.py	433	code	План r%s · %s · %s/%s %s влито
+terminal_planner/delivery.py	515	code	[w] наблюдать %s
+terminal_planner/delivery.py	517	code	[g] проверить %s — сверить с Zeroshot без повторной отправки
+terminal_planner/delivery.py	519	code	[g] запустить %s
+terminal_planner/delivery.py	522	code	[o] открыть %s
+terminal_planner/delivery.py	524	code	[g] продолжить %s — та же попытка в её рабочем дереве; [o] открыть — новая попытка
+terminal_planner/delivery.py	526	code	[g] новая попытка %s — с текущего HEAD
+terminal_planner/delivery.py	561	code	Дальше: все этапы влиты; [r] пересмотреть — новая цель или доработка
+terminal_planner/delivery.py	635	code	план пересмотрен
+terminal_planner/delivery.py	640	code	план пересмотрен
+terminal_planner/delivery.py	642	code	начата другая попытка
+terminal_planner/delivery.py	644	code	попытка продвинулась
+terminal_planner/delivery.py	681	code	Достигнут предел параллельных milestone runs (%s) профиля: %s уже выполняются.
+terminal_planner/delivery.py	690	code	Запуск %s · %s (попытка %s)
+terminal_planner/delivery.py	692	code	  Рабочая ветка:   
+terminal_planner/delivery.py	693	code	  Ветка результата: 
+terminal_planner/delivery.py	694	code	  Слияние в:       %s (с HEAD %s)
+terminal_planner/delivery.py	695	code	  Роли:            
+terminal_planner/delivery.py	697	code	  Границы:         задач %s (+ до %s новых), ремонтов на задачу %s, итоговых ремонтов %s
+terminal_planner/delivery.py	740	code	Профиль процесса проекта ещё не принят: примите его или отложите.
+terminal_planner/delivery.py	750	code	Milestone %s нет в утверждённом плане.
+terminal_planner/delivery.py	752	code	Проверка задач выключена в %s.
+terminal_planner/delivery.py	770	code	Правила проверки задач изменились; повторная отправка запрещена.
+terminal_planner/delivery.py	868	code	план пересмотрен
+terminal_planner/delivery.py	923	code	  Остановка запрошена; жду подтверждения Zeroshot.
+terminal_planner/delivery.py	962	code	Журнал пока пуст: Zeroshot ещё ничего не записал.
+terminal_planner/delivery.py	975	code	У планировщика ещё нет запущенного прогона: журнала нет.
+terminal_planner/delivery.py	976	code	Журнал планировщика r%s
+terminal_planner/delivery.py	991	code	Проверяю остановку %s…
+terminal_planner/delivery.py	991	code	Проверяю незавершённую отправку %s…
+terminal_planner/delivery.py	1008	code	  Причина: 
+terminal_planner/delivery.py	1014	code	не указана; подробности — [i] на главном экране
+terminal_planner/delivery.py	1019	code	  Манифест недоступен.
+terminal_planner/delivery.py	1021	code	  Задачи: %s/%s выполнены
+terminal_planner/delivery.py	1060	code	влит
+terminal_planner/delivery.py	1065	code	готово, ждёт слияния
+terminal_planner/delivery.py	1083	code	заблокирован
+terminal_planner/delivery.py	1085	code	сбой, можно продолжить
+terminal_planner/delivery.py	1089	code	сбой, продолжить нельзя
+terminal_planner/delivery.py	1173	code	Отправка проверки merge не подтверждена; повторная отправка запрещена.
+terminal_planner/delivery.py	1186	code	Проверка merge не дала разрешения влить кандидат %s; merge не выполнен.
+terminal_planner/delivery.py	1491	code	Плана нет.
+terminal_planner/delivery.py	371	code	  %s — %s · покрывает %s
+terminal_planner/delivery.py	536	code	Плана нет.
+terminal_planner/delivery.py	536	code	Дальше: [p] план — описать цель
+terminal_planner/delivery.py	540	code	План r%s · %s
+terminal_planner/delivery.py	541	code	Дальше: [p] план — %s
+terminal_planner/delivery.py	563	code	Дальше: 
+terminal_planner/delivery.py	598	code	Этапа %s нет в плане.
+terminal_planner/delivery.py	623	code	%s: %s. Открыть: [o] %s
+terminal_planner/delivery.py	848	code	Отправка проверки задач не подтверждена; повторная отправка запрещена.
+terminal_planner/delivery.py	863	code	Профиль процесса изменился после предпросмотра: проверьте новые значения и подтвердите запуск заново.
+terminal_planner/delivery.py	872	code	попытка %s уже начата
+terminal_planner/delivery.py	971	code	Сейчас нет выполняющегося или упавшего прогона: журнала нет.
+terminal_planner/delivery.py	973	code	Журнал %s · попытка %s
+terminal_planner/delivery.py	985	code	%s уже останавливается.
+terminal_planner/delivery.py	1012	code	  Причина: этап «%s» не дал ответа (таймаут, сбой или неверный ответ) — %s
+terminal_planner/delivery.py	1023	code	  План изменён: %s%s
+terminal_planner/delivery.py	1033	code	%s ещё выполняется.
+terminal_planner/delivery.py	1057	code	статус отправки неизвестен
+terminal_planner/delivery.py	1057	code	прервано
+terminal_planner/delivery.py	1058	code	  Отправка не подтверждена; [g] проверить сверит её с Zeroshot (без повторного запуска).
+terminal_planner/delivery.py	1073	code	  Отмена слияния не удалась: рабочее дерево НЕ чистое. git status:
+terminal_planner/delivery.py	1075	code	конфликт при слиянии в 
+terminal_planner/delivery.py	1096	code	  Вопрос: 
+terminal_planner/delivery.py	1105	code	  Отличие от плана: меняет план этапа → принятие откроет пересмотр плана.
+terminal_planner/delivery.py	1107	code	  Предложение: изменить задачи этапа
+terminal_planner/delivery.py	1136	code	Профиль процесса изменился после решения о merge: проверьте новые значения и повторите merge.
+terminal_planner/delivery.py	1146	code	; оставлено: %s.
+terminal_planner/delivery.py	1147	code	Влито: %s → %s%s
+terminal_planner/delivery.py	1214	code	Проверка merge не завершилась за отведённый срез; повторите слияние.
+terminal_planner/delivery.py	1466	code	Планировщик r%s: прогон %s
+terminal_planner/delivery.py	1472	code	%s r%s попытка %s · прогон %s · %s · итог %s · доставка %s
+terminal_planner/delivery.py	1475	code	  рабочее дерево %s · ветка %s · результат %s %s
+terminal_planner/delivery.py	1499	code	Для диагностики (идентификаторы, пути, команды Zeroshot):
+terminal_planner/delivery.py	351	code	Репозиторий изменился после утверждения (дайджест базы плана %s, сейчас %s); пересмотр плана пересоберёт его на текущем состоянии.
+terminal_planner/delivery.py	374	code	      проверки: 
+terminal_planner/delivery.py	414	code	задача %s/%s (%s)
+terminal_planner/delivery.py	433	code	утверждён
+terminal_planner/delivery.py	541	code	утвердить или доработать
+terminal_planner/delivery.py	541	code	открыть
+terminal_planner/delivery.py	602	code	%s сейчас не выполняется.
+terminal_planner/delivery.py	694	code	HEAD отсоединён
+terminal_planner/delivery.py	845	code	Проверка задач %s ещё не завершена (%s); дождитесь её конца.
+terminal_planner/delivery.py	959	code	Журнал недоступен: 
+terminal_planner/delivery.py	961	code	Журнал недоступен: 
+terminal_planner/delivery.py	1060	code	  Влит в %s (коммит %s).
+terminal_planner/delivery.py	1063	code	  Изменения относительно базы %s:
+terminal_planner/delivery.py	1068	code	  Файлы: 
+terminal_planner/delivery.py	1070	code	  Слияние отменено: повторите git merge %s вручную, разрешите конфликт, закоммитьте, затем zplan
+terminal_planner/delivery.py	1087	code	  [g] продолжит ту же попытку в её рабочем дереве.
+terminal_planner/delivery.py	1102	code	  Предложение: 
+terminal_planner/delivery.py	1143	code	Не выполнено: 
+terminal_planner/delivery.py	1433	code	%s идёт%s
+terminal_planner/delivery.py	1449	code	Журнал планировщика r%s:
+terminal_planner/delivery.py	1482	code	  Диагностика Zeroshot (%s):
+terminal_planner/delivery.py	1508	code	Цель: 
+terminal_planner/delivery.py	613	code	Сейчас занят %s (%s): новый запуск, продолжение и новая попытка ждут. [w] наблюдать, [g] проверить.
+terminal_planner/delivery.py	1064	code	(нет изменений)
+terminal_planner/delivery.py	1104	code	  Не подходит как список задач этапа: 
+terminal_planner/delivery.py	1446	code	Журнал %s (попытка %s):
+terminal_planner/delivery.py	1483	code	корневой прогон
+terminal_planner/delivery.py	884	code	задача %s/%s (%s)
+terminal_planner/delivery.py	1483	code	продолжение %s
+terminal_planner/engine.py	356	code	План ещё не отправлен. Проект изменился после его создания. Цель и настройки сохранены.
+terminal_planner/engine.py	357	code	План ещё не отправлен. Он создан для другой версии или состояния Zeroshot (другой toolchain, пересобранный бинарник или другой каталог состояния). Цель и настройки сохранены.
+terminal_planner/engine.py	994	code	Проверяю кандидата слияния…
+terminal_planner/engine.py	327	code	Запускаю планировщик…
+terminal_planner/engine.py	327	code	Составляю план…
+terminal_planner/engine.py	328	code	Проверяю, что план покрывает цель…
+terminal_planner/engine.py	328	code	Проверяю, что план покрывает цель…
+terminal_planner/engine.py	329	code	Уточняю план по замечаниям…
+terminal_planner/engine.py	1516	code	Отправка проверки задач не подтверждена; повторная отправка запрещена.
+terminal_planner/engine.py	1694	code	Отправка проверки merge не подтверждена; повторная отправка запрещена.
+terminal_planner/engine.py	27	code	Native controller socket path слишком длинный: %s bytes, требуется < %s. Для нового Plan задайте короткий private --native-state-dir (например ~/.zp). Frozen state/intent не переносится автоматически;
+terminal_planner/engine.py	216	code	Неизвестный сценарий fixture.
+terminal_planner/engine.py	217	code	Некорректный fixture failure.
+terminal_planner/engine.py	232	code	Fixture evidence требует отдельную authority.
+terminal_planner/engine.py	233	code	Демонстрационный план: модель не вызывалась.
+terminal_planner/engine.py	254	code	Fixture driver требует fixture authority.
+terminal_planner/engine.py	261	code	Fixture-проверка требует fixture authority.
+terminal_planner/engine.py	262	code	Демонстрационная проверка задач: модель не вызывалась.
+terminal_planner/engine.py	288	code	Fixture-проверка merge требует fixture authority.
+terminal_planner/engine.py	289	code	Демонстрационная проверка merge: модель не вызывалась.
+terminal_planner/engine.py	1097	code	Наблюдение прервано; планировщик продолжает работу, [w] в плане — наблюдать снова.
+terminal_planner/engine.py	1114	code	План или run привязан к %s (%s), %s. Текущий toolchain этого zplan: %s. Завершите это или начните заново с новой revision плана на текущем toolchain; либо переустановите прежнюю версию zplan (её катал
+terminal_planner/engine.py	1131	code	его executable изменён (sha256 не совпадает)
+terminal_planner/engine.py	1301	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1303	code	Нужен frozen target worktree.
+terminal_planner/engine.py	1306	code	Receipt без frozen prepared intent; повторное наблюдение запрещено.
+terminal_planner/engine.py	1382	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1451	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1460	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1463	code	Native binary/state проверки задач изменились; повторная отправка запрещена.
+terminal_planner/engine.py	1559	code	Нет frozen documents проверки задач.
+terminal_planner/engine.py	1564	code	Незавершённая подготовка checkout проверки задач; требуется ручная проверка.
+terminal_planner/engine.py	1576	code	Git изменился во время создания gate snapshot.
+terminal_planner/engine.py	1633	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1640	code	Fixture authority не может submit native runs.
+terminal_planner/engine.py	1643	code	Native binary/state проверки merge изменились; повторная отправка запрещена.
+terminal_planner/engine.py	1733	code	Нет frozen documents проверки merge.
+terminal_planner/engine.py	1738	code	Незавершённая подготовка checkout проверки merge; требуется ручная проверка.
+terminal_planner/engine.py	1751	code	Git не отсоединил checkout проверки merge на candidate.
+terminal_planner/engine.py	1754	code	Git изменился во время создания critic snapshot.
+terminal_planner/engine.py	1756	code	Дерево candidate проверки merge не совпадает; повторная отправка запрещена.
+terminal_planner/engine.py	1943	code	Нет reconstructable first finished watch record; native identity сохранена, resubmit запрещён.
+terminal_planner/engine.py	312	code	fixture: журнал native недоступен в демонстрационном режиме (run %s)
+terminal_planner/engine.py	438	code	 и ещё %d
+terminal_planner/engine.py	1129	code	его executable отсутствует
+terminal_planner/engine.py	1263	code	Ответ native CLI превысил допустимый размер.
+terminal_planner/engine.py	1319	code	Native binary/state изменились. Для возобновления используйте исходные isolated пути.
+terminal_planner/engine.py	1323	code	Frozen intent изменён.
+terminal_planner/engine.py	1340	code	Незавершённая подготовка checkout; требуется ручная проверка isolated state.
+terminal_planner/engine.py	1345	code	Не удалось подготовить disposable planner checkout.
+terminal_planner/engine.py	1351	code	Git изменился во время создания planner snapshot.
+terminal_planner/engine.py	1385	code	Отправка планировщика не подтверждена; повторная отправка запрещена.
+terminal_planner/engine.py	1410	code	Native admission не подтверждён.
+terminal_planner/engine.py	1417	code	Нет однозначного receipt; submission_unknown.
+terminal_planner/engine.py	1475	code	Отправка проверки задач не подтверждена; повторная отправка запрещена.
+terminal_planner/engine.py	1485	code	Native admission не подтверждён.
+terminal_planner/engine.py	1549	code	Checkout проверки задач утрачен; повторная отправка запрещена.
+terminal_planner/engine.py	1552	code	Frozen documents проверки задач изменены; повторная отправка запрещена.
+terminal_planner/engine.py	1555	code	Git изменился во время создания gate snapshot.
+terminal_planner/engine.py	1562	code	Есть незакоммиченные изменения (%s): проверке задач нужен чистый проект.
+terminal_planner/engine.py	1572	code	Не удалось подготовить disposable gate checkout.
+terminal_planner/engine.py	1578	code	Frozen documents проверки задач не совпадают.
+terminal_planner/engine.py	1657	code	Отправка проверки merge не подтверждена; повторная отправка запрещена.
+terminal_planner/engine.py	1668	code	Native admission не подтверждён.
+terminal_planner/engine.py	1722	code	Checkout проверки merge утрачен; повторная отправка запрещена.
+terminal_planner/engine.py	1725	code	Frozen documents проверки merge изменены; повторная отправка запрещена.
+terminal_planner/engine.py	1729	code	Checkout проверки merge изменён; повторная отправка запрещена.
+terminal_planner/engine.py	1736	code	Есть незакоммиченные изменения (%s): проверке merge нужен чистый проект.
+terminal_planner/engine.py	1746	code	Не удалось подготовить disposable checkout проверки merge.
+terminal_planner/engine.py	1758	code	Frozen documents проверки merge не совпадают.
+terminal_planner/engine.py	1886	code	Native binary/state изменились; используйте исходные isolated пути.
+terminal_planner/engine.py	1895	code	Остановка планировщика не подтверждена: native force-stop отклонён (exit %s).
+terminal_planner/engine.py	1259	code	Native controller socket path слишком длинный. Задайте короткий --native-state-dir для нового Plan; frozen history не заменяется.
+terminal_planner/engine.py	1261	code	Zeroshot отклонил операцию (код %s); подробности не показываются. Проверка: zplan doctor.
+terminal_planner/engine.py	1295	code	Поддерживается только qualified static contract %s.
+terminal_planner/engine.py	1297	code	Не удалось проверить native executable identity.
+terminal_planner/engine.py	1325	code	Planner checkout утрачен. Автоматическое повторное submission запрещено.
+terminal_planner/engine.py	1335	code	Есть незакоммиченные изменения (%s): планировщику нужен чистый проект. Закоммитьте или уберите их; цель сохранена.
+terminal_planner/engine.py	1444	code	План проверен.
+terminal_planner/engine.py	1444	code	Проверка не приняла план.
+terminal_planner/engine.py	1892	code	Остановка планировщика не подтверждена: native force-stop не ответил.
+terminal_planner/engine.py	1244	code	Zeroshot не запустился или не ответил; цель и план сохранены. Проверка: zplan doctor.
+terminal_planner/engine.py	1329	code	Frozen native intent изменён; повторное submission запрещено.
+terminal_planner/engine.py	1279	code	Native CLI вернул некорректный JSON.
+terminal_planner/engine.py	1275	code	Native CLI вернул некорректный UTF-8.
+terminal_planner/export.py	86	code	Git отказал: check-ignore; экспорт прерван.
+terminal_planner/export.py	88	code	Git вернул некорректный check-ignore; экспорт прерван.
+terminal_planner/export.py	97	code	Frozen source revision некорректна.
+terminal_planner/export.py	105	code	Snapshot не совпадает с проверенным candidate; экспорт запрещён.
+terminal_planner/export.py	151	code	Snapshot изменился во время экспорта; экспорт запрещён.
+terminal_planner/export.py	165	code	Git вернул некорректный commit.
+terminal_planner/export.py	44	code	; экспорт прерван.
+terminal_planner/export.py	103	code	Target отслеживает служебный путь %s; экспорт запрещён.
+terminal_planner/export.py	122	code	Snapshot содержит gitlink/submodule; экспорт запрещён.
+terminal_planner/export.py	125	code	Служебный путь попал в tree; экспорт запрещён.
+terminal_planner/export.py	142	code	Snapshot tree не совпадает с файлами; экспорт запрещён.
+terminal_planner/export.py	43	code	Git не ответил вовремя; экспорт прерван.
+terminal_planner/export.py	44	code	Git отказал: 
+terminal_planner/export.py	85	code	Git не ответил вовремя; экспорт прерван.
+terminal_planner/export.py	101	code	Source revision отсутствует в target repo; экспорт запрещён.
+terminal_planner/export.py	114	code	Target использует filters (LFS/ident/encoding) для файлов snapshot; экспорт запрещён.
+terminal_planner/export.py	149	code	Snapshot tree изменён конверсией Git; экспорт запрещён.
+terminal_planner/export.py	159	code	Ветка %s уже существует; экспорт отказан.
+terminal_planner/export.py	60	code	; экспорт запрещён.
+terminal_planner/export.py	140	code	; экспорт запрещён.
+terminal_planner/export.py	169	code	Ветка %s не создана (уже существует или конфликтует); экспорт отказан.
+terminal_planner/export.py	60	code	Snapshot содержит вложенный .git или submodules: 
+terminal_planner/export.py	139	code	Snapshot-файлы не попали в tree (ignore/exclude target): 
+terminal_planner/feed.py	57	code	Некорректный feed; store отклонён.
+terminal_planner/feed.py	219	code	Статус: 
+terminal_planner/feed.py	220	code	статус недоступен: вызови zplan_status
+terminal_planner/feed.py	241	code	События с прошлого хода:
+terminal_planner/feed.py	254	code	Оцени их по снимку и действуй по своим правилам; если решать нечего, ответь коротко.
+terminal_planner/feed.py	268	code	%s попытка %s: %s -> %s
+terminal_planner/feed.py	263	code	план r%s: %s -> %s
+terminal_planner/feed.py	265	code	%s %s раунд %s %s: %s — %s
+terminal_planner/feed.py	249	code	Промежуточных состояний без действия: %d.
+terminal_planner/feed.py	251	code	… и ещё %d событий.
+terminal_planner/foreman.py	121	code	brief: %d байт при пределе %d
+terminal_planner/foreman.py	123	code	write_set: %d файлов при пределе %d
+terminal_planner/foreman.py	87	code	write_set: %s — ни файла, ни каталога с файлами в проекте
+terminal_planner/foreman.py	101	code	%s: %s — нет в проекте и в write_set
+terminal_planner/foreman.py	105	code	reuse: %s — не найден в проекте
+terminal_planner/foreman.py	117	code	%s: %s — зависит от платформы, а dod не упоминает linux
+terminal_planner/foreman.py	103	code	%s: %s — в файле меньше строк
+terminal_planner/journal.py	35	code	Журнал недоступен: история прогонов Zeroshot не прочитана (%s).
+terminal_planner/journal.py	120	code	сервер не запущен
+terminal_planner/journal.py	131	code	неожиданный ответ
+terminal_planner/journal.py	72	code	не запустился
+terminal_planner/journal.py	79	code	нет адреса за %d с
+terminal_planner/journal.py	126	code	ответ слишком велик
+terminal_planner/journal.py	142	code	неожиданный ответ
+terminal_planner/live.py	603	code	[скрыто]
+terminal_planner/live.py	47	code	исполнитель
+terminal_planner/live.py	47	code	ревью кода
+terminal_planner/live.py	47	code	приёмка
+terminal_planner/live.py	48	code	стюард
+terminal_planner/live.py	48	code	финальная проверка
+terminal_planner/live.py	48	code	финальная проверка
+terminal_planner/live.py	49	code	финальная проверка
+terminal_planner/live.py	49	code	ремонт итоговой проверки
+terminal_planner/live.py	49	code	планировщик
+terminal_planner/live.py	50	code	проверка плана
+terminal_planner/live.py	50	code	проверка плана
+terminal_planner/live.py	50	code	предпроверка
+terminal_planner/live.py	51	code	выбор задачи
+terminal_planner/live.py	52	code	выбор задачи
+terminal_planner/live.py	52	code	выбор задачи
+terminal_planner/live.py	52	code	стюард
+terminal_planner/live.py	53	code	доработка плана
+terminal_planner/live.py	267	code	%s мин
+terminal_planner/live.py	267	code	%s с
+terminal_planner/live.py	304	code	  Сейчас работают: 
+terminal_planner/live.py	306	code	  %s: раунд %s из %s
+terminal_planner/live.py	330	code	идёт %s
+terminal_planner/live.py	345	code	наблюдение прервано в %s — [w] подключиться
+terminal_planner/live.py	351	code	  последнее: %s
+terminal_planner/live.py	318	code	  проверка
+terminal_planner/live.py	339	code	последнее событие %s назад
+terminal_planner/live.py	347	code	проверено %s
+terminal_planner/live.py	233	code	%s: реализация
+terminal_planner/live.py	234	code	%s: доработка, раунд %s
+terminal_planner/live.py	238	code	запись результата
+terminal_planner/live.py	318	code	  %s: раунд %s
+terminal_planner/live.py	341	code	последняя активность %s назад
+terminal_planner/live.py	343	code	молчит %s
+terminal_planner/live.py	238	code	%s: запись результата
+terminal_planner/live.py	241	code	итоговая проверка: ремонт %s
+terminal_planner/live.py	243	code	итоговая проверка
+terminal_planner/live.py	247	code	этап 
+terminal_planner/merge_critic.py	38	code	Некорректный результат проверки merge: его нельзя сохранить в store.
+terminal_planner/merge_critic.py	53	code	Некорректная запись проверки merge; store отклонён.
+terminal_planner/merge_critic.py	100	code	Input проверки merge не соответствует её identity.
+terminal_planner/planning.py	26	code	Нужна непустая цель длиной до 8192 символов.
+terminal_planner/planning.py	29	code	утверждён вопреки проверке
+terminal_planner/planning.py	83	code	Цель: %s — %s
+terminal_planner/planning.py	98	code	План r%s построен на текущем состоянии проекта (r%s → r%s); цель и настройки те же.
+terminal_planner/planning.py	442	code	Остановка запрошена.
+terminal_planner/planning.py	82	code	Цель: 
+terminal_planner/planning.py	93	code	%s мин
+terminal_planner/planning.py	93	code	%s с
+terminal_planner/planning.py	628	code	Требования:
+terminal_planner/planning.py	649	code	принят
+terminal_planner/planning.py	649	code	отклонён
+terminal_planner/planning.py	384	code	Править можно только текущую revision с предложенным планом.
+terminal_planner/planning.py	390	code	Правка не меняет план.
+terminal_planner/planning.py	409	code	Отказаться можно только от текущего предложенного плана.
+terminal_planner/planning.py	426	code	Остановить можно только работающего планировщика.
+terminal_planner/planning.py	496	code	У планировщика ещё нет запущенного прогона.
+terminal_planner/planning.py	554	code	План r%s · планирование не завершено.
+terminal_planner/planning.py	560	code	Дальше: [r] доработать цель или [g] запустить заново.
+terminal_planner/planning.py	593	code	проверен
+terminal_planner/planning.py	594	code	проверка не приняла
+terminal_planner/planning.py	595	code	План r%s · %s · %s · %s
+terminal_planner/planning.py	652	code	Проверка плана: %s · раундов %s из %s · конфигурация %s
+terminal_planner/planning.py	675	code	  Диагностика Zeroshot (планировщик):
+terminal_planner/planning.py	685	code	Проверить вручную, есть ли у Zeroshot прогон «Terminal roadmap revision %s»:
+terminal_planner/planning.py	529	code	Повторно не отправляется, чтобы не запустить планирование дважды. Команды проверки — [i].
+terminal_planner/planning.py	532	code	План r%s · планировщик работает.
+terminal_planner/planning.py	548	code	План r%s остановлен вами в %s.
+terminal_planner/planning.py	564	code	Дальше: [l] обновить вход, затем [g] проверить готовность.
+terminal_planner/planning.py	593	code	утверждён
+terminal_planner/planning.py	599	code	Доработка: 
+terminal_planner/planning.py	601	code	  %s %s  (после: %s)
+terminal_planner/planning.py	607	code	Проверка плана не приняла его: «%s»
+terminal_planner/planning.py	609	code	Утверждён вопреки проверке: «%s»
+terminal_planner/planning.py	612	code	Проект изменился после планирования: утвердить нельзя, [r] доработать пересоберёт план.
+terminal_planner/planning.py	632	code	%s %s  (после: %s)
+terminal_planner/planning.py	651	code	Проверка плана: %s · %s
+terminal_planner/planning.py	656	code	  Утверждён вопреки проверке: «%s»
+terminal_planner/planning.py	658	code	  Раунды исчерпаны без согласия: утвердить этот план нельзя, [r] доработать.
+terminal_planner/planning.py	660	code	  Раунд %s · %s: %s
+terminal_planner/planning.py	662	code	    Ответ планировщика: 
+terminal_planner/planning.py	523	code	План r%s ещё не отправлен.
+terminal_planner/planning.py	527	code	План r%s: отправка планировщику не подтверждена — неизвестно, принял ли её Zeroshot.%s
+terminal_planner/planning.py	534	code	Наблюдение остановилось: 
+terminal_planner/planning.py	558	code	Планировщик вернул план, который zplan не принял: 
+terminal_planner/planning.py	563	code	Планирование остановилось: сервис отклонил авторизацию.
+terminal_planner/planning.py	569	code	Дальше: подождите или проверьте лимиты аккаунта, затем [g] запустить заново.
+terminal_planner/planning.py	595	code	этап
+terminal_planner/planning.py	595	code	этапа
+terminal_planner/planning.py	595	code	этапов
+terminal_planner/planning.py	596	code	задача
+terminal_planner/planning.py	596	code	задачи
+terminal_planner/planning.py	596	code	задач
+terminal_planner/planning.py	198	code	…всё ещё работаю, прошло %s
+terminal_planner/planning.py	568	code	Планирование остановилось: сервис отклонил запрос из-за лимита или квоты.
+terminal_planner/planning.py	573	code	Дальше: проверьте сеть, затем [g] запустить заново.
+terminal_planner/planning.py	581	code	Дальше: [i] команды диагностики Zeroshot, затем [g] запустить заново.
+terminal_planner/planning.py	572	code	Планирование остановилось: нет связи с сервисом модели.
+terminal_planner/planning.py	579	code	Планирование остановилось%s; причина неизвестна — в доступных журналах её не видно.%s
+terminal_planner/planning.py	576	code	 на шаге составления плана
+terminal_planner/planning.py	577	code	 на шаге проверки плана
+terminal_planner/planning.py	578	code	 на шаге проверки плана
+terminal_planner/planning.py	605	code	проверка
+terminal_planner/planning.py	605	code	проверки
+terminal_planner/planning.py	605	code	проверок
+terminal_planner/process.py	63	code	без проверки
+terminal_planner/process.py	64	code	без квалификации
+terminal_planner/process.py	65	code	профиль не сохранён
+terminal_planner/process.py	66	code	для следующих этапов
+terminal_planner/process.py	68	code	предложение
+terminal_planner/process.py	69	code	снимок профиля
+terminal_planner/process.py	70	code	не принят
+terminal_planner/process.py	70	code	не сохранён (отложен)
+terminal_planner/process.py	70	code	принят
+terminal_planner/process.py	71	code	файл принятого профиля удалён
+terminal_planner/process.py	71	code	файл профиля повреждён
+terminal_planner/process.py	67	code	проверка задач ещё не реализована: выключите её в 
+terminal_planner/process.py	68	code	пресет 
+terminal_planner/process.py	1044	code	%s: %s (%d с)
+terminal_planner/process.py	1056	code	Профиль процесса: %s
+terminal_planner/process.py	1135	code	профиль не принят
+terminal_planner/process.py	1137	code	профиль: ошибка
+terminal_planner/process.py	127	code	%s: ключ «%s» — %s. %s
+terminal_planner/process.py	131	code	Состояние профиля повреждено (%s): %s. Удалите этот файл — профиль будет предложен заново; планы и прогоны не затрагиваются.
+terminal_planner/process.py	139	code	"нужен объект {""model"": ..., ""effort"": ...}"
+terminal_planner/process.py	140	code	Укажите model и effort или удалите ключ — тогда возьмётся значение пресета.
+terminal_planner/process.py	142	code	некорректный идентификатор модели
+terminal_planner/process.py	142	code	Укажите ID модели, например gpt-6.1-sol.
+terminal_planner/process.py	144	code	Исправьте значение.
+terminal_planner/process.py	150	code	нужен объект
+terminal_planner/process.py	161	code	нужен путь к файлу в репозитории
+terminal_planner/process.py	161	code	Укажите относительный путь, например AGENTS.md.
+terminal_planner/process.py	164	code	Укажите путь относительно корня проекта без «..».
+terminal_planner/process.py	171	code	"нужен объект {""name"", ""argv"", ""timeout_s""}"
+terminal_planner/process.py	172	code	"Пример: {""name"": ""unit"", ""argv"": [""python3"", ""-m"", ""unittest""], ""timeout_s"": 1800}."
+terminal_planner/process.py	174	code	нужно короткое имя из латиницы, цифр, «_», «.», «-»
+terminal_planner/process.py	174	code	Исправьте имя проверки.
+terminal_planner/process.py	177	code	пустая команда проверки
+terminal_planner/process.py	178	code	"Укажите программу и аргументы, например [""npm"", ""test""], или удалите эту проверку."
+terminal_planner/process.py	180	code	каждый элемент команды — непустая строка
+terminal_planner/process.py	180	code	Исправьте команду.
+terminal_planner/process.py	183	code	нужно целое число секунд от 1 до 86400
+terminal_planner/process.py	183	code	Исправьте таймаут.
+terminal_planner/process.py	190	code	нужен шаблон пути
+terminal_planner/process.py	190	code	"Например ""docs/**""."
+terminal_planner/process.py	192	code	Сократите шаблон.
+terminal_planner/process.py	195	code	Укажите путь относительно корня проекта, без начального «/» и без «..».
+terminal_planner/process.py	202	code	"Например [""docs/**""]."
+terminal_planner/process.py	250	code	(корень)
+terminal_planner/process.py	250	code	нужен JSON-объект
+terminal_planner/process.py	734	code	неизвестный формат
+terminal_planner/process.py	1051	code	пресет 
+terminal_planner/process.py	1058	code	 · файл 
+terminal_planner/process.py	1066	code	  пресет %s%s
+terminal_planner/process.py	1070	code	  проверка плана: %s%s
+terminal_planner/process.py	1071	code	  проверка задач: %s%s (%s)
+terminal_planner/process.py	1072	code	  проверка слияния: %s%s
+terminal_planner/process.py	1074	code	  раунды: план %d%s; повторы задачи %d%s; слияние %d (%s)
+terminal_planner/process.py	1091	code	  правила (при планировании): нет
+terminal_planner/process.py	1110	code	  Правила для агентов (действуют при планировании): %s
+terminal_planner/process.py	1124	code	  Принять — файл останется как есть; решение запомнится вне проекта.
+terminal_planner/process.py	144	code	допустимы 
+terminal_planner/process.py	150	code	Допустимые ключи: %s.
+terminal_planner/process.py	153	code	 Роль plan_verifier называется critic.
+terminal_planner/process.py	154	code	неизвестный ключ
+terminal_planner/process.py	164	code	путь %r вне репозитория
+terminal_planner/process.py	192	code	шаблон длиннее %d символов
+terminal_planner/process.py	194	code	шаблон %r вне репозитория
+terminal_planner/process.py	201	code	нужен список шаблонов путей (от %d до %d)
+terminal_planner/process.py	213	code	"Например [{""paths"": [""docs/**""], ""tier"": ""low""}]."
+terminal_planner/process.py	228	code	"Например [{""name"": ""secrets"", ""paths"": [""**/.env*""]}]."
+terminal_planner/process.py	241	code	имя триггера указано дважды
+terminal_planner/process.py	241	code	Дайте триггерам разные имена.
+terminal_planner/process.py	250	code	Допустимые ключи: %s.
+terminal_planner/process.py	253	code	неизвестный ключ
+terminal_planner/process.py	265	code	"Например [""AGENTS.md""]."
+terminal_planner/process.py	268	code	путь указан дважды
+terminal_planner/process.py	268	code	Уберите повтор.
+terminal_planner/process.py	280	code	в этой версии план проверяется всегда
+terminal_planner/process.py	281	code	Верните required или удалите ключ.
+terminal_planner/process.py	296	code	Исправьте значение.
+terminal_planner/process.py	314	code	Исправьте значение.
+terminal_planner/process.py	319	code	Пустой список — без квалификации.
+terminal_planner/process.py	322	code	имя проверки указано дважды
+terminal_planner/process.py	322	code	Дайте проверкам разные имена.
+terminal_planner/process.py	335	code	Укажите файл внутри проекта.
+terminal_planner/process.py	337	code	Создайте файл или уберите путь из rules.
+terminal_planner/process.py	419	code	roles.json повреждён: нужен объект; выполните zplan roles или удалите %s.
+terminal_planner/process.py	726	code	не читается
+terminal_planner/process.py	730	code	не JSON
+terminal_planner/process.py	810	code	Профиль меняется только в сессии, которая держит проект.
+terminal_planner/process.py	983	code	Профиль уже решён или найден файл: примите его.
+terminal_planner/process.py	995	code	Профиль процесса проекта ещё не принят: примите его или отложите (запустите zplan, или zplan profile init).
+terminal_planner/process.py	1069	code	  роль %-9s %s / %s%s
+terminal_planner/process.py	1079	code	  автономия: %s · прогонов до %d · раунд воркера %d мин · прогон %d мин · проверка после раунда %d · пробуждений %d/ч · повторов %d%s (%s)
+terminal_planner/process.py	1084	code	  риск: правил %d · триггеров %d%s (%s)
+terminal_planner/process.py	1088	code	  правила (действуют при планировании; задачи и слияние — %s): %s
+terminal_planner/process.py	1093	code	  проверки (%s): %s
+terminal_planner/process.py	1095	code	  проверки: %s
+terminal_planner/process.py	1105	code	Профиль процесса проекта: найден %s — показаны его значения.
+terminal_planner/process.py	1107	code	Профиль процесса проекта (%s): предложение.
+terminal_planner/process.py	1111	code	не найдены (AGENTS.md, CLAUDE.md)
+terminal_planner/process.py	1114	code	  Проверка (квалификация, %s): %s
+terminal_planner/process.py	1116	code	  Проверка: %s
+terminal_planner/process.py	1119	code	  Проверка плана: %s · задач: %s · слияния: %s
+terminal_planner/process.py	1121	code	  Роли: 
+terminal_planner/process.py	1126	code	  Принять — zplan создаст %s в корне проекта; закоммитьте его, чтобы профиль был общим.
+terminal_planner/process.py	1127	code	  Позже — ничего не пишется в проект; действуют эти значения, в шапке: «%s».
+terminal_planner/process.py	1157	code	профиль: ошибка
+terminal_planner/process.py	154	code	Допустимые: %s.%s
+terminal_planner/process.py	212	code	нужен список правил (от 1 до %d)
+terminal_planner/process.py	219	code	"нужен объект {""paths"", ""tier""}"
+terminal_planner/process.py	219	code	Укажите оба ключа.
+terminal_planner/process.py	221	code	Исправьте значение.
+terminal_planner/process.py	227	code	нужен список триггеров (от 1 до %d)
+terminal_planner/process.py	234	code	"нужен объект {""name"", ""paths""}"
+terminal_planner/process.py	234	code	Укажите оба ключа.
+terminal_planner/process.py	236	code	нужно короткое имя из латиницы, цифр, «_», «.», «-»
+terminal_planner/process.py	237	code	Исправьте имя триггера.
+terminal_planner/process.py	253	code	Удалите его или исправьте опечатку; допустимы: %s.
+terminal_planner/process.py	258	code	неизвестный пресет %r
+terminal_planner/process.py	265	code	нужен список путей (не больше %d)
+terminal_planner/process.py	277	code	допустимы required или off
+terminal_planner/process.py	277	code	Исправьте значение.
+terminal_planner/process.py	289	code	Исправьте значение.
+terminal_planner/process.py	295	code	"раздел автономии есть только в пресете %s; укажите ""preset"": ""%s"""
+terminal_planner/process.py	313	code	"раздел риска есть только в пресете %s; укажите ""preset"": ""%s"""
+terminal_planner/process.py	319	code	нужен список проверок (не больше %d)
+terminal_planner/process.py	335	code	путь %r вне репозитория
+terminal_planner/process.py	337	code	файл %r не найден
+terminal_planner/process.py	340	code	Сократите правила.
+terminal_planner/process.py	343	code	Проверьте права.
+terminal_planner/process.py	359	code	Проверьте файл.
+terminal_planner/process.py	361	code	Правила %s изменились во время подготовки плана. Повторите действие.
+terminal_planner/process.py	364	code	правила вместе больше %d КиБ: файл %r не помещается
+terminal_planner/process.py	365	code	Сократите %s или уберите файл из rules: агентам отдаётся не больше %d КиБ.
+terminal_planner/process.py	370	code	Сохраните его в UTF-8 или уберите из rules.
+terminal_planner/process.py	409	code	roles.json не читается (%s); выполните zplan roles или удалите %s.
+terminal_planner/process.py	416	code	roles.json повреждён; выполните zplan roles или удалите %s.
+terminal_planner/process.py	831	code	(файл)
+terminal_planner/process.py	832	code	Замените его корректным JSON или удалите и выполните zplan profile init.
+terminal_planner/process.py	835	code	(файл)
+terminal_planner/process.py	835	code	Проверьте права или удалите файл.
+terminal_planner/process.py	839	code	(файл)
+terminal_planner/process.py	839	code	не JSON или повторяющийся ключ
+terminal_planner/process.py	840	code	Исправьте файл (git diff покажет изменения) или удалите его и выполните zplan profile init.
+terminal_planner/process.py	877	code	Найден %s: профиль принят.
+terminal_planner/process.py	901	code	Принятый профиль %s удалён из проекта. Верните файл (git checkout -- %s) или создайте его заново: zplan profile init.
+terminal_planner/process.py	221	code	допустимы 
+terminal_planner/process.py	259	code	Доступны 
+terminal_planner/process.py	289	code	нужно целое число от 1 до %d
+terminal_planner/process.py	304	code	Исправьте значение.
+terminal_planner/process.py	309	code	Исправьте значение.
+terminal_planner/process.py	340	code	файл %r больше %d КБ
+terminal_planner/process.py	343	code	файл %r не читается (%s)
+terminal_planner/process.py	359	code	файл %r не читается (%s)
+terminal_planner/process.py	370	code	файл %r не в UTF-8
+terminal_planner/process.py	429	code	roles.json: роль %s задана неверно; выполните zplan roles или удалите %s.
+terminal_planner/process.py	831	code	это не обычный файл или он больше %d КБ
+terminal_planner/process.py	835	code	не читается (%s)
+terminal_planner/process.py	908	code	снимок профиля
+terminal_planner/process.py	303	code	допустимы 
+terminal_planner/process.py	308	code	нужно целое число от %d до %d
+terminal_planner/process.py	972	code	%s уже существует; он не перезаписывается.
+terminal_planner/project_read.py	34	code	Корень чтения не проект и не его worktree.
+terminal_planner/project_read.py	49	code	Путь вне проекта.
+terminal_planner/project_read.py	68	code	Ссылка ведёт за пределы проекта.
+terminal_planner/project_read.py	70	code	Файл с учётными данными не читается.
+terminal_planner/project_read.py	72	code	Файл не входит в проект.
+terminal_planner/project_read.py	96	code	Бинарный файл не читается.
+terminal_planner/project_read.py	134	code	Файл с учётными данными не читается.
+terminal_planner/record_home.py	21	code	Некорректный recorded codex_home: %r.
+terminal_planner/record_home.py	35	code	Некорректный native binding: %r.
+terminal_planner/runs.py	141	code	Некорректная запись milestone run; store отклонён.
+terminal_planner/runs.py	311	code	Revision %s устарела (текущая revision %s, %s): новые действия над её milestone runs запрещены.
+terminal_planner/runs.py	335	code	предпроверка
+terminal_planner/runs.py	346	code	итоговая проверка
+terminal_planner/runs.py	414	code	Python interpreter path неизвестен; checker не может быть заморожен.
+terminal_planner/runs.py	448	code	Root output milestone run не соответствует driver contract.
+terminal_planner/runs.py	473	code	Milestone run не принадлежит утверждённой revision; store отклонён.
+terminal_planner/runs.py	474	code	Fixture и production runs несовместимы.
+terminal_planner/runs.py	636	code	Git не показал изменённые файлы кандидата; состояние не изменено.
+terminal_planner/runs.py	883	code	подготовка прервана
+terminal_planner/runs.py	340	code	 · ревью
+terminal_planner/runs.py	342	code	 · запись результата
+terminal_planner/runs.py	344	code	итоговая проверка: ремонт %s/%s
+terminal_planner/runs.py	353	code	%s · ревью: принято
+terminal_planner/runs.py	361	code	порядок задач изменён
+terminal_planner/runs.py	374	code	задача
+terminal_planner/runs.py	391	code	остановка…
+terminal_planner/runs.py	395	code	план: 
+terminal_planner/runs.py	512	code	Resume lineage некорректна; store отклонён.
+terminal_planner/runs.py	513	code	Run возобновлён дважды; store отклонён.
+terminal_planner/runs.py	646	code	Больше %s активных milestone writers; store отклонён.
+terminal_planner/runs.py	673	code	Git не проверил ancestry %s; состояние не изменено.
+terminal_planner/runs.py	731	code	Нет сохранённого плана.
+terminal_planner/runs.py	784	code	Нет утверждённого плана.
+terminal_planner/runs.py	791	code	Fixture-утверждение не разрешает native submission.
+terminal_planner/runs.py	792	code	Fixture driver не запускается для production плана.
+terminal_planner/runs.py	797	code	Нужен чистый Git-проект: закоммитьте или уберите изменения перед запуском milestone.
+terminal_planner/runs.py	806	code	Проект отслеживает .zplan/ (служебный каталог zplan); уберите его из Git перед запуском milestone.
+terminal_planner/runs.py	811	code	Нужны роли worker/reviewer/steward.
+terminal_planner/runs.py	905	code	Подготовка возможна только до submission.
+terminal_planner/runs.py	937	code	Frozen bootstrap manifest не воспроизводится.
+terminal_planner/runs.py	957	code	Baseline в worktree не совпадает с frozen submission.
+terminal_planner/runs.py	964	code	Native binary/state изменились; используйте исходные isolated пути.
+terminal_planner/runs.py	1041	code	Наблюдать можно только отправленный активный milestone run.
+terminal_planner/runs.py	1218	code	Run ещё не отправлен.
+terminal_planner/runs.py	1316	code	Остановить можно только отправленный активный milestone run.
+terminal_planner/runs.py	1325	code	Resume возможен только для failed run.
+terminal_planner/runs.py	1327	code	Run уже возобновлён; повторный resume запрещён.
+terminal_planner/runs.py	1332	code	Run не восстанавливаем; нужен новый attempt.
+terminal_planner/runs.py	1340	code	возобновление после сбоя
+terminal_planner/runs.py	1354	code	Resume не подтверждён native (нет successorRunId); повторный resume запрещён. Команды проверки: [i] подробнее.
+terminal_planner/runs.py	1359	code	Successor lineage не подтверждена; resume_pending сохранён.
+terminal_planner/runs.py	1393	code	Экспорт возможен только для принятого (done) attempt.
+terminal_planner/runs.py	1398	code	Base commit отслеживает .zplan/ (служебный каталог zplan); экспорт запрещён.
+terminal_planner/runs.py	1440	code	Merge возможен только для экспортированного результата.
+terminal_planner/runs.py	1442	code	В проекте не завершён merge (MERGE_HEAD): завершите его или git merge --abort.
+terminal_planner/runs.py	1451	code	Нужен чистый Git-проект: закоммитьте или уберите изменения перед merge.
+terminal_planner/runs.py	1453	code	Git user.name/user.email не настроены; merge запрещён (git config user.name ...).
+terminal_planner/runs.py	1537	code	Проект или профиль изменились за время проверок; merge не выполнен: повторите его.
+terminal_planner/runs.py	1568	code	Git не построил кандидата merge без конфликтов; состояние не изменено.
+terminal_planner/runs.py	1570	code	Проверка слияния включена, но проверок нет: добавьте checks в zplan.process.json.
+terminal_planner/runs.py	1580	code	Git не создал commit кандидата; состояние не изменено.
+terminal_planner/runs.py	1739	code	остановка…
+terminal_planner/runs.py	1755	code	План не утверждён.
+terminal_planner/runs.py	1773	code	Результат ещё не экспортирован.
+terminal_planner/runs.py	1776	code	Git не показал diff результата.
+terminal_planner/runs.py	1799	code	Нужен текст: что изменить в плане.
+terminal_planner/runs.py	1811	code	Новый attempt нужен только после неуспешного attempt.
+terminal_planner/runs.py	1819	code	Нужен текст ответа.
+terminal_planner/runs.py	1847	code	Нет предложения steward для принятия.
+terminal_planner/runs.py	1860	code	Нужен текст для revise.
+terminal_planner/runs.py	1870	code	Fixture authority не может submit native runs.
+terminal_planner/runs.py	1889	code	Нет однозначного receipt; submission_unknown.
+terminal_planner/runs.py	1899	code	Нет однозначного native status.
+terminal_planner/runs.py	1919	code	Нет однозначного resume receipt; resume_pending сохранён.
+terminal_planner/runs.py	1938	code	Неизвестный fixture outcome.
+terminal_planner/runs.py	1950	code	Fixture driver требует fixture authority.
+terminal_planner/runs.py	1970	code	Fixture admission: frozen documents отсутствуют.
+terminal_planner/runs.py	2124	code	Fixture run не восстанавливаем.
+terminal_planner/runs.py	195	code	Product tree содержит не-UTF-8 пути; identity не вычислена.
+terminal_planner/runs.py	337	code	 · реализация
+terminal_planner/runs.py	338	code	%s · ревью: отклонено, ремонт %s/%s
+terminal_planner/runs.py	359	code	+%s (добавить)
+terminal_planner/runs.py	359	code	+%s (разбить %s)
+terminal_planner/runs.py	360	code	−%s (отменить)
+terminal_planner/runs.py	360	code	%s переформулирована
+terminal_planner/runs.py	661	code	Git отказал (%s); операция прервана.
+terminal_planner/runs.py	725	code	Инструменты zplan не установлены или повреждены: [u] на экране готовности или zplan setup.
+terminal_planner/runs.py	744	code	Достигнут предел параллельных milestone runs (%s): %s уже выполняются.
+terminal_planner/runs.py	747	code	Milestone %s уже выполняется (attempt %s): новый attempt ждёт его завершения.
+terminal_planner/runs.py	787	code	Revision %s устарела: текущая revision %s. Запуск milestone запрещён.
+terminal_planner/runs.py	789	code	Revision %s не утверждена; запуск milestone запрещён.
+terminal_planner/runs.py	794	code	Milestone %s нет в утверждённом плане.
+terminal_planner/runs.py	804	code	Новый attempt стартует с HEAD ветки %s; переключитесь на неё (git switch %s).
+terminal_planner/runs.py	810	code	Milestone %s ждёт %s: результат не влит в %s.
+terminal_planner/runs.py	868	code	Frozen submission не воспроизводится.
+terminal_planner/runs.py	886	code	Milestone worktree %s утрачен; повторная отправка запрещена.
+terminal_planner/runs.py	889	code	Milestone worktree принадлежит другому репозиторию; %s.
+terminal_planner/runs.py	1193	code	остановка запрошена
+terminal_planner/runs.py	1399	code	экспорт запрещён
+terminal_planner/runs.py	1408	code	Manifest или baseline в worktree изменены после приёмки; экспорт запрещён.
+terminal_planner/runs.py	1412	code	Product tree изменён после приёмки; экспорт запрещён.
+terminal_planner/runs.py	1449	code	Merge идёт в %s: переключитесь на неё (git switch %s).
+terminal_planner/runs.py	1480	code	Конфликт merge (%s); git merge --abort не удался — рабочее дерево НЕ чистое.
+terminal_planner/runs.py	1543	code	Git не влил проверенный кандидат %s; проверьте %s.
+terminal_planner/runs.py	1757	code	Milestone %s нет в утверждённом плане.
+terminal_planner/runs.py	1814	code	Attempt %s уже не последний; действуйте над последним attempt.
+terminal_planner/runs.py	1885	code	Native admission отклонил frozen submission.
+terminal_planner/runs.py	1913	code	Native force-stop отклонён (exit %s); run остаётся stopping.
+terminal_planner/runs.py	2066	code	Остановлен по запросу владельца.
+terminal_planner/runs.py	655	code	Git не ответил (%s); операция прервана.
+terminal_planner/runs.py	753	code	Milestone %s пересекается с %s (%s): ждёт его завершения.
+terminal_planner/runs.py	801	code	HEAD отсоединён; переключитесь на ветку (git switch <branch>) перед запуском milestone.
+terminal_planner/runs.py	816	code	Некорректные model/effort ролей worker/reviewer/steward.
+terminal_planner/runs.py	880	code	Frozen submission %s утрачен или изменён; повторная отправка запрещена.
+terminal_planner/runs.py	897	code	Milestone worktree не на рабочей ветке %s; %s.
+terminal_planner/runs.py	900	code	HEAD milestone worktree (%s) не на base commit %s; %s.
+terminal_planner/runs.py	947	code	Checker preflight не выполнился в milestone worktree.
+terminal_planner/runs.py	953	code	Checker не прошёл preflight в milestone worktree: 
+terminal_planner/runs.py	1465	code	Merge создал неожиданный commit %s; проверьте %s.
+terminal_planner/runs.py	1474	code	Git merge отказал без конфликтов%s.
+terminal_planner/runs.py	1517	code	Проверка «%s» не прошла (%s); merge не выполнен.
+terminal_planner/runs.py	1528	code	Проверка merge не дала разрешения влить кандидат %s; merge не выполнен.
+terminal_planner/runs.py	1588	code	Проверки кандидата не запущены: checkout отказал (%s); merge не выполнен.
+terminal_planner/runs.py	1779	code	⏎… (обрезано; полностью: git diff %s %s)
+terminal_planner/runs.py	1912	code	Native force-stop не ответил; run остаётся stopping, наблюдайте его.
+terminal_planner/runs.py	1019	code	replay запрещён, worktree не изменён
+terminal_planner/runs.py	1194	code	план: 
+terminal_planner/runs.py	1251	code	Остановлен по запросу.
+terminal_planner/runs.py	1474	code	; merge --abort не удался, дерево не чистое
+terminal_planner/runs.py	1586	code	Проверки кандидата не запущены (%s); merge не выполнен.
+terminal_planner/runs.py	1701	code	… ещё %s
+terminal_planner/runs.py	1963	code	Fixture run %s не найден.
+terminal_planner/runs.py	2095	code	fixture log %s: пока пусто
+terminal_planner/runs.py	917	code	Ветка %s уже существует не на base; подготовка прервана.
+terminal_planner/runs.py	1295	code	done без валидного manifest: 
+terminal_planner/runs.py	1304	code	done, но product tree не заморожен: %s
+terminal_planner/setup.py	47	code	Некорректный role configuration.
+terminal_planner/setup.py	122	code	Bundled restic отсутствует; runtime startup запрещён.
+terminal_planner/setup.py	133	code	Private tools повреждены; execution запрещён.
+terminal_planner/setup.py	163	code	Нужны Node.js/npm. Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y nodejs npm; macOS: brew install node
+terminal_planner/setup.py	166	code	Требуется Node.js >=16; установите поддерживаемый Node.js перед setup.
+terminal_planner/setup.py	206	code	Вход: zplan login; затем zplan doctor.
+terminal_planner/setup.py	593	code	Инструменты zplan не установлены⏎  Нужны проверенные Zeroshot %s и Codex %s (своя копия zplan, глобальные не трогаются).
+terminal_planner/setup.py	54	code	Некорректный model/effort.
+terminal_planner/setup.py	63	code	Некорректный role configuration.
+terminal_planner/setup.py	113	code	Setup command failed: %s (exit %s); предыдущая установка сохранена.
+terminal_planner/setup.py	141	code	Setup поддерживает Linux x86_64/aarch64 и macOS arm64; platform: 
+terminal_planner/setup.py	205	code	; модель не запускалась.
+terminal_planner/setup.py	574	code	Codex model_provider в %s не строка; исправьте файл.
+terminal_planner/setup.py	580	code	Codex provider %r не определён в %s; добавьте [model_providers.%s] или выберите openai.
+terminal_planner/setup.py	666	code	"git config --global user.name ""Имя"" и user.email you@example.com."
+terminal_planner/setup.py	718	code	Toolchain: %s · %s · %s · каталог %s
+terminal_planner/setup.py	733	code	Target: не выбран (cd в Git-проект или --project); на готовность tools не влияет.
+terminal_planner/setup.py	734	code	Профиль процесса: проект не выбран.
+terminal_planner/setup.py	738	code	Plan: готов.
+terminal_planner/setup.py	171	code	Pinned tools уже установлены и проверены.
+terminal_planner/setup.py	186	code	Release checksum mismatch; установка отменена.
+terminal_planner/setup.py	205	code	Tools установлены в 
+terminal_planner/setup.py	303	code	Дом Codex для zplan %s ведёт в ваш %s; zplan не пишет туда профиль и не запускает там Codex. Удалите ссылку или задайте CODEX_HOME с отдельным каталогом.
+terminal_planner/setup.py	320	code	Профиль агента не записан: %s не является обычным файлом; zplan не пишет через ссылку. Удалите её и повторите.
+terminal_planner/setup.py	403	code	Target: Git-проект 
+terminal_planner/setup.py	403	code	Проект 
+terminal_planner/setup.py	426	code	Target origin не GitHub-репозиторий; добавьте: git remote add origin https://github.com/OWNER/REPO.git (или git remote set-url origin ...).
+terminal_planner/setup.py	428	code	Нет GitHub origin — [i] инструкция
+terminal_planner/setup.py	429	code	Zeroshot называет проект по origin; zplan никуда не пушит. Добавьте сами: git remote add origin https://github.com/OWNER/REPO.git (или git remote set-url origin ...).
+terminal_planner/setup.py	571	code	Codex profile %r не найден в %s; исправьте profile или добавьте [profiles.%s].
+terminal_planner/setup.py	671	code	Git не установлен — [i] инструкция
+terminal_planner/setup.py	730	code	Агентский профиль zplan: 
+terminal_planner/setup.py	112	code	Не удалось выполнить setup command: 
+terminal_planner/setup.py	153	code	Другой setup уже выполняется.
+terminal_planner/setup.py	200	code	Установка Codex %s через npm ci и integrity из bundled lockfile.
+terminal_planner/setup.py	400	code	Target не Git-проект с commit; перейдите в проект (cd) или укажите --project.
+terminal_planner/setup.py	401	code	Каталог не Git-проект с commit
+terminal_planner/setup.py	401	code	Перейдите в проект (cd) или укажите --project.
+terminal_planner/setup.py	406	code	Target: ветка 
+terminal_planner/setup.py	406	code	Ветка 
+terminal_planner/setup.py	408	code	Target HEAD отсоединён; переключитесь на ветку: git switch <branch>.
+terminal_planner/setup.py	409	code	HEAD отсоединён — [i] инструкция
+terminal_planner/setup.py	409	code	Переключитесь на ветку: git switch <branch>.
+terminal_planner/setup.py	421	code	Origin с credentials — [i] инструкция
+terminal_planner/setup.py	424	code	GitHub origin есть
+terminal_planner/setup.py	436	code	Target: не закоммичен %s; выполните: %s.
+terminal_planner/setup.py	437	code	Закоммитьте %s
+terminal_planner/setup.py	438	code	Закоммитьте %s: %s; zplan ничего не коммитит сам.
+terminal_planner/setup.py	440	code	Target: есть незакоммиченные изменения; закоммитьте или уберите их (git status).
+terminal_planner/setup.py	441	code	Есть незакоммиченные изменения — [d] посмотреть
+terminal_planner/setup.py	442	code	Закоммитьте или уберите их сами (git status); zplan ничего не коммитит и не прячет.
+terminal_planner/setup.py	444	code	Target: рабочее дерево чистое
+terminal_planner/setup.py	444	code	Рабочее дерево чистое
+terminal_planner/setup.py	562	code	Codex config %s не читается (%s); исправьте файл или уберите его, чтобы вернуть defaults Codex.
+terminal_planner/setup.py	621	code	Установка: [u] или zplan setup.
+terminal_planner/setup.py	668	code	Не задано имя автора Git — [i] инструкция
+terminal_planner/setup.py	671	code	git отсутствует; 
+terminal_planner/setup.py	677	code	выполните zplan roles или удалите %s.
+terminal_planner/setup.py	181	code	Загрузка Zeroshot %s; проверка pinned SHA256.
+terminal_planner/setup.py	420	code	Target origin %s несёт userinfo; 10.12 отвергает такую URL. %s.
+terminal_planner/setup.py	422	code	Ваша URL несёт логин/пароль (zplan её не показывает). Выполните сами: 
+terminal_planner/setup.py	609	code	Путь к сокету Zeroshot слишком длинный — [i] подробнее
+terminal_planner/setup.py	616	code	Установка: [u] или zplan setup.
+terminal_planner/setup.py	620	code	codex binary отсутствует: %s; выполните zplan setup.
+terminal_planner/setup.py	629	code	Настройки Codex не читаются — [i] подробнее
+terminal_planner/setup.py	667	code	Git identity не задана; 
+terminal_planner/setup.py	668	code	Выполните 
+terminal_planner/setup.py	679	code	Настройки ролей повреждены — [i] инструкция
+terminal_planner/setup.py	615	code	zeroshot не установлен или повреждён (%s); выполните zplan setup.
+terminal_planner/setup.py	635	code	auth: provider %s не требует login
+terminal_planner/setup.py	636	code	Codex: %s · вход не нужен
+terminal_planner/setup.py	678	code	roles config повреждён (%s); %s
+terminal_planner/setup.py	627	code	 (config.toml нет: defaults Codex)
+terminal_planner/setup.py	639	code	auth: login-файл есть в CODEX_HOME (наличие, не валидность)
+terminal_planner/setup.py	640	code	Codex: вход найден в 
+terminal_planner/setup.py	642	code	auth: $%s задана (наличие, не валидность)
+terminal_planner/setup.py	643	code	Codex: %s · ключ $%s задан
+terminal_planner/setup.py	645	code	нет login для provider %s в %s; zplan нужен свой вход Codex один раз — выполните zplan login или нажмите [l]. Ваш вход ~/.codex не используется и не меняется; другой каталог Codex — задайте CODEX_HOME
+terminal_planner/setup.py	648	code	Codex: нет входа в %s — [l] войти (свой вход zplan, не ~/.codex)
+terminal_planner/setup.py	649	code	[l] запускает вход Codex в %s; свой вход ~/.codex zplan не читает, не копирует и не меняет; другой каталог Codex — export CODEX_HOME=... перед zplan.
+terminal_planner/setup.py	652	code	переменная %s для provider %s не задана; export %s=... перед zplan.
+terminal_planner/setup.py	654	code	Codex: не задана переменная %s для provider %s — [i] инструкция
+terminal_planner/setup.py	655	code	Выйдите, выполните export %s=... и запустите zplan снова; значение zplan не показывает.
+terminal_planner/task_gate.py	25	code	проверки задач
+terminal_planner/task_gate.py	27	code	Некорректный результат проверки задач: его нельзя сохранить в store.
+terminal_planner/task_gate.py	140	code	Некорректная запись проверки задач; store отклонён.
+terminal_planner/tui/app.py	116	code	Планировщик
+terminal_planner/tui/app.py	118	code	Не запущено: сначала исправьте отмеченное выше.
+terminal_planner/tui/app.py	120	code	Журнал установки пока пуст: кнопка «установить», кнопка «войти».
+terminal_planner/tui/app.py	121	code	Пустой текст: план не изменён.
+terminal_planner/tui/app.py	123	code	Проект изменился после планирования: пересобрать план
+terminal_planner/tui/app.py	127	code	План устарел до отправки (проект или Zeroshot изменились): /view открыть план.
+terminal_planner/tui/app.py	315	code	 · [← / →] вкладки — переключить по кругу; клик по ярлыку вкладки — показать её
+terminal_planner/tui/app.py	150	code	Дальше: [p] план — описать цель
+terminal_planner/tui/app.py	151	code	Дальше: [p] план — утвердить или доработать
+terminal_planner/tui/app.py	150	code	Дальше: напиши цель архитектору в чат
+terminal_planner/tui/app.py	152	code	Дальше: /approve — утвердить, или напиши архитектору, что доработать
+terminal_planner/tui/app.py	157	code	\[g\] (запустить|новая попытка|проверить|продолжить) (?=\S)
+terminal_planner/tui/app.py	162	code	/setup → установить
+terminal_planner/tui/app.py	162	code	/setup → войти
+terminal_planner/tui/app.py	163	code	/view → доработать
+terminal_planner/tui/app.py	164	code	установить(?: инструменты)?
+terminal_planner/tui/app.py	164	code	войти|обнов(?:ить|ите) вход
+terminal_planner/tui/app.py	165	code	доработать|пересмотреть
+terminal_planner/tui/app.py	199	code	Дальше:
+terminal_planner/tui/app.py	323	code	Клавиши
+terminal_planner/tui/app.py	586	code	Выше
+terminal_planner/tui/app.py	586	code	Ниже
+terminal_planner/tui/app.py	628	code	Панель
+terminal_planner/tui/app.py	629	code	Отменить ход
+terminal_planner/tui/app.py	634	code	Вкладка влево
+terminal_planner/tui/app.py	635	code	Вкладка вправо
+terminal_planner/tui/app.py	639	code	История вверх
+terminal_planner/tui/app.py	640	code	История вниз
+terminal_planner/tui/app.py	1805	code	Выход
+terminal_planner/tui/app.py	2341	code	Планировщик в этой сессии недоступен.
+terminal_planner/tui/app.py	2391	code	Черновика ответа для выбранного этапа нет.
+terminal_planner/tui/app.py	2797	code	Не выполнено: нет этапа, готового к запуску.
+terminal_planner/tui/app.py	2845	code	Сверяю %s с Zeroshot (без повторной отправки)…
+terminal_planner/tui/app.py	3364	code	Проверка готовности…
+terminal_planner/tui/app.py	3378	code	Установка инструментов…
+terminal_planner/tui/app.py	3412	code	Вход в Codex в этом терминале…
+terminal_planner/tui/app.py	189	code	Кнопка 
+terminal_planner/tui/app.py	189	code	кнопка 
+terminal_planner/tui/app.py	190	code	 — кнопка «%s»
+terminal_planner/tui/app.py	1130	code	План r%s
+terminal_planner/tui/app.py	2218	code	Проверки пройдены: можно запускать планировщик — [g].
+terminal_planner/tui/app.py	2220	code	Исправьте это (/setup на главном экране — настройки), затем снова [g].
+terminal_planner/tui/app.py	2259	code	Уже выполняется: %s Дождитесь подтверждения Zeroshot.
+terminal_planner/tui/app.py	2527	code	Не выполнено: 
+terminal_planner/tui/app.py	2770	code	Сейчас занят %s: новый запуск, продолжение и новая попытка ждут. /attempt наблюдать, /run на нём — проверить.
+terminal_planner/tui/app.py	2877	code	Продолжить %s (попытка %s)?⏎Та же попытка в её рабочем дереве; уже сделанное не теряется.
+terminal_planner/tui/app.py	2899	code	Новая попытка %s · %s⏎%s⏎Это новый прогон этапа: модель будет запущена заново. Прежняя попытка остаётся в истории.
+terminal_planner/tui/app.py	2901	code	Заметка для новой попытки (необязательно, можно оставить пустой):
+terminal_planner/tui/app.py	2953	code	Журнал: сейчас нет выполняющегося или упавшего прогона.
+terminal_planner/tui/app.py	2965	code	Журнал уже читается.
+terminal_planner/tui/app.py	2976	code	Журнал уже читается.
+terminal_planner/tui/app.py	2990	code	Не выполнено: 
+terminal_planner/tui/app.py	3185	code	Наблюдение прервано: %s /attempt — продолжить.
+terminal_planner/tui/app.py	3370	code	Установка инструментов здесь недоступна (тестовый режим или явно заданный исполняемый файл).
+terminal_planner/tui/app.py	3374	code	Установка уже идёт.
+terminal_planner/tui/app.py	3407	code	Вход здесь недоступен (тестовый режим или явно заданный исполняемый файл).
+terminal_planner/tui/app.py	3410	code	Идёт установка; войти можно после неё.
+terminal_planner/tui/app.py	1687	code	Не выполнено: 
+terminal_planner/tui/app.py	1967	code	План r
+terminal_planner/tui/app.py	2415	code	Ответ на вопрос %s
+terminal_planner/tui/app.py	2446	code	%s: новая попытка запущена.
+terminal_planner/tui/app.py	2462	code	Подготовлен новый план на текущем проекте; цель и настройки те же. Модель не запускалась.
+terminal_planner/tui/app.py	2487	code	Не выполнено: 
+terminal_planner/tui/app.py	2576	code	Не выполнено: 
+terminal_planner/tui/app.py	2807	code	Не выполнено: 
+terminal_planner/tui/app.py	2825	code	Не запущено: %s Экран обновлён.
+terminal_planner/tui/app.py	2886	code	Не выполнено: 
+terminal_planner/tui/app.py	2915	code	Не остановлено: 
+terminal_planner/tui/app.py	3013	code	Подробности
+terminal_planner/tui/app.py	3050	code	%s: прогон изменился.
+terminal_planner/tui/app.py	3210	code	%s завершён: /attempt на главном экране открывает итог.
+terminal_planner/tui/app.py	3218	code	Уже выполняется: %s
+terminal_planner/tui/app.py	3274	code	Не выполнено: 
+terminal_planner/tui/app.py	3291	code	Не выполнено: 
+terminal_planner/tui/app.py	3346	code	Не выполнено: 
+terminal_planner/tui/app.py	3359	code	Наблюдение закончено.
+terminal_planner/tui/app.py	3391	code	Не выполнено: 
+terminal_planner/tui/app.py	3394	code	Установка завершена.
+terminal_planner/tui/app.py	3395	code	Установка завершена; остались замечания — см. список выше.
+terminal_planner/tui/app.py	3417	code	Этот терминал не поддерживает приостановку: выполните zplan login отдельно.
+terminal_planner/tui/app.py	3422	code	Вход прерван.
+terminal_planner/tui/app.py	3424	code	Вход завершён.
+terminal_planner/tui/app.py	1513	code	Не выполнено: 
+terminal_planner/tui/app.py	2397	code	Черновик ответа не открыт: 
+terminal_planner/tui/app.py	2401	code	Черновик ответа не открыт: состояние попытки изменилось.
+terminal_planner/tui/app.py	2448	code	%s выполняется.
+terminal_planner/tui/app.py	2459	code	Не выполнено: 
+terminal_planner/tui/app.py	2460	code	Не выполнено: 
+terminal_planner/tui/app.py	2601	code	Не выполнено: 
+terminal_planner/tui/app.py	2645	code	Не выполнено: 
+terminal_planner/tui/app.py	2656	code	Не выполнено: 
+terminal_planner/tui/app.py	2688	code	Не выполнено: 
+terminal_planner/tui/app.py	2829	code	Не запущено: 
+terminal_planner/tui/app.py	2856	code	Не выполнено: 
+terminal_planner/tui/app.py	2907	code	%s: %s — останавливать нечего.
+terminal_planner/tui/app.py	2918	code	Не остановлено: %s Экран обновлён.
+terminal_planner/tui/app.py	2960	code	Журнал недоступен: 
+terminal_planner/tui/app.py	2970	code	Журнал недоступен: 
+terminal_planner/tui/app.py	2994	code	%s выполняется; наблюдение продолжается.
+terminal_planner/tui/app.py	3012	code	Не выполнено: 
+terminal_planner/tui/app.py	3298	code	%s: прогон изменился; экран обновлён.
+terminal_planner/tui/app.py	3420	code	Вход не выполнен: 
+terminal_planner/tui/app.py	2454	code	%s: экран обновлён.
+terminal_planner/tui/app.py	2660	code	План r%s утверждён вопреки проверке. Реализация не запускалась; запуск — /run на главном экране.
+terminal_planner/tui/app.py	2836	code	%s запущен · план r%s · попытка %s
+terminal_planner/tui/app.py	2862	code	%s Экран обновлён.
+terminal_planner/tui/app.py	3195	code	%s завершён.
+terminal_planner/tui/app.py	3278	code	Изменения %s
+terminal_planner/tui/app.py	3356	code	Планировщик закончил: /view открыть план.
+terminal_planner/tui/app.py	3357	code	Планирование остановилось: /view открыть план.
+terminal_planner/tui/app.py	2665	code	План r%s утверждён. Реализация не запускалась; запуск — /run на главном экране.
+terminal_planner/tui/app.py	2668	code	Предложение r%s не утверждено; ничего не запускалось.
+terminal_planner/tui/app.py	2868	code	продолжаю ту же попытку
+terminal_planner/tui/app.py	2869	code	новая попытка запущена
+terminal_planner/tui/app.py	3239	code	Уже выполняется: %s
+terminal_planner/tui/app.py	3425	code	Вход не завершён (код %s); повторите вход: [l]. 
+terminal_planner/tui/app.py	1077	code	Дальше:
+terminal_planner/tui/app.py	3306	code	%s: новая попытка запущена.
+terminal_planner/tui/app.py	3308	code	%s выполняется.
+terminal_planner/tui/app.py	910	code	Дальше:
+terminal_planner/tui/app.py	3266	code	Ответ на вопрос %s
+terminal_planner/tui/app.py	3270	code	Что изменить в плане
+terminal_planner/tui/card_host.py	555	code	Результат ещё не экспортирован.
+terminal_planner/tui/card_host.py	620	code	Не выполнено: 
+terminal_planner/tui/card_host.py	793	code	Ответ на вопрос %s
+terminal_planner/tui/card_host.py	405	code	Не выполнено: 
+terminal_planner/tui/card_host.py	437	code	Не выполнено: 
+terminal_planner/tui/card_host.py	409	code	новая попытка запущена
+terminal_planner/tui/card_host.py	410	code	выполняется
+terminal_planner/tui/card_kinds.py	26	code	Не запущено: сначала исправьте отмеченное ниже.
+terminal_planner/tui/card_kinds.py	27	code	Пустой ответ: новая попытка не запускалась.
+terminal_planner/tui/card_kinds.py	28	code	Состояние изменилось, пока экран был открыт: показано актуальное.
+terminal_planner/tui/card_kinds.py	619	code	Не запущено:
+terminal_planner/tui/card_kinds.py	109	code	Не запущено:
+terminal_planner/tui/card_kinds.py	109	code	Не выполнено:
+terminal_planner/tui/card_kinds.py	109	code	Не остановлено:
+terminal_planner/tui/card_kinds.py	109	code	Наблюдение прервано:
+terminal_planner/tui/card_kinds.py	281	code	Задачи:\s*(\d+)\s*/\s*(\d+)
+terminal_planner/tui/card_kinds.py	534	code	Отправить
+terminal_planner/tui/card_kinds.py	593	code	Не выполнено: 
+terminal_planner/tui/chat.py	53	code	готовлю чат…
+terminal_planner/tui/chat.py	54	code	Чат недоступен.
+terminal_planner/tui/chat.py	56	code	Отправлю после текущего хода.
+terminal_planner/tui/chat.py	357	code	черновик устарел
+terminal_planner/tui/chat.py	358	code	новая ревизия
+terminal_planner/tui/chat.py	359	code	состояние плана изменилось
+terminal_planner/tui/chat.py	408	code	Сессия закрывается. Сохрани передачу дел следующей сессии: вызови zplan_state_update с полным текстом STATE (план, следующий шаг, открытые вопросы, решения). Ответь одной строкой.
+terminal_planner/tui/chat.py	410	code	Передача дел не сохранена (сбой или отмена хода): новый диалог начат без неё.
+terminal_planner/tui/chat.py	411	code	Новая сессия. Ты продолжаешь работу над проектом; прежний разговор забыт.⏎⏎STATE проекта:⏎%s⏎⏎Снимок экрана:⏎%s⏎⏎Коротко скажи, где мы и что делать дальше.
+terminal_planner/tui/chat.py	46	code	ты
+terminal_planner/tui/chat.py	46	code	арх
+terminal_planner/tui/chat.py	46	code	сбой
+terminal_planner/tui/chat.py	46	code	сброс
+terminal_planner/tui/chat.py	46	code	соб
+terminal_planner/tui/chat.py	52	code	черновик цели
+terminal_planner/tui/chat.py	52	code	черновик ответа
+terminal_planner/tui/chat.py	375	code	появился план
+terminal_planner/tui/chat.py	377	code	план исчез
+terminal_planner/tui/chat.py	1125	code	думает… %d:%02d
+terminal_planner/tui/chat.py	691	code	Начинаю новый диалог…
+terminal_planner/tui/chat.py	697	code	Сохраняю передачу дел и начинаю новый диалог…
+terminal_planner/tui/chat.py	498	code	Инструменты zplan не установлены: выполните zplan setup.
+terminal_planner/tui/chat.py	502	code	Codex не найден: %s; выполните zplan setup.
+terminal_planner/tui/chat.py	505	code	Закреплённый Codex не поддерживает нужные флаги (%s); обновите инструменты: zplan setup.
+terminal_planner/tui/chat.py	733	code	Отменяю ход…
+terminal_planner/tui/chat.py	434	code	%s повреждён.
+terminal_planner/tui/chat.py	436	code	Принятый %s удалён из проекта.
+terminal_planner/tui/chat.py	659	code	Чат ещё готовится: 
+terminal_planner/tui/chat.py	895	code	Новый диалог: прежний thread id забыт.
+terminal_planner/tui/chat.py	656	code	Пустое сообщение архитектору не отправлено.
+terminal_planner/tui/chat.py	663	code	Идёт выход: новые сообщения не отправляются.
+terminal_planner/tui/chat.py	677	code	Архитектор уже отвечает: дождитесь ответа или отмените ход [esc].
+terminal_planner/tui/chat.py	701	code	Идёт выход: новый диалог не начинается.
+terminal_planner/tui/chat.py	704	code	Архитектор отвечает: новый диалог начнётся после хода.
+terminal_planner/tui/chat.py	707	code	Чат ещё готовится: 
+terminal_planner/tui/chat.py	806	code	Ход отменён до запуска Codex: сообщение не отправлено.
+terminal_planner/tui/chat.py	1139	code	ответ %d
+terminal_planner/tui/chat.py	811	code	Ход архитектора не завершён.
+terminal_planner/tui/chat_view.py	19	code	Чат архитектора недоступен: проект не выбран.
+terminal_planner/tui/controller.py	297	code	Черновик ответа без корректной идентичности попытки: открыть нельзя.
+terminal_planner/tui/controller.py	298	code	%s: попытка ещё выполняется, черновик ответа отвечает только завершённой.
+terminal_planner/tui/controller.py	299	code	%s: этот итог не предлагает ответ, черновик ответа неприменим.
+terminal_planner/tui/controller.py	587	code	Интерфейс закрывается: лента событий недоступна.
+terminal_planner/tui/controller.py	385	code	Планировщик в этой сессии недоступен.
+terminal_planner/tui/controller.py	580	code	Лента событий недоступна из рабочего потока.
+terminal_planner/tui/controller.py	722	code	Интерфейс закрывается: действие не запущено.
+terminal_planner/tui/controller.py	782	code	Неизвестный инструмент: %s.
+terminal_planner/tui/controller.py	792	code	Неверный аргумент token.
+terminal_planner/tui/controller.py	804	code	план пересмотрен
+terminal_planner/tui/controller.py	812	code	Профиль процесса изменился после предпросмотра: проверьте новые значения и подтвердите запуск заново.
+terminal_planner/tui/controller.py	828	code	начата другая попытка
+terminal_planner/tui/controller.py	841	code	план пересмотрен
+terminal_planner/tui/controller.py	845	code	Профиль процесса изменился после проверки плана: проверьте конфигурацию и утвердите заново.
+terminal_planner/tui/controller.py	937	code	Профиль процесса изменился после решения политики: проверьте новые значения и повторите действие.
+terminal_planner/tui/controller.py	977	code	Установка инструментов здесь недоступна.
+terminal_planner/tui/controller.py	1397	code	Снимок для архитектора недоступен.
+terminal_planner/tui/controller.py	595	code	Лента событий не ответила вовремя.
+terminal_planner/tui/controller.py	636	code	Неизвестный инструмент: %s.
+terminal_planner/tui/controller.py	726	code	исход неизвестен
+terminal_planner/tui/controller.py	735	code	Нет аргумента %s.
+terminal_planner/tui/controller.py	739	code	Неверный аргумент %s.
+terminal_planner/tui/controller.py	749	code	Неизвестный инструмент: %s.
+terminal_planner/tui/controller.py	752	code	Неизвестный аргумент %s.
+terminal_planner/tui/controller.py	757	code	Неверный аргумент revision.
+terminal_planner/tui/controller.py	765	code	Неверный аргумент revision.
+terminal_planner/tui/controller.py	777	code	Неверный аргумент revision.
+terminal_planner/tui/controller.py	807	code	Не готово к запуску: 
+terminal_planner/tui/controller.py	815	code	Запуск %s делает владелец своим ключом в интерфейсе zplan (политика автономии).
+terminal_planner/tui/controller.py	848	code	Утверждение плана r%s делает владелец своим ключом в интерфейсе zplan (политика автономии).
+terminal_planner/tui/controller.py	862	code	Не готово к продолжению: 
+terminal_planner/tui/controller.py	866	code	Продолжение %s делает владелец своим ключом в интерфейсе zplan (политика автономии).
+terminal_planner/tui/controller.py	884	code	Не готово к новой попытке: 
+terminal_planner/tui/controller.py	888	code	Новую попытку %s делает владелец своим ключом в интерфейсе zplan (политика автономии).
+terminal_planner/tui/controller.py	923	code	Слияние %s делает владелец своим ключом в интерфейсе zplan (политика автономии).
+terminal_planner/tui/controller.py	997	code	Профиль процесса в этой сессии не используется.
+terminal_planner/tui/controller.py	692	code	Запрос %s не принят: id уже занят или %d запросов ещё не завершены.
+terminal_planner/tui/controller.py	1297	code	Журнал %s · попытка %s
+terminal_planner/tui/controller.py	1357	code	Предложение меняет план: создана revision r%s; её нужно утвердить.
+terminal_planner/tui/controller.py	1366	code	Изменение плана: создана revision r%s; её нужно утвердить.
+terminal_planner/tui/controller.py	1218	code	%s: прогонов нет.
+terminal_planner/tui/modals.py	230	code	Что изменить в плане
+terminal_planner/tui/modals.py	312	code	%s %s · попытка %s
+terminal_planner/tui/modals.py	41	code	Закрыть
+terminal_planner/tui/modals.py	60	code	Нет
+terminal_planner/tui/modals.py	60	code	Кнопка
+terminal_planner/tui/modals.py	61	code	Кнопка
+terminal_planner/tui/modals.py	93	code	Кнопка
+terminal_planner/tui/modals.py	93	code	Кнопка
+terminal_planner/tui/modals.py	162	code	Выше
+terminal_planner/tui/modals.py	162	code	Ниже
+terminal_planner/tui/modals.py	163	code	Выбрать
+terminal_planner/tui/modals.py	163	code	Оставить
+terminal_planner/tui/modals.py	228	code	Назад
+terminal_planner/tui/modals.py	282	code	Закрыть
+terminal_planner/tui/modals.py	325	code	Закрыть
+terminal_planner/tui/modals.py	325	code	Кнопка
+terminal_planner/tui/modals.py	326	code	Кнопка
+terminal_planner/tui/modals.py	327	code	Прокрутка
+terminal_planner/tui/modals.py	328	code	Прокрутка
+terminal_planner/tui/modals.py	329	code	Прокрутка
+terminal_planner/tui/modals.py	330	code	Прокрутка
+terminal_planner/tui/modals.py	398	code	%s кнопки %s. %s — выбор, %s — нажать, %s — закрыть.
+terminal_planner/tui/modals.py	130	code	Не выполнено: 
+terminal_planner/tui/scheme.py	53	code	предпроверка
+terminal_planner/tui/scheme.py	54	code	выбор первой задачи
+terminal_planner/tui/scheme.py	55	code	выбор задачи
+terminal_planner/tui/scheme.py	56	code	проверка выбора
+terminal_planner/tui/scheme.py	57	code	исполнитель
+terminal_planner/tui/scheme.py	58	code	ревью: приёмка
+terminal_planner/tui/scheme.py	59	code	ревью: код
+terminal_planner/tui/scheme.py	60	code	учёт результата
+terminal_planner/tui/scheme.py	61	code	решение по задаче
+terminal_planner/tui/scheme.py	62	code	итоговая проверка
+terminal_planner/tui/scheme.py	63	code	доработка этапа
+terminal_planner/tui/scheme.py	64	code	проверка объёма
+terminal_planner/tui/scheme.py	65	code	повторная итоговая проверка
+terminal_planner/tui/scheme.py	66	code	планирование
+terminal_planner/tui/scheme.py	67	code	проверка плана
+terminal_planner/tui/scheme.py	68	code	идёт
+terminal_planner/tui/scheme.py	69	code	готово
+terminal_planner/tui/scheme.py	70	code	отклонено
+terminal_planner/tui/scheme.py	71	code	ошибка
+terminal_planner/tui/scheme.py	72	code	ждёт
+terminal_planner/tui/scheme.py	73	code	пропущено
+terminal_planner/tui/scheme.py	74	code	если нужно
+terminal_planner/tui/scheme.py	75	code	{name} · {n} из {max} / до {max} раз
+terminal_planner/tui/scheme.py	76	code	если нужно: {name}
+terminal_planner/tui/scheme.py	77	code	задачи по очереди
+terminal_planner/tui/scheme.py	78	code	раунды ревью
+terminal_planner/tui/scheme.py	79	code	раунды доработки
+terminal_planner/tui/scheme.py	80	code	доработка после итоговой проверки
+terminal_planner/tui/scheme.py	81	code	✓ ещё {n} позади ↑
+terminal_planner/tui/scheme.py	82	code	◌ ещё {n} впереди: {names} ↓
+terminal_planner/tui/screens.py	93	code	План
+terminal_planner/tui/screens.py	251	code	Готовность
+terminal_planner/tui/screens.py	252	code	Журнал
+terminal_planner/tui/screens.py	253	code	Роли (модель / усилие)
+terminal_planner/tui/screens.py	22	code	Назад
+terminal_planner/tui/screens.py	22	code	Кнопка
+terminal_planner/tui/screens.py	23	code	Кнопка
+terminal_planner/tui/screens.py	71	code	Прокрутка
+terminal_planner/tui/screens.py	72	code	Прокрутка
+terminal_planner/tui/screens.py	73	code	Прокрутка
+terminal_planner/tui/screens.py	74	code	Прокрутка
+terminal_planner/tui/screens.py	232	code	Прокрутка
+terminal_planner/tui/screens.py	233	code	Прокрутка
+terminal_planner/tui/screens.py	234	code	Прокрутка
+terminal_planner/tui/screens.py	235	code	Прокрутка
+terminal_planner/tui/screens.py	272	code	Проверка…
+terminal_planner/tui/screens.py	295	code	проверка…
+terminal_planner/tui/screens.py	125	code	План%s · %s
+terminal_planner/tui/screens.py	203	code	Утвердить план r%s? Реализация не запускается.
+terminal_planner/tui/screens.py	217	code	Отказаться от предложения r%s? Ничего не запустится, предложение останется как есть.
+terminal_planner/tui/screens.py	269	code	Настройки · 
+terminal_planner/tui/screens.py	303	code	Роли ещё не загружены.
+terminal_planner/tui/screens.py	127	code	Загрузка…
+terminal_planner/tui/screens.py	210	code	Утвердить план r%s вопреки проверке?
+terminal_planner/tui/screens.py	211	code	Причина (одна строка, 10–500 символов); проверка плана остаётся в записи.
+terminal_planner/tui/screens.py	140	code	Планировщик работает…
+terminal_planner/tui/strings.py	72	catalog	Русский
+terminal_planner/tui/strings.py	82	catalog	Разговор
+terminal_planner/tui/strings.py	83	catalog	Схема
+terminal_planner/tui/strings.py	84	catalog	План
+terminal_planner/tui/strings.py	85	catalog	Что происходит
+terminal_planner/tui/strings.py	87	catalog	◐ идёт ✓ готово ✗ отклонено ◌ ждёт
+terminal_planner/tui/strings.py	91	catalog	Цель
+terminal_planner/tui/strings.py	92	catalog	Этап
+terminal_planner/tui/strings.py	93	catalog	Задача
+terminal_planner/tui/strings.py	94	catalog	Осталось: …
+terminal_planner/tui/strings.py	97	catalog	архитектор
+terminal_planner/tui/strings.py	98	catalog	планирование
+terminal_planner/tui/strings.py	99	catalog	проверка плана
+terminal_planner/tui/strings.py	100	catalog	исполнитель
+terminal_planner/tui/strings.py	101	catalog	ревью: приёмка
+terminal_planner/tui/strings.py	102	catalog	ревью: код
+terminal_planner/tui/strings.py	103	catalog	итоговая проверка
+terminal_planner/tui/strings.py	104	catalog	слияние
+terminal_planner/tui/strings.py	105	catalog	предпроверка
+terminal_planner/tui/strings.py	106	catalog	выбор первой задачи
+terminal_planner/tui/strings.py	107	catalog	выбор задачи
+terminal_planner/tui/strings.py	108	catalog	проверка выбора
+terminal_planner/tui/strings.py	109	catalog	учёт результата
+terminal_planner/tui/strings.py	110	catalog	решение по задаче
+terminal_planner/tui/strings.py	111	catalog	доработка этапа
+terminal_planner/tui/strings.py	112	catalog	проверка объёма
+terminal_planner/tui/strings.py	113	catalog	повторная итоговая проверка
+terminal_planner/tui/strings.py	116	catalog	идёт
+terminal_planner/tui/strings.py	117	catalog	готово
+terminal_planner/tui/strings.py	118	catalog	отклонено
+terminal_planner/tui/strings.py	119	catalog	ошибка
+terminal_planner/tui/strings.py	120	catalog	ждёт
+terminal_planner/tui/strings.py	121	catalog	пропущено
+terminal_planner/tui/strings.py	122	catalog	если нужно
+terminal_planner/tui/strings.py	125	catalog	назад: исполнитель
+terminal_planner/tui/strings.py	126	catalog	раунд ревью 1 из 3
+terminal_planner/tui/strings.py	128	catalog	{name} · {n} из {max} / до {max} раз
+terminal_planner/tui/strings.py	130	catalog	если нужно: {name}
+terminal_planner/tui/strings.py	131	catalog	задачи по очереди
+terminal_planner/tui/strings.py	132	catalog	раунды ревью
+terminal_planner/tui/strings.py	133	catalog	раунды доработки
+terminal_planner/tui/strings.py	134	catalog	доработка после итоговой проверки
+terminal_planner/tui/strings.py	136	catalog	✓ ещё {n} позади ↑
+terminal_planner/tui/strings.py	137	catalog	◌ ещё {n} впереди: {names} ↓
+terminal_planner/tui/strings.py	142	catalog	{stage} идёт {h:mm:ss}
+terminal_planner/tui/strings.py	144	catalog	последнее: {what} · {m:ss} назад
+terminal_planner/tui/strings.py	146	catalog	! без присмотра — /status подключиться
+terminal_planner/tui/strings.py	150	catalog	панель
+terminal_planner/tui/strings.py	151	catalog	схема/план
+terminal_planner/tui/strings.py	152	catalog	команды
+terminal_planner/tui/strings.py	153	catalog	выйти (работа продолжится)
+terminal_planner/tui/strings.py	156	catalog	проверка…
+terminal_planner/tui/strings.py	157	catalog	✓ готов
+terminal_planner/tui/strings.py	158	catalog	ещё {n}
+terminal_planner/tui/strings.py	159	catalog	проверка не пройдена
+terminal_planner/tui/strings.py	160	catalog	проверки не пройдены
+terminal_planner/tui/strings.py	161	catalog	проверок не пройдено
+terminal_planner/tui/strings.py	162	catalog	HEAD отсоединён
+terminal_planner/tui/strings.py	167	catalog	Привет. Расскажи, что хочешь сделать в проекте — обсудим и составим план. Пока ты не скажешь «да», ничего не запускается.
+terminal_planner/tui/strings.py	171	catalog	Напиши архитектору… или / для команд
+terminal_planner/tui/strings.py	173	catalog	Разговор с архитектором
+terminal_planner/tui/strings.py	174	catalog	Разговор · ←→ вкладки
+terminal_planner/tui/strings.py	175	catalog	сообщение архитектору
+terminal_planner/tui/strings.py	176	catalog	Архитектор
+terminal_planner/tui/strings.py	177	catalog	Планировщик
+terminal_planner/tui/strings.py	178	catalog	Прогон {stage}
+terminal_planner/tui/strings.py	179	catalog	Планировщик работает…
+terminal_planner/tui/strings.py	180	catalog	Наблюдение {stage}…
+terminal_planner/tui/strings.py	181	catalog	Остановить планирование плана r{v}?
+terminal_planner/tui/strings.py	184	catalog	Остановка {stage} запрошена; жду подтверждения Zeroshot.
+terminal_planner/tui/strings.py	186	catalog	Читаю журнал Zeroshot…
+terminal_planner/tui/strings.py	189	catalog	Завершаю операцию, не прерывая её. Выход сразу после неё.
+terminal_planner/tui/strings.py	192	catalog	Чат архитектора недоступен в демо (--fixture).
+terminal_planner/tui/strings.py	195	catalog	Чат архитектора недоступен: проект не выбран.
+terminal_planner/tui/strings.py	197	catalog	ходов {turns} · токенов {tokens}
+terminal_planner/tui/strings.py	199	catalog	х {turns} · т {tokens}
+terminal_planner/tui/strings.py	201	catalog	сессия длинная: /new
+terminal_planner/tui/strings.py	202	catalog	ты
+terminal_planner/tui/strings.py	205	catalog	сбой
+terminal_planner/tui/strings.py	206	catalog	сброс
+terminal_planner/tui/strings.py	208	catalog	события
+terminal_planner/tui/strings.py	209	catalog	прервано
+terminal_planner/tui/strings.py	212	catalog	Черновик цели
+terminal_planner/tui/strings.py	213	catalog	✓ отправлен планировщику {time}
+terminal_planner/tui/strings.py	216	catalog	Составить план из этого черновика? Полный текст — во вкладке «Черновик цели».
+terminal_planner/tui/strings.py	218	catalog	да, составить план
+terminal_planner/tui/strings.py	219	catalog	нет
+terminal_planner/tui/strings.py	220	catalog	План · {stages} · {tasks}
+terminal_planner/tui/strings.py	222	catalog	✓ утверждён {time}
+terminal_planner/tui/strings.py	224	catalog	План проверен и покрывает цель. Утвердить? Справа — вкладка «План».
+terminal_planner/tui/strings.py	228	catalog	Проект изменился после планирования: утвердить нельзя. Доработка пересоберёт план.
+terminal_planner/tui/strings.py	230	catalog	доработать
+terminal_planner/tui/strings.py	231	catalog	да, утвердить
+terminal_planner/tui/strings.py	232	catalog	нет, доработать
+terminal_planner/tui/strings.py	233	catalog	{stage} готов
+terminal_planner/tui/strings.py	235	catalog	{done} из {total} задач приняты, итоговая проверка пройдена. Влить в main?
+terminal_planner/tui/strings.py	237	catalog	влить
+terminal_planner/tui/strings.py	238	catalog	посмотреть изменения
+terminal_planner/tui/strings.py	239	catalog	Нужно твоё решение · {task}
+terminal_planner/tui/strings.py	242	catalog	Ревью отклонило {task} {count} раза подряд: {why}. Что делаем?
+terminal_planner/tui/strings.py	245	catalog	или ответь словами, например: «убери тест, сделаем в M3»
+terminal_planner/tui/strings.py	247	catalog	упростить
+terminal_planner/tui/strings.py	248	catalog	разбить
+terminal_planner/tui/strings.py	249	catalog	пропустить
+terminal_planner/tui/strings.py	250	catalog	! Ошибка · {task}
+terminal_planner/tui/strings.py	251	catalog	Остановлено · {task}
+terminal_planner/tui/strings.py	254	catalog	Исполнитель остановился: модель не ответила за 10 минут (выход 1). Остальное цело, ветка на месте.
+terminal_planner/tui/strings.py	257	catalog	новая попытка
+terminal_planner/tui/strings.py	258	catalog	подробнее
+terminal_planner/tui/strings.py	259	catalog	или {commands}
+terminal_planner/tui/strings.py	263	catalog	Итоговая проверка пройдена. Влить в main?
+terminal_planner/tui/strings.py	265	catalog	✓ {stage} влит в main {time}
+terminal_planner/tui/strings.py	269	catalog	отправить черновик ответа
+terminal_planner/tui/strings.py	270	catalog	✓ ответ отправлен {time}
+terminal_planner/tui/strings.py	273	catalog	↻ новая попытка {time}
+terminal_planner/tui/strings.py	276	catalog	Сейчас
+terminal_planner/tui/strings.py	277	catalog	План
+terminal_planner/tui/strings.py	278	catalog	План r{v}
+terminal_planner/tui/strings.py	279	catalog	Загрузка…
+terminal_planner/tui/strings.py	280	catalog	Не открыто: {error}
+terminal_planner/tui/strings.py	281	catalog	Сейчас ничего не выполняется.
+terminal_planner/tui/strings.py	284	catalog	[p] — план: цель, ход планирования, предложение, утверждение.
+terminal_planner/tui/strings.py	286	catalog	Черновик цели
+terminal_planner/tui/strings.py	287	catalog	Изменения {stage}
+terminal_planner/tui/strings.py	290	catalog	Здесь появится схема работы, когда ты запустишь план.⏎⏎←→ или клик по вкладке — переключить · / — команды
+terminal_planner/tui/strings.py	294	catalog	Это получит планировщик — целиком, без чата:
+terminal_planner/tui/strings.py	296	catalog	Плана пока нет.
+terminal_planner/tui/strings.py	299	catalog	Расскажи архитектору, что хочешь сделать. Когда договоритесь, он предложит черновик цели; ты скажешь «да» — и планировщик составит план.
+terminal_planner/tui/strings.py	302	catalog	План составляется…
+terminal_planner/tui/strings.py	304	catalog	Обычно 1–3 минуты. Ход — на вкладке «Схема».
+terminal_planner/tui/strings.py	306	catalog	пока ничего не происходит
+terminal_planner/tui/strings.py	308	catalog	{stage} · идёт
+terminal_planner/tui/strings.py	309	catalog	{stage} · готов, ждёт слияния
+terminal_planner/tui/strings.py	311	catalog	{stage} · ждёт тебя
+terminal_planner/tui/strings.py	312	catalog	{stage} · остановлен: ошибка
+terminal_planner/tui/strings.py	314	catalog	Остановлено: ошибка
+terminal_planner/tui/strings.py	315	catalog	{stage} · остановлен вами
+terminal_planner/tui/strings.py	317	catalog	Планирование · идёт
+terminal_planner/tui/strings.py	318	catalog	по черновику цели «{goal}»
+terminal_planner/tui/strings.py	320	catalog	План готов · ждёт твоего да
+terminal_planner/tui/strings.py	322	catalog	Черновик цели · ещё не отправлен
+terminal_planner/tui/strings.py	324	catalog	notes · работы нет
+terminal_planner/tui/strings.py	325	catalog	задача
+terminal_planner/tui/strings.py	326	catalog	задачи
+terminal_planner/tui/strings.py	328	catalog	черновик плана — ждёт твоего да
+terminal_planner/tui/strings.py	330	catalog	влит {time}
+terminal_planner/tui/strings.py	331	catalog	готов, ждёт слияния
+terminal_planner/tui/strings.py	334	catalog	итоговая проверка → слияние в main (твоё ok)
+terminal_planner/tui/strings.py	336	catalog	принята
+terminal_planner/tui/strings.py	337	catalog	ревью, раунд {n} из {max}
+terminal_planner/tui/strings.py	340	catalog	Требования и проверки каждой задачи — спроси архитектора.
+terminal_planner/tui/strings.py	342	catalog	файл урезан: первые {shown} из {total} КБ
+terminal_planner/tui/strings.py	345	catalog	изменений нет
+terminal_planner/tui/strings.py	348	catalog	раунды плана
+terminal_planner/tui/strings.py	349	catalog	читает код
+terminal_planner/tui/strings.py	350	catalog	сверяет с целью
+terminal_planner/tui/strings.py	351	catalog	ждёт тебя
+terminal_planner/tui/strings.py	352	catalog	модель не ответила
+terminal_planner/tui/strings.py	357	catalog	{n} задача
+terminal_planner/tui/strings.py	358	catalog	{n} задачи
+terminal_planner/tui/strings.py	359	catalog	{n} задач
+terminal_planner/tui/strings.py	360	catalog	{n} проверка
+terminal_planner/tui/strings.py	361	catalog	{n} проверки
+terminal_planner/tui/strings.py	362	catalog	{n} проверок
+terminal_planner/tui/strings.py	363	catalog	{n} этап
+terminal_planner/tui/strings.py	364	catalog	{n} этапа
+terminal_planner/tui/strings.py	365	catalog	{n} этапов
+terminal_planner/tui/strings.py	368	catalog	план составляется {clock}
+terminal_planner/tui/strings.py	370	catalog	план ждёт твоего да
+terminal_planner/tui/strings.py	372	catalog	{stage} ждёт слияния
+terminal_planner/tui/strings.py	373	catalog	{stage} ждёт твоего решения
+terminal_planner/tui/strings.py	375	catalog	{stage} остановлен: ошибка · /status
+terminal_planner/tui/strings.py	377	catalog	остановлено: ошибка · /status
+terminal_planner/tui/strings.py	379	catalog	{stage} остановлен вами
+terminal_planner/tui/strings.py	381	catalog	работы нет
+terminal_planner/tui/strings.py	382	catalog	вкладки
+terminal_planner/tui/strings.py	383	catalog	команды
+terminal_planner/tui/strings.py	384	catalog	закрыть
+terminal_planner/tui/strings.py	385	catalog	выйти
+terminal_planner/tui/strings.py	386	catalog	(работа продолжится)
+terminal_planner/tui/strings.py	389	catalog	спланировать цель: /plan <цель>
+terminal_planner/tui/strings.py	391	catalog	утвердить план или решение на карточке
+terminal_planner/tui/strings.py	393	catalog	отказаться от карточки
+terminal_planner/tui/strings.py	394	catalog	открыть экран плана
+terminal_planner/tui/strings.py	395	catalog	запустить следующий этап
+terminal_planner/tui/strings.py	397	catalog	открыть попытку выбранного этапа (идущая снова под наблюдением)
+terminal_planner/tui/strings.py	399	catalog	открыть черновик ответа выбранного этапа
+terminal_planner/tui/strings.py	401	catalog	влить готовый этап в main
+terminal_planner/tui/strings.py	403	catalog	показать изменения этапа справа
+terminal_planner/tui/strings.py	406	catalog	открыть файл справа (только просмотр): /open AGENTS.md
+terminal_planner/tui/strings.py	408	catalog	показать конец журнала прогона
+terminal_planner/tui/strings.py	410	catalog	итог, затем план и диагностика
+terminal_planner/tui/strings.py	412	catalog	try the failed step again (the card's «новая попытка»)
+terminal_planner/tui/strings.py	413	catalog	повторить сорвавшийся шаг (кнопка «новая попытка» на карточке)
+terminal_planner/tui/strings.py	415	catalog	что с работой и с движком
+terminal_planner/tui/strings.py	417	catalog	остановить текущую работу
+terminal_planner/tui/strings.py	418	catalog	UI language: English · Русский · 中文
+terminal_planner/tui/strings.py	418	catalog	язык интерфейса: English · Русский · 中文
+terminal_planner/tui/strings.py	419	catalog	界面语言：English · Русский · 中文
+terminal_planner/tui/strings.py	421	catalog	новая сессия архитектора (план и STATE переносятся)
+terminal_planner/tui/strings.py	423	catalog	настройка проекта и входа
+terminal_planner/tui/strings.py	425	catalog	что умеет экран
+terminal_planner/tui/strings.py	426	catalog	выйти (работа продолжится)
+terminal_planner/tui/strings.py	429	catalog	Язык: {name}
+terminal_planner/tui/strings.py	430	catalog	Язык интерфейса
+terminal_planner/tui/strings.py	432	catalog	нет команды {name} · /help — список
+terminal_planner/tui/strings.py	435	catalog	{name}: сейчас нечего — нет карточки с этим действием
+terminal_planner/tui/strings.py	437	catalog	{name}: в лабе не показано
+terminal_planner/tui/strings.py	439	catalog	плана нет — /plan <цель>
+terminal_planner/tui/strings.py	441	catalog	напишите /plan <цель>
+terminal_planner/tui/strings.py	444	catalog	{name}: укажи путь, например /open AGENTS.md
+terminal_planner/tui/strings.py	446	catalog	unsupported language: English · Русский · 中文
+terminal_planner/tui/strings.py	447	catalog	язык не поддерживается: English · Русский · 中文
+terminal_planner/tui/strings.py	448	catalog	不支持的语言：English · Русский · 中文
+terminal_planner/tui/strings.py	449	catalog	файл пуст
+terminal_planner/tui/strings.py	450	catalog	файл вне проекта: {name}
+terminal_planner/tui/strings.py	452	catalog	нет такого файла: {name}
+terminal_planner/tui/strings.py	454	catalog	это папка: {name}
+terminal_planner/tui/strings.py	456	catalog	двоичный файл: {name}
+terminal_planner/tui/strings.py	458	catalog	файлы открываются, когда работа стоит: сейчас идёт {what}
+terminal_planner/tui/strings.py	460	catalog	нет такой команды · /help
+terminal_planner/tui/viewer.py	49	code	…показаны первые {shown} КБ из {total}
+terminal_planner/tui/viewer.py	50	code	Изменений нет.
+terminal_planner/update.py	130	code	zplan обновлён до %s.
+terminal_planner/update.py	131	code	Откат: направьте launcher на app/%s и восстановите production/v3 из копии выше (docs/UPGRADE.md).
+terminal_planner/update.py	57	code	Не удалось прочитать релизы %s: %s
+terminal_planner/update.py	75	code	Не удалось получить релиз v%s из %s: %s
+terminal_planner/update.py	86	code	В релизе нет install.py: 
+terminal_planner/update.py	87	code	Устанавливаю новую версию через 
+terminal_planner/update.py	102	code	В %s нет релизов vX.Y.Z.
+terminal_planner/update.py	106	code	Текущая версия zplan %s; новейший релиз %s.
+terminal_planner/update.py	109	code	zplan %s уже новейший: обновление не нужно.
+terminal_planner/update.py	128	code	zplan обновлён до %s, но zplan setup завершился с кодом %d; повторите zplan setup.
+terminal_planner/update.py	124	code	zplan обновлён до %s, но не удалось запустить %s setup (%s); выполните zplan setup вручную.
+terminal_planner/update.py	57	code	git ls-remote не сработал
+terminal_planner/update.py	76	code	git clone не сработал
+terminal_planner/update.py	115	code	Установка v%s не завершена; launcher и store не изменены.

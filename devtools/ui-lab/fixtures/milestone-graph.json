@@ -1,0 +1,768 @@
+{
+ "kind": "seq",
+ "name": "milestone",
+ "children": [
+  {
+   "kind": "verifier",
+   "name": "select_init",
+   "worker": "zplan.milestone.select-init@1"
+  },
+  {
+   "kind": "choice",
+   "name": "select_init_result",
+   "otherwise": {
+    "kind": "seq",
+    "name": "empty_final_stage",
+    "children": [
+     {
+      "kind": "verifier",
+      "name": "empty_final_verify",
+      "worker": "zplan.milestone.empty-final-verify@1"
+     },
+     {
+      "kind": "choice",
+      "name": "empty_final_result",
+      "otherwise": {
+       "kind": "seq",
+       "name": "empty_final_repair",
+       "children": [
+        {
+         "kind": "loop",
+         "name": "empty_repair_loop",
+         "maxIterations": 3,
+         "body": {
+          "kind": "seq",
+          "name": "empty_repair_iteration",
+          "children": [
+           {
+            "kind": "step",
+            "name": "empty_repair",
+            "worker": "zplan.milestone.empty-repair@1"
+           },
+           {
+            "kind": "choice",
+            "name": "empty_repair_result",
+            "otherwise": {
+             "kind": "seq",
+             "name": "empty_verify_stage",
+             "children": [
+              {
+               "kind": "verifier",
+               "name": "empty_scope_verify",
+               "worker": "zplan.milestone.empty-scope-verify@1"
+              },
+              {
+               "kind": "choice",
+               "name": "empty_scope_verify_result",
+               "otherwise": {
+                "kind": "verifier",
+                "name": "empty_final_reverify",
+                "worker": "zplan.milestone.empty-final-reverify@1"
+               },
+               "branches": [
+                {
+                 "node": {
+                  "kind": "fail",
+                  "name": "empty_scope_verify_failed"
+                 },
+                 "when": {
+                  "kind": "in",
+                  "value": {
+                   "name": "empty_scope_verify",
+                   "source": "error",
+                   "field": null
+                  },
+                  "labels": [
+                   "timeout",
+                   "crash",
+                   "malformed",
+                   "refusal"
+                  ]
+                 }
+                }
+               ]
+              }
+             ]
+            },
+            "branches": [
+             {
+              "node": {
+               "kind": "fail",
+               "name": "empty_repair_failed"
+              },
+              "when": {
+               "kind": "in",
+               "value": {
+                "name": "empty_repair",
+                "source": "error",
+                "field": null
+               },
+               "labels": [
+                "timeout",
+                "crash",
+                "malformed",
+                "refusal"
+               ]
+              }
+             }
+            ]
+           }
+          ]
+         }
+        },
+        {
+         "kind": "choice",
+         "name": "empty_final_repair_result",
+         "otherwise": {
+          "kind": "succeed",
+          "name": "empty_final_exhausted"
+         },
+         "branches": [
+          {
+           "node": {
+            "kind": "fail",
+            "name": "empty_final_reverify_failed"
+           },
+           "when": {
+            "kind": "in",
+            "value": {
+             "name": "empty_final_reverify",
+             "source": "error",
+             "field": null
+            },
+            "labels": [
+             "timeout",
+             "crash",
+             "malformed",
+             "refusal"
+            ]
+           }
+          },
+          {
+           "node": {
+            "kind": "succeed",
+            "name": "empty_repaired"
+           },
+           "when": {
+            "kind": "in",
+            "value": {
+             "name": "empty_repair_loop",
+             "source": "group",
+             "field": "terminated"
+            },
+            "labels": [
+             "converged"
+            ]
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "branches": [
+       {
+        "node": {
+         "kind": "fail",
+         "name": "empty_final_verify_failed"
+        },
+        "when": {
+         "kind": "in",
+         "value": {
+          "name": "empty_final_verify",
+          "source": "error",
+          "field": null
+         },
+         "labels": [
+          "timeout",
+          "crash",
+          "malformed",
+          "refusal"
+         ]
+        }
+       },
+       {
+        "node": {
+         "kind": "succeed",
+         "name": "empty_done"
+        },
+        "when": {
+         "kind": "in",
+         "value": {
+          "name": "empty_final_verify",
+          "source": "signal",
+          "field": "verdict"
+         },
+         "labels": [
+          "accepted"
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "branches": [
+    {
+     "node": {
+      "kind": "fail",
+      "name": "select_init_failed"
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "select_init",
+       "source": "error",
+       "field": null
+      },
+      "labels": [
+       "timeout",
+       "crash",
+       "malformed",
+       "refusal"
+      ]
+     }
+    },
+    {
+     "node": {
+      "kind": "fail",
+      "name": "select_init_invalid"
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "select_init",
+       "source": "signal",
+       "field": "queue"
+      },
+      "labels": [
+       "invalid"
+      ]
+     }
+    },
+    {
+     "node": {
+      "kind": "seq",
+      "name": "task_stage",
+      "children": [
+       {
+        "kind": "loop",
+        "name": "task_loop",
+        "maxIterations": 20,
+        "body": {
+         "kind": "seq",
+         "name": "task_iteration",
+         "children": [
+          {
+           "kind": "step",
+           "name": "select",
+           "worker": "zplan.milestone.select@1"
+          },
+          {
+           "kind": "choice",
+           "name": "select_result",
+           "otherwise": {
+            "kind": "seq",
+            "name": "selection_stage",
+            "children": [
+             {
+              "kind": "verifier",
+              "name": "select_verify",
+              "worker": "zplan.milestone.select-verify@1"
+             },
+             {
+              "kind": "choice",
+              "name": "select_verify_result",
+              "otherwise": {
+               "kind": "seq",
+               "name": "review_stage",
+               "children": [
+                {
+                 "kind": "loop",
+                 "name": "review_loop",
+                 "maxIterations": 4,
+                 "body": {
+                  "kind": "seq",
+                  "name": "review_iteration",
+                  "children": [
+                   {
+                    "kind": "step",
+                    "name": "worker",
+                    "worker": "zplan.milestone.worker@1"
+                   },
+                   {
+                    "kind": "choice",
+                    "name": "worker_result",
+                    "otherwise": {
+                     "kind": "par",
+                     "name": "reviews",
+                     "branches": [
+                      {
+                       "kind": "verifier",
+                       "name": "acceptance_review",
+                       "worker": "zplan.milestone.acceptance-review@1"
+                      },
+                      {
+                       "kind": "verifier",
+                       "name": "code_review",
+                       "worker": "zplan.milestone.code-review@1"
+                      }
+                     ]
+                    },
+                    "branches": [
+                     {
+                      "node": {
+                       "kind": "fail",
+                       "name": "worker_failed"
+                      },
+                      "when": {
+                       "kind": "in",
+                       "value": {
+                        "name": "worker",
+                        "source": "error",
+                        "field": null
+                       },
+                       "labels": [
+                        "timeout",
+                        "crash",
+                        "malformed",
+                        "refusal"
+                       ]
+                      }
+                     }
+                    ]
+                   }
+                  ]
+                 }
+                },
+                {
+                 "kind": "choice",
+                 "name": "review_result",
+                 "otherwise": {
+                  "kind": "step",
+                  "name": "steward_apply",
+                  "worker": "zplan.milestone.steward-apply@1"
+                 },
+                 "branches": [
+                  {
+                   "node": {
+                    "kind": "fail",
+                    "name": "acceptance_review_failed"
+                   },
+                   "when": {
+                    "kind": "in",
+                    "value": {
+                     "name": "acceptance_review",
+                     "source": "error",
+                     "field": null
+                    },
+                    "labels": [
+                     "timeout",
+                     "crash",
+                     "malformed",
+                     "refusal"
+                    ]
+                   }
+                  },
+                  {
+                   "node": {
+                    "kind": "fail",
+                    "name": "code_review_failed"
+                   },
+                   "when": {
+                    "kind": "in",
+                    "value": {
+                     "name": "code_review",
+                     "source": "error",
+                     "field": null
+                    },
+                    "labels": [
+                     "timeout",
+                     "crash",
+                     "malformed",
+                     "refusal"
+                    ]
+                   }
+                  }
+                 ]
+                }
+               ]
+              },
+              "branches": [
+               {
+                "node": {
+                 "kind": "fail",
+                 "name": "select_verify_failed"
+                },
+                "when": {
+                 "kind": "in",
+                 "value": {
+                  "name": "select_verify",
+                  "source": "error",
+                  "field": null
+                 },
+                 "labels": [
+                  "timeout",
+                  "crash",
+                  "malformed",
+                  "refusal"
+                 ]
+                }
+               },
+               {
+                "node": {
+                 "kind": "fail",
+                 "name": "selection_invalid"
+                },
+                "when": {
+                 "kind": "in",
+                 "value": {
+                  "name": "select_verify",
+                  "source": "signal",
+                  "field": "selection"
+                 },
+                 "labels": [
+                  "invalid"
+                 ]
+                }
+               }
+              ]
+             }
+            ]
+           },
+           "branches": [
+            {
+             "node": {
+              "kind": "fail",
+              "name": "select_failed"
+             },
+             "when": {
+              "kind": "in",
+              "value": {
+               "name": "select",
+               "source": "error",
+               "field": null
+              },
+              "labels": [
+               "timeout",
+               "crash",
+               "malformed",
+               "refusal"
+              ]
+             }
+            }
+           ]
+          },
+          {
+           "kind": "verifier",
+           "name": "steward_decide",
+           "worker": "zplan.milestone.steward-decide@1"
+          }
+         ]
+        }
+       },
+       {
+        "kind": "choice",
+        "name": "task_result",
+        "otherwise": {
+         "kind": "seq",
+         "name": "final_stage",
+         "children": [
+          {
+           "kind": "verifier",
+           "name": "final_verify",
+           "worker": "zplan.milestone.final-verify@1"
+          },
+          {
+           "kind": "choice",
+           "name": "final_result",
+           "otherwise": {
+            "kind": "seq",
+            "name": "final_repair",
+            "children": [
+             {
+              "kind": "loop",
+              "name": "repair_loop",
+              "maxIterations": 3,
+              "body": {
+               "kind": "seq",
+               "name": "repair_iteration",
+               "children": [
+                {
+                 "kind": "step",
+                 "name": "repair",
+                 "worker": "zplan.milestone.repair@1"
+                },
+                {
+                 "kind": "choice",
+                 "name": "repair_result",
+                 "otherwise": {
+                  "kind": "seq",
+                  "name": "verify_stage",
+                  "children": [
+                   {
+                    "kind": "verifier",
+                    "name": "scope_verify",
+                    "worker": "zplan.milestone.scope-verify@1"
+                   },
+                   {
+                    "kind": "choice",
+                    "name": "scope_verify_result",
+                    "otherwise": {
+                     "kind": "verifier",
+                     "name": "final_reverify",
+                     "worker": "zplan.milestone.final-reverify@1"
+                    },
+                    "branches": [
+                     {
+                      "node": {
+                       "kind": "fail",
+                       "name": "scope_verify_failed"
+                      },
+                      "when": {
+                       "kind": "in",
+                       "value": {
+                        "name": "scope_verify",
+                        "source": "error",
+                        "field": null
+                       },
+                       "labels": [
+                        "timeout",
+                        "crash",
+                        "malformed",
+                        "refusal"
+                       ]
+                      }
+                     }
+                    ]
+                   }
+                  ]
+                 },
+                 "branches": [
+                  {
+                   "node": {
+                    "kind": "fail",
+                    "name": "repair_failed"
+                   },
+                   "when": {
+                    "kind": "in",
+                    "value": {
+                     "name": "repair",
+                     "source": "error",
+                     "field": null
+                    },
+                    "labels": [
+                     "timeout",
+                     "crash",
+                     "malformed",
+                     "refusal"
+                    ]
+                   }
+                  }
+                 ]
+                }
+               ]
+              }
+             },
+             {
+              "kind": "choice",
+              "name": "final_repair_result",
+              "otherwise": {
+               "kind": "succeed",
+               "name": "final_exhausted"
+              },
+              "branches": [
+               {
+                "node": {
+                 "kind": "fail",
+                 "name": "final_reverify_failed"
+                },
+                "when": {
+                 "kind": "in",
+                 "value": {
+                  "name": "final_reverify",
+                  "source": "error",
+                  "field": null
+                 },
+                 "labels": [
+                  "timeout",
+                  "crash",
+                  "malformed",
+                  "refusal"
+                 ]
+                }
+               },
+               {
+                "node": {
+                 "kind": "succeed",
+                 "name": "repaired"
+                },
+                "when": {
+                 "kind": "in",
+                 "value": {
+                  "name": "repair_loop",
+                  "source": "group",
+                  "field": "terminated"
+                 },
+                 "labels": [
+                  "converged"
+                 ]
+                }
+               }
+              ]
+             }
+            ]
+           },
+           "branches": [
+            {
+             "node": {
+              "kind": "fail",
+              "name": "final_verify_failed"
+             },
+             "when": {
+              "kind": "in",
+              "value": {
+               "name": "final_verify",
+               "source": "error",
+               "field": null
+              },
+              "labels": [
+               "timeout",
+               "crash",
+               "malformed",
+               "refusal"
+              ]
+             }
+            },
+            {
+             "node": {
+              "kind": "succeed",
+              "name": "done"
+             },
+             "when": {
+              "kind": "in",
+              "value": {
+               "name": "final_verify",
+               "source": "signal",
+               "field": "verdict"
+              },
+              "labels": [
+               "accepted"
+              ]
+             }
+            }
+           ]
+          }
+         ]
+        },
+        "branches": [
+         {
+          "node": {
+           "kind": "fail",
+           "name": "steward_apply_failed"
+          },
+          "when": {
+           "kind": "in",
+           "value": {
+            "name": "steward_apply",
+            "source": "error",
+            "field": null
+           },
+           "labels": [
+            "timeout",
+            "crash",
+            "malformed",
+            "refusal"
+           ]
+          }
+         },
+         {
+          "node": {
+           "kind": "fail",
+           "name": "steward_decide_failed"
+          },
+          "when": {
+           "kind": "in",
+           "value": {
+            "name": "steward_decide",
+            "source": "error",
+            "field": null
+           },
+           "labels": [
+            "timeout",
+            "crash",
+            "malformed",
+            "refusal"
+           ]
+          }
+         },
+         {
+          "node": {
+           "kind": "succeed",
+           "name": "needs_owner"
+          },
+          "when": {
+           "kind": "in",
+           "value": {
+            "name": "steward_decide",
+            "source": "signal",
+            "field": "signal"
+           },
+           "labels": [
+            "needs_owner"
+           ]
+          }
+         },
+         {
+          "node": {
+           "kind": "succeed",
+           "name": "steward_blocked"
+          },
+          "when": {
+           "kind": "in",
+           "value": {
+            "name": "steward_decide",
+            "source": "signal",
+            "field": "signal"
+           },
+           "labels": [
+            "blocked"
+           ]
+          }
+         },
+         {
+          "node": {
+           "kind": "succeed",
+           "name": "task_loop_exhausted"
+          },
+          "when": {
+           "kind": "in",
+           "value": {
+            "name": "task_loop",
+            "source": "group",
+            "field": "terminated"
+           },
+           "labels": [
+            "exhausted"
+           ]
+          }
+         }
+        ]
+       }
+      ]
+     },
+     "when": {
+      "kind": "in",
+      "value": {
+       "name": "select_init",
+       "source": "signal",
+       "field": "queue"
+      },
+      "labels": [
+       "open"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,145 @@
+#main {
+    height: 1fr;
+}
+
+#chat-pane {
+    width: 38%;
+    border: round ansi_bright_black;
+    border-title-color: ansi_white;
+    padding: 0 1;
+}
+
+#chat-pane:focus-within {
+    border: round ansi_yellow;
+}
+
+#messages-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+
+#prompt-box {
+    height: 3;
+    border: round ansi_bright_black;
+    padding: 0 1;
+}
+
+#prompt-box:focus-within {
+    border: round ansi_yellow;
+}
+
+#chevron {
+    width: 2;
+    color: ansi_yellow;
+    text-style: bold;
+}
+
+#prompt {
+    border: none;
+    background: transparent;
+    padding: 0;
+    height: 1;
+}
+
+#right {
+    width: 1fr;
+}
+
+#flow-pane {
+    height: 1fr;
+    border: round ansi_bright_black;
+    border-title-color: ansi_white;
+    padding: 0 1;
+}
+
+#legend {
+    height: 2;
+}
+
+#view-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+
+#view {
+    height: 1fr;
+    content-align: center middle;
+}
+
+#palette {
+    height: auto;
+    max-height: 8;
+    border: round ansi_yellow;
+    padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#log-pane {
+    height: 20%;
+    min-height: 5;
+    border: round ansi_bright_black;
+    border-title-color: ansi_white;
+    border-subtitle-color: ansi_green;
+    padding: 0 1;
+}
+
+
+#bar {
+    height: 1;
+}
+
+.msg {
+    margin-bottom: 1;
+}
+
+.msg.arch {
+    border-left: outer ansi_magenta;
+    padding-left: 1;
+}
+
+.card {
+    border: round ansi_magenta;
+    border-title-color: ansi_white;
+    border-title-style: bold;
+    padding: 0 1;
+    margin: 0 0 1 2;
+    height: auto;
+}
+
+.card.done {
+    border: round ansi_bright_black;
+}
+
+.card.alarm {
+    border: round ansi_red;
+}
+
+.card .buttons {
+    height: 1;
+    margin-top: 1;
+}
+
+.card Button {
+    margin-right: 2;
+    min-width: 6;
+}
+
+.card-hint {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.msg.sys {
+    margin-bottom: 1;
+}
+
+#legend, #log-pane, #bar {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.narrow #chat-pane {
+    width: 1fr;
+}

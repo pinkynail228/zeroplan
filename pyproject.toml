@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==75.8.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeroshot-planning-kit"
+version = "0.8.0"
+description = "Terminal planning client for the native Zeroshot engine"
+requires-python = ">=3.11"
+dependencies = ["textual==8.2.8"]
+
+[project.scripts]
+zplan = "terminal_planner.cli:main"
+zplan-dev = "terminal_planner.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["terminal_planner*"]
+
+[tool.setuptools.package-data]
+terminal_planner = ["resources/*.json", "resources/*.toml", "resources/*.md"]
+"terminal_planner.tui" = ["*.tcss"]

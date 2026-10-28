@@ -1,0 +1,14 @@
+tui-quit-race-2 — continue tui-quit-race after a lost run. The full task, invariants I-1..I-4 and acceptance criteria Q-1..Q-4 are in devtools/zeroshot/tasks/tui-quit-race.md (read it first; all of it applies unchanged). DeepSeek, rung 4 continued.
+
+State: the previous run's workspace was lost (owner pause + Mac reboot). The worktree HEAD c5cf119 ("WIP tui-quit-race ...", parent = main 85cc0d2) holds the previous worker's files at the pause: the round-1 implementation plus a partial, unverified round-2 repair. Start from it; do not restart the design. Check every item below against the current files before editing. Reviewers review the whole diff 85cc0d2..HEAD including the WIP: the earlier "product code sound" verdict was on round 1, not on the partial repair.
+
+Round-1 review (both reviewers rejected; product code found sound, tests too weak):
+1. tests/test_tui_milestones.py (~580-590, `HeldDelivery`): the hold sits before the production `closing` check, so restoring the blocking `call_from_thread` keeps the race test green. Hold the worker after the real `closing` check (inside the hand-over), so the negative control fails.
+2. tests/test_tui_milestones.py (~623-628, I-2 test): releasing `_mutating` on the worker right after `done()`, or an early `release()` before the UI handler is queued, keeps the test green (one reviewer each). Hold the delivery of the job under test on the UI side, independent of any release token, while the worker finishes and quit polling runs; both negative controls must fail.
+3. tests/test_terminal_planner.py (~1631-1643, EOF test): the old loop fails only after a real 10-13 s busy loop (36 M reads). Bound the mock (e.g. EOF at the third read and a read counter assertion) or use a controlled clock so the negative control fails at once. The WIP already has a controlled clock: recheck its negative control, do not redo it blindly.
+4. WIP tests/test_tui_milestones.py:~648 uses `Timer(0.3)` to order the race; a timer does not guarantee that `stop()` has begun. Use an explicit Event/barrier between the passed `closing` check and the entry into `stop()`; the blocking-hand-over mutation must fail on its assertion with guaranteed cleanup (no runner hang).
+
+Keep to these items and the original ACs; minimal production fixes needed for I-1..I-4 are allowed; a new blocker outside the scope goes into the final report for the orchestrator. No open-ended diagnostics (e.g. CPU-load A/B experiments): Q-3 (tests.test_tui_live 10x) is the flake evidence the task asks for. Report Q-1..Q-4 again with the three negative controls of Q-2 shown failing on their assertions.
+
+critic tui-quit-race (session 01a1423d-ffcd-7fd3-b25f-f07ccc624d65), continuation task gate: GO WITH CHANGES (5, applied).
+critic tui-quit-race merge (same session): MERGE (d29ff42; Linux 597 OK, Mac 597 OK; notes: private App._context() recheck on Textual bump, swallowed handler exceptions lack a log).

@@ -1,0 +1,485 @@
+/* i9/A3: the approved lab look (`devtools/ui-lab/work.tcss`). The logo and the header are gone — the panes begin
+   at row 0 — and the colours are the terminal's own ANSI names, so the screen follows the owner's terminal theme
+   (`App(ansi_color=True)`, theme `ansi-dark`). */
+MainScreen {
+    layout: vertical;
+}
+
+#panes {
+    height: 1fr;
+}
+
+/* A2 + V6: the chat pane is the wide column (`1fr`, the canvas column keeps 40%), its border bright black, the
+   focused pane (any widget inside it focused) yellow. */
+#chat-pane {
+    width: 1fr;
+    border: round ansi_bright_black;
+    border-title-color: ansi_white;
+    padding: 0 1;
+}
+
+#chat-pane:focus-within {
+    border: round ansi_yellow;
+}
+
+/* I1c/A1: the right column is a Vertical of the canvas (`TabbedContent#right`, the two tabs «Scheme»/«Plan») and
+   the always-visible «What's happening» pane (`Activity#activity`) under it. The canvas keeps the rest of the column;
+   each tab fills what the tab strip leaves. The canvas frame itself is the TabbedContent (its rules below). */
+#right-column {
+    width: 40%;
+}
+
+/* i9/A1+A3+A4 repair: the canvas frame is the `#right` TabbedContent itself — its border starts on row 0 and wraps
+   the tab strip, and its border title is the canvas state phrase (`notes · nothing runs`, `M2 … · running`). The tab
+   panes inside carry no border of their own: the frame is the one box all the canvas tabs share, the lab's
+   `#flow-pane`. The frame's padding keeps the pane bodies at the columns they had when each pane carried its own
+   border, and the frame takes the yellow of the lab's focused boxes (`#right:focus-within`, like `#chat-pane` and
+   `#prompt-box`), so the focused canvas — Scheme and Plan both — reads yellow instead of the idle bright black. */
+#right {
+    width: 1fr;
+    height: 1fr;
+    border: round ansi_bright_black;
+    border-title-color: ansi_white;
+    padding: 0 1;
+}
+
+#right:focus-within {
+    border: round ansi_yellow;
+}
+
+#right > ContentSwitcher, #right TabPane {
+    height: 1fr;
+}
+
+/* The tab strip is one row: the two labels, with the shown tab in bold and its own colour. Textual's second
+   row (the animated underline of the active tab) is not drawn, so the pane below keeps the height and the box
+   it has today and the whole right pane stays one label row plus the tab's content. */
+#right ContentTabs {
+    height: 1;
+}
+
+#right ContentTabs Tab.-active {
+    text-style: bold;
+    color: $accent;
+}
+
+/* I7: in narrow mode the «Conversation» page is a disabled `Tab` (a label only — the chat is not a TabPane), so it
+   reads as one of the strip's labels: drawn like the other inactive tabs rather than the dimmer disabled style. */
+#right ContentTabs #tab-chat {
+    color: $foreground 50%;
+}
+
+/* I5: a file/diff canvas tab's body — a `VerticalScroll` around the read-only renderable — fills the tab, so the
+   file (or the diff) scrolls inside the canvas frame (`#right`). The pane itself already takes `height: 1fr` from
+   `#right TabPane`; the scroll inside it must fill that height. The frame is the box, so the scroll carries no
+   border or padding of its own (the lab's `#view-scroll`). */
+#right .view-scroll {
+    height: 1fr;
+}
+
+/* I1c/A1: the «What's happening» pane under the canvas — 8 rows at the 40-row layout (its own round border is part
+   of that height), never below 4, so the canvas above it always keeps the rest. The widget's DEFAULT_CSS carries
+   the border, title/subtitle colours and padding; only the height is pinned to the app here. */
+#activity {
+    height: 8;
+    min-height: 4;
+}
+
+/* I1b: the Now drawing is the fitted scheme (`scheme.render`) plus its legend; while it is shown (`#live.flow`,
+   set by `app.py`) the widget must never re-wrap a drawn line and break its frame, so the body keeps the lines
+   exactly as drawn (the pane hides the horizontal overflow). Without the class — C0c2's plain fallback (F2/A3,
+   below `FLOW_MIN_WIDTH` or with no flow) — the widget keeps Textual's own wrapping, so a line too wide in terminal
+   cells is split, not clipped. */
+#live.flow {
+    text-wrap: nowrap;
+}
+
+/* i9/A4: the plan tab's pane keeps filling its tab; the canvas frame (`#right`) is the box around it and carries
+   the focus colour, so the pane itself needs no border, title or padding (the frame's own are the pane's). */
+#plan-pane {
+    height: 1fr;
+}
+
+#status {
+    height: auto;
+    max-height: 40%;
+    color: $text-muted;
+}
+
+/* i3-chat-inline: the conversation is a scroll of one widget per history entry (`ChatMessage`) with the decision
+   cards mounted inline in it after the newest entry (the lab's layout); a short conversation sits at the scroll's
+   bottom, on the status area. The Card widget's own DEFAULT_CSS carries its border, padding and margin, so nothing
+   is pinned here beyond the roles and the one exception below. */
+#chat {
+    height: 1fr;
+    align-vertical: bottom;
+}
+
+#chat .msg {
+    height: auto;
+}
+
+/* V2: an entry is an optional time line (dim, centred) above its body. The owner's body is bright behind a yellow
+   left bar; the architect's and the error's carry their mark in a gutter drawn with the text (no bar). Each of
+   the three stands a blank row below the entry before it. */
+#chat .msg > .time {
+    color: ansi_bright_black;
+    text-align: center;
+    margin: 1 0 0 0;
+}
+
+#chat .msg.owner > .body {
+    border-left: outer ansi_yellow;
+    padding: 0 1;
+    margin: 1 0 0 0;
+    color: ansi_bright_white;
+}
+
+#chat .msg.architect > .body,
+#chat .msg.error > .body {
+    margin: 1 0 0 0;
+}
+
+/* S1: an events entry is a block of one-line steps, a blank row below the entry before it like the others. A closed
+   card is one borderless row (cards.py `Card.done`) that sits flush in the conversation. */
+#chat .msg.events > .body {
+    margin: 1 0 0 0;
+}
+
+/* E1: the empty chat's intro fills the scroll and centres its content (the lab's `.empty`): the lead and the hint wrap
+   and centre in the pane's width, the caption and the examples are one block that keeps its left edge. */
+#chat > .intro {
+    height: 1fr;
+    align: center middle;
+}
+
+#chat > .intro > .lead,
+#chat > .intro > .hint {
+    width: 100%;
+    height: auto;
+    text-align: center;
+}
+
+#chat > .intro .pick {
+    width: auto;
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+#chat > .intro .pick > Static {
+    width: auto;
+    height: auto;
+}
+
+#chat > .intro > .hint,
+#chat > .intro .caption {
+    color: ansi_bright_black;
+}
+
+#chat > .intro > .hint {
+    margin: 1 0 0 0;
+}
+
+/* A card carries a one-row drop below it (the Card DEFAULT_CSS margin); under the newest card that row is trailing
+   space *inside* the scroll, so the scroll's own end (the view A1 asks for) would spend a visible row on nothing and
+   clip the card above it at 80x24. The last row of the conversation is the newest widget's own bottom edge. */
+#chat > Card:last-child {
+    margin-bottom: 0;
+}
+
+/* Acceptance A1 at 80x24 (the joint example with two open cards, the draft's and the plan's): the narrow pane is
+   the whole-width chat of a 24-row terminal and holds sixteen content rows — the status area on the input and the
+   conversation, at least eleven rows. Two lab cards need fourteen of those rows (the draft's seven,
+   the plan's six and the one-row drop the first carries between them), every card carrying the dim command line
+   under its buttons (`card.hint`, the very commands those buttons stand for) as well, so the upper card's title and
+   body were clipped above the view. In the narrow pane a card therefore sits flush in the conversation — no indent
+   and no drop after it, the way the history's own entries sit — and leaves out that command line: the draft's six
+   rows and the plan's five fill the eleven exactly. The buttons, the text and the border title are untouched, and
+   the wide pane keeps the lab card whole. */
+MainScreen.narrow #chat-pane,
+MainScreen.narrow #right-column {
+    width: 1fr;
+}
+
+MainScreen.narrow #chat > Card {
+    margin: 0;
+}
+
+MainScreen.narrow #chat .card-hint {
+    display: none;
+}
+
+/* i2/A1 + i9/A2: the `/` palette takes the row directly above the prompt box, inside the chat pane (it is not
+   docked; the bar at the screen's bottom is). The `Palette.DEFAULT_CSS` carries the lab's border, padding and row
+   limit; the palette stays hidden (`display: false`) until a `/` is typed, so it costs no space. */
+#palette {
+    height: auto;
+}
+
+/* i9/A2: the lab's `#prompt-box` — a yellow `›` chevron and the input at the bottom of the chat pane, its border
+   bright black until the box is focused (yellow). The input itself has no border of its own (the box carries it). i10/P1: the box has no side padding
+   (the chevron carries its own one column), so it spans the chat pane's content width like the entries and the
+   whole placeholder fits the 41 columns the pane has at 120x40. */
+#prompt-box {
+    height: 3;
+    border: round ansi_bright_black;
+    padding: 0;
+}
+
+#prompt-box:focus-within {
+    border: round ansi_yellow;
+}
+
+#chevron {
+    width: 3;
+    padding-left: 1;
+    color: ansi_yellow;
+    text-style: bold;
+}
+
+#input {
+    border: none;
+    background: transparent;
+    padding: 0;
+    height: 1;
+}
+
+/* i9/A4: the bottom bar, the lab's one-row `#bar` (no background of its own). */
+#keys {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+HelpScreen {
+    align: center middle;
+}
+
+#help {
+    width: 100;
+    max-width: 100%;
+    height: auto;
+    max-height: 90%;  /* the key bar below stays visible */
+    border: round $accent;
+    background: $surface;
+    padding: 0 2;
+}
+
+#help-body {
+    height: auto;
+}
+
+SettingsScreen {
+    layout: vertical;
+}
+
+#settings-title {
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    text-style: bold;
+}
+
+#checks-pane {
+    height: auto;
+    max-height: 50%;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#checks {
+    height: auto;
+}
+
+#log {
+    height: 1fr;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#roles {
+    height: 1fr;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#settings-keys {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+ConfirmScreen, FinishingScreen {
+    align: center bottom;
+}
+
+#confirm {
+    margin-bottom: 2;
+    width: 60;
+    height: auto;
+    border: round $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+#confirm-question {
+    height: auto;
+}
+
+#confirm-buttons, #bootstrap-buttons, #plan-buttons, #settings-buttons, #run-buttons {
+    height: 1;
+}
+
+#confirm-buttons Button, #bootstrap-buttons Button, #plan-buttons Button, #settings-buttons Button, #run-buttons Button, #note-send {
+    margin-right: 2;
+}
+
+NoteScreen {
+    align: center middle;
+}
+
+#note {
+    width: 90%;
+    height: 70%;
+    border: round $accent;
+    background: $surface;
+    padding: 0 1;
+}
+
+#note-title {
+    height: auto;
+    text-style: bold;
+}
+
+#note-label {
+    height: 1;
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#note-text {
+    height: 1fr;
+}
+
+#note-keys {
+    height: 1;
+}
+
+BootstrapScreen {
+    align: center middle;
+}
+
+#bootstrap {
+    width: 96%;
+    height: 90%;
+    border: round $accent;
+    background: $surface;
+    padding: 0 1;
+}
+
+#bootstrap-scroll {
+    height: 1fr;
+}
+
+#bootstrap-keys {
+    height: 1;
+}
+
+/* i6: the language chooser. A small centred box with one row per language; the marked row is reversed, so the
+   arrow keys and enter read as a list the owner scrolls and picks from. */
+LanguageScreen {
+    align: center middle;
+}
+
+#language {
+    width: 44;
+    height: auto;
+    border: round $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+.language-row {
+    height: 1;
+    padding: 0 1;
+}
+
+.language-row.-selected {
+    text-style: reverse bold;
+}
+
+#plan-title {
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    text-style: bold;
+}
+
+#plan-keys {
+    dock: bottom;
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+PlanScreen {
+    layout: vertical;
+}
+
+#plan-scroll {
+    height: 1fr;
+    border: round $primary;
+    padding: 0 1;
+}
+
+#plan-body {
+    height: auto;
+}
+
+#plan-progress {
+    height: auto;
+    max-height: 8;
+    border: round $primary;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+RunScreen, TextScreen {
+    align: center middle;
+}
+
+/* R-3: on a supported terminal the result modal sits in the MainScreen body below the header (the height and the
+   top margin are set per size from the same rule that lays the main screen out). */
+RunScreen.body-region {
+    align: center top;
+}
+
+#run, #text {
+    width: 90%;
+    height: 80%;
+    border: round $accent;
+    background: $surface;
+    padding: 0 1;
+}
+
+#run-title, #text-title {
+    height: 1;
+    text-style: bold;
+}
+
+#run-scroll, #text-scroll {
+    height: 1fr;
+}
+
+#run-keys, #text-keys {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}

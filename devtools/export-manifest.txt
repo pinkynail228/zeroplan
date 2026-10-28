@@ -1,0 +1,30 @@
+# Public export manifest (scope: docs/P0_AUDIT.md "Recommendation").
+# One pattern per line:
+#   + PATTERN   include
+#   - PATTERN   exclude (wins over include)
+# A pattern ending in "/" matches that directory prefix; otherwise
+# fnmatch.fnmatchcase is applied to the whole repo-relative path ("*" crosses "/").
+# Blank lines and lines starting with "#" are ignored.
+
++ terminal_planner/
++ tests/
++ install.py
++ install.sh
++ pyproject.toml
++ LICENSE
++ .gitignore
++ .gitleaks.toml
++ README.md
++ docs/
++ devtools/
++ zplan.process.json
++ AGENTS.md
++ STATE.md
++ .github/workflows/
+
+- prototype/
+- reference/
+- docs/history/
+- upstream/
+- docs/P0_AUDIT.md
+- devtools/zeroshot/tasks/one-command.md

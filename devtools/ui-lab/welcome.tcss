@@ -1,0 +1,108 @@
+Screen {
+    align: center middle;
+}
+
+#page {
+    width: 76;
+    max-width: 100%;
+    height: auto;
+}
+
+#hero {
+    height: auto;
+    align-horizontal: center;
+    margin-bottom: 1;
+}
+
+#hero.compact {
+    layout: horizontal;
+    align-horizontal: center;
+}
+
+#hero.compact Center {
+    width: auto;
+}
+
+#mascot {
+    width: auto;
+    margin-bottom: 1;
+}
+
+#hero.compact #mascot {
+    margin: 0 4 0 0;
+}
+
+#brand {
+    width: 40;
+    height: auto;
+}
+
+#wordmark {
+    text-align: center;
+    color: ansi_bright_yellow;
+}
+
+#subtitle {
+    color: ansi_white;
+    text-align: center;
+}
+
+#prompt-box {
+    height: 3;
+    border: round ansi_bright_black;
+    padding: 0 1;
+}
+
+#prompt-box:focus-within {
+    border: round ansi_yellow;
+}
+
+#chevron {
+    width: 2;
+    color: ansi_yellow;
+    text-style: bold;
+}
+
+#prompt {
+    border: none;
+    background: transparent;
+    padding: 0;
+    height: 1;
+}
+
+#context {
+    margin: 0 2;
+    height: 1;
+}
+
+#notices {
+    margin: 1 2 0 2;
+    height: auto;
+}
+
+#footer {
+    margin-top: 2;
+    text-align: center;
+}
+
+#picker-box {
+    height: auto;
+    margin: 0 2;
+}
+
+#picker-title {
+    margin-bottom: 1;
+}
+
+#picker {
+    height: auto;
+    max-height: 8;
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+#picker > .option-list--option-highlighted {
+    background: ansi_bright_black;
+    text-style: none;
+}

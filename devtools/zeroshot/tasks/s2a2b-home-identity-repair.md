@@ -1,0 +1,24 @@
+s2a2b-home-identity-repair — repair of the s2a2-engine-wiring candidate (branch zs-s2a2-engine-wiring, 5f05526; the s2a2 brief devtools/zeroshot/tasks/s2a2-engine-wiring.md applies verbatim except R-3's home comparison, replaced below). Lane: Environment (L1). DeepSeek worker, sol reviewers. Critic gate18: NO with changes (applied); gate20: GO after the A-2 wording (applied).
+
+Base: this run starts on the s2a2 candidate (worktree branch from zs-s2a2-engine-wiring); the result merges as s2a2.
+
+Why: the integration gate (03a2917) fails `tests.test_ux.NativeJourneys.test_a5_phases_print_while_the_planner_runs_with_one_rare_heartbeat` on Linux and macOS (main passes). Cause: `NativeEngine.with_home` (engine.py, s2a2 R-3) compares the recorded home with the engine's env `CODEX_HOME` *as stored*; when the env has no `CODEX_HOME` (the default `~/.codex` case, and every test without it) the comparison never matches, so `engine_for` builds a new sibling on every slice. Per-instance observation state (`self.reviewed`, engine.py `phase`) is lost between slices, so a planner turn after a review prints "Составляю план…" instead of "Уточняю план по замечаниям…". The same loss happens for a real recorded home different from the current one.
+
+Requirements:
+- R-1 Same home (replaces s2a2 R-3's comparison, keeps gate5's bound-engine idempotence). The engine's own home for the comparison is its env `CODEX_HOME` *as stored* when that value is present and non-empty, else the effective default `str(self.codex_home())` (absent or empty `CODEX_HOME`). The recorded home is never resolved again (gate5 point 1). `engine_for`/`with_home` return `self` when executable, version and that home equal the binding's; for any binding, the engine `bound = engine.engine_for(binding)` satisfies `bound.engine_for(binding) is bound` (no recursive delegation, engine.py `proposal`). Domain: env without `CODEX_HOME`, with an empty value, with an absolute path, with a path containing `..` or a symlink component; recorded 4-key (legacy) and 5-key bindings; a recorded `..`/symlink spelling. A canonical binding met by an engine whose env spells the home as an alias may get a sibling (not required to be `self`).
+- R-2 Phase state per run, not per transport object. The "a review was seen" fact used by `phase` (engine.py, today `self.reviewed`) lives in one observation context keyed by the native run id, shared by every engine object in the process (the current engine, `engine_for` siblings, `recorded_engine`), with no new Authority/store state; a new run id starts unreviewed. Write-set extends to `phase` and the observation code that calls it.
+- R-3 No other change: s2a2 identity checks (four-field `binding_identity`, `engine.identity_changed`, `check_recorded`) and env construction (PATH prefix, `CODEX_HOME`) are unchanged.
+
+Acceptance:
+- A-1 The A5 test above passes unchanged (do not edit it), on the full `tests.test_ux` module.
+- A-2 R-1 table test over the domain: when the env `CODEX_HOME` is absent or empty, or its stored value equals the recorded home exactly, `engine_for(binding) is engine`; when the env spells the home as an alias and the binding records a different (canonical) string, a sibling is allowed; in every case `bound.engine_for(binding) is bound` and a sibling keeps the recorded home literally as its env `CODEX_HOME`. Control: a binding with another recorded home gives a sibling whose env `CODEX_HOME` is exactly the recorded string.
+- A-3 R-2: a planning journey on a recorded home different from the current one (planner, plan_verifier, planner across separate slices and delegated engines) prints "Уточняю план по замечаниям…" for the second planner turn; then a second run (new run id) in the same process starts with "Составляю план…".
+- A-4 Mutations (shown once in a scratch copy, recorded in the receipt): (a) revert R-1 to the as-stored comparison for an absent `CODEX_HOME` → A-2 fails; (b) keep `reviewed` on the engine instance → A-3's cross-home journey fails; (c) one global flag instead of the run-keyed context → A-3's second run fails; (d) resolve the explicit env value → A-2's `..`/symlink idempotence fails.
+
+Write-set: terminal_planner/engine.py (`with_home`, `engine_for`, `sibling`, `phase` and the observation code that calls it), tests/test_home_wiring.py, the receipt devtools/zeroshot/tasks/s2a2b-home-identity-repair-receipt.md.
+
+Size: ~40 product / ~160 tests. Report the measured overrun and rationale in the receipt; merge requires explicit critic disposition (ORCHESTRATOR step 1).
+
+DoD:
+- `PYTHONPATH=.:tests python3 -m unittest tests.test_toolchain tests.test_reference tests.test_home_wiring tests.test_record_home tests.test_ux tests.test_runs tests.test_terminal_planner tests.test_milestone tests.test_plan_gate tests.test_plan_override tests.test_live tests.test_tui_planning` passes.
+- The receipt maps A-1..A-4 to tests and file:line.

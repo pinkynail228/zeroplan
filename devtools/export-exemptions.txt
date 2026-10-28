@@ -1,0 +1,20 @@
+# Export exemptions: path<TAB>rule<TAB>sha256(line).
+# Silences exactly one line for one rule; an exemption that matches no finding is
+# itself a finding (stale-exemption).  Entries below are synthetic credential-shaped
+# fixture values: fake strings the content rules cannot tell from real ones.  One entry
+# per line of one file; adding or changing a fixture line means updating its digest.
+devtools/plan_qual.py	credential	bd10679840d90a389e27db1fe912a91531e9eea076d463877d171d0b4080f822
+terminal_planner/setup.py	url-userinfo	3e9d32b173cf9b497accc0a1b2d19ee23aa4cbd6c21ac5e5c57b8bef9546c37b
+tests/test_live.py	bearer	64edc1dc9e7864fe184c3ad07ebb748dfb9930e74ed7b777f610e7b86aa4207e
+tests/test_live.py	credential	ebe51ec3c6e5fa56132d32584d2a66de90ec19957bd856ab8d155ceba7d3e780
+tests/test_live.py	credential	6e73a435542946125f1aab0d6fb663a4789805051ec672f21a013d81fa22d308
+tests/test_setup.py	credential	f6b960a904d263983fcbc03ae2a14ea1296e14fc0494fae5ee3e53805e9d0d74
+tests/test_setup.py	url-userinfo	a56e07b440251d733eba12d6f3a2bccfccd62e53ae376bf5696973f70b08f7e0
+tests/test_tui_planning.py	credential	4d9b402a2cc55c5b26f2c99d6ee6db09797cbcc353d876cd8454de3618c4c4c7
+tests/test_tui_planning.py	openai	4d9b402a2cc55c5b26f2c99d6ee6db09797cbcc353d876cd8454de3618c4c4c7
+tests/test_ux.py	credential	004664e7c7a33bf2dd03930b989213a8900559765b5c4409ec1de082246ef74d
+devtools/task_gate_qual.py	credential	bd10679840d90a389e27db1fe912a91531e9eea076d463877d171d0b4080f822
+devtools/zeroshot/tasks/s1a1b1-gate-record-receipt.md	credential	110e9b936a40cf92429c5577d701499f2a951df935f15e739732b187811d8ec5
+tests/test_task_gate_record.py	openai	86066a19c40a7c2f72f3cf2f49a376eff9174901e7cd367dbcf8c93633f90706
+tests/test_task_gate_record.py	openai	0962d7845f38576c12c823ef17f35072d4e1c0024ff72d1d2b65ead0e7abf7e0
+tests/test_task_gate_record.py	openai	56f167975a673c7266cbe4b817c84a26b62826d359da6690374210de7074df16

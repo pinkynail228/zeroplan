@@ -1,0 +1,18 @@
+# zplan-agent-profile: 2
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+cli_auth_credentials_store = "file"
+
+[features]
+apps = false
+hooks = false
+plugins = false
+multi_agent = false
+goals = false
+memories = false
+
+[skills]
+include_instructions = false
+
+[skills.bundled]
+enabled = false
