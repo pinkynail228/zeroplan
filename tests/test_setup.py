@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from terminal_planner import agent_profile, catalog, setup, toolchain
+from terminal_planner import agent_profile, catalog, process, setup, toolchain
 from terminal_planner.authority import Blocked
 from terminal_planner.cli import Terminal, configure_roles, main, session
 from terminal_planner.engine import FixtureEngine
@@ -199,7 +199,8 @@ class SetupTests(unittest.TestCase):
 
     def test_preferences_persist_and_malformed_values_fail_closed(self):
         roles = setup.default_roles()
-        self.assertEqual(roles["worker"], {"model": "gpt-6.1-sol", "effort": "medium"})
+        self.assertEqual(roles["worker"], {"model": "gpt-6.1-terra", "effort": "max"})   # M3: terra / max
+        self.assertEqual(roles["plan_verifier"], {"model": "gpt-6.1-sol", "effort": "high"})
         roles["worker"] = {"model": "other-model", "effort": "low"}
         setup.save_roles(roles)
         terminal = Terminal(io.StringIO("\n" * 10), io.StringIO())
@@ -212,6 +213,17 @@ class SetupTests(unittest.TestCase):
             setup.load_roles()
         with self.assertRaises(Blocked):
             setup.validate_roles({role: {"model": "x", "effort": []} for role in setup.ROLE_DEFAULTS})
+
+    def test_role_defaults_come_from_one_table(self):
+        """M3: Enter on every prompt of `configure_roles` keeps `default_roles()` (worker terra / max, the others
+        sol / high) when nothing is saved. Interpretation: the shell's `_roles` start value is `default_roles()`
+        itself (cli.py), so this covers it; the model hint is process.py's `binding`, read here through a bad id."""
+        roles = configure_roles(Terminal(io.StringIO("\n" * 10), io.StringIO()), {})
+        self.assertEqual(roles, setup.default_roles())
+        self.assertEqual(roles["worker"], {"model": "gpt-6.1-terra", "effort": "max"})
+        self.assertEqual(roles["plan_verifier"], {"model": "gpt-6.1-sol", "effort": "high"})
+        with self.assertRaisesRegex(Blocked, "for example gpt-6.1-terra"):
+            process.binding("roles.worker", {"model": "bad model", "effort": "max"})
 
     def test_legacy_effort_preference_loads_but_input_requires_native_value(self):
         self.assertEqual(setup.EFFORTS, {"low", "medium", "high", "xhigh", "max"})

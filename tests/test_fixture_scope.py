@@ -569,9 +569,9 @@ class DocsTests(unittest.TestCase):
         repo = Path(__file__).resolve().parents[1]
         self.assertIn("sets the model and effort of each architect chat turn",
                       (repo / "docs" / "REFERENCE.md").read_text(encoding="utf-8"))
-        readme = (repo / "README.md").read_text(encoding="utf-8")
-        self.assertIn("process.py:", readme)
-        self.assertIn("tui/chat.py:", readme)
+        architecture = (repo / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("process.py:", architecture)
+        self.assertIn("tui/chat.py:", architecture)
         flow = (repo / "docs" / "USER_FLOW.md").read_text(encoding="utf-8")
         self.assertIn("The architect chat is unavailable in the demo", flow)
         self.assertIn("zplan.process.json", flow)

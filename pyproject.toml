@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zeroshot-planning-kit"
-version = "0.8.0"
+version = "0.8.1"
 description = "Terminal planning client for the native Zeroshot engine"
 requires-python = ">=3.11"
 dependencies = ["textual==8.2.8"]

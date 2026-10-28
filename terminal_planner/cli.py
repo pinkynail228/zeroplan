@@ -24,7 +24,7 @@ from .process import Profile, ProfileChanged
 from .planning import (HEARTBEAT, OBSERVING, PLANNER_FAMILY, PLANNER_SLICE, Planning, elapsed, one_line, plural,  # noqa: F401
                        summary)
 from .runs import FixtureDriver, MilestoneRuns, NativeDriver, run_state
-from .setup import (INTERRUPTED, YES_ANSWERS, ROLE_DEFAULTS, EFFORTS, agent_home, launch_home, check_installation, doctor,
+from .setup import (INTERRUPTED, YES_ANSWERS, ROLE_DEFAULTS, EFFORTS, agent_home, default_roles, launch_home, check_installation, doctor,
                     install_tools, load_roles, login, logout, native_environment,
                     native_state_root, owned_home, readiness, save_roles, severity, tool_paths)
 
@@ -110,8 +110,8 @@ def configure_roles(terminal, current=None):
     terminal.show("Runtime: Codex / OpenAI. Model and effort are set separately for each role.")
     roles = {}
     defaults = current or getattr(terminal, "role_preferences", {})
-    for role, effort in ROLE_DEFAULTS.items():
-        binding = defaults.get(role, {"model": "gpt-6.1-sol", "effort": effort})
+    for role, binding in default_roles().items():
+        binding = defaults.get(role, binding)
         while True:
             model = terminal.ask(role + " model", binding["model"])
             selected = terminal.ask(role + " effort", binding["effort"])
@@ -152,7 +152,7 @@ class App:
         self.delivery = Delivery(authority, self.controller, self.planning)
         revisions = authority.state["revisions"] if authority.state else []
         # Saved preferences, else the planning roles of the last revision, over the defaults for every role.
-        self._roles = {role: {"model": "gpt-6.1-sol", "effort": effort} for role, effort in ROLE_DEFAULTS.items()}
+        self._roles = default_roles()
         self._roles.update(getattr(terminal, "role_preferences", None) or (revisions[-1]["roles"] if revisions else {}))
 
     @property

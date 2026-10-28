@@ -22,6 +22,7 @@ from rich.text import Text
 from textual.app import App, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, HorizontalGroup, Vertical, VerticalGroup, VerticalScroll
+from textual.geometry import Region
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Input, RichLog, Static, Tab, TabbedContent, TabPane, TextArea
@@ -111,6 +112,9 @@ TAB_DIFF = "tab-diff"
 NOTHING_RUNNING = "canvas.nothing_running"
 # F2/A3: the width below which the Now tab keeps C0c2's plain lines rather than the scheme drawing (I1b).
 FLOW_MIN_WIDTH = 40
+# T4e: the height `/scheme` hands `scheme.render` on the whole screen — far more than the boxes of the longest graph
+# need, so box mode (`_full`) is chosen by the width alone and the pane scrolls.
+SCHEME_FULL_ROWS = 200
 # I7: below this many columns the main screen shows one pane at a time — the chat or the canvas — full width,
 # because at 80x24 the two side by side are both too narrow to read. At or above it both panes show, as today.
 NARROW_COLUMNS = 100
@@ -809,6 +813,19 @@ class Intro(Vertical):
         self.hint.update(strings.text("chat.intro_hint"))
 
 
+class LivePane(VerticalScroll):
+    """T4e: the Scheme tab's scroll. The layout change `/scheme` makes (in either direction) lands after the refresh
+    callbacks `toggle_scheme_full` can queue, so the pane itself reports its own resize and, for the few resizes
+    that screen allows (`MainScreen.scheme_repaints`), the drawing is redone against the width it really has."""
+
+    def on_resize(self, event):
+        screen = self.screen
+        if isinstance(screen, MainScreen) and screen.scheme_repaints > 0 and not screen.closing \
+                and max(self.scrollable_content_region.width, 20) != screen.live_width:
+            screen.scheme_repaints -= 1
+            screen.render_settled()
+
+
 class MainScreen(CardHost, Screen):
     BINDINGS = [Binding("tab", "toggle_focus", "Pane", priority=True),
                 Binding("escape", "cancel_turn", "Cancel turn", priority=True),
@@ -848,6 +865,10 @@ class MainScreen(CardHost, Screen):
     closing = False  # L-5: the unmount has begun; no render runs and a late update is dropped
     narrow = False  # I7: below `NARROW_COLUMNS` the screen shows one pane at a time (one of these two)
     chat_shown = True  # I7: in narrow mode the chat pane is the shown one (`True`) or the canvas column (`False`)
+    scheme_full = False  # T4e: `/scheme` shows the Scheme tab on the whole window (chat and activity not drawn)
+    scheme_cmd = False  # T4e: on the whole-screen scheme the prompt is open at the bottom (a `/` was typed)
+    scheme_repaints = 0  # T4e: the pane resizes after a `/scheme` toggle that may still redraw the tab (`LivePane`)
+    full_return = None  # T4e: (tab, focused widget, chat_shown) to restore when the whole-screen scheme closes
     strip_shown = False  # I7: the "Conversation" label rides the canvas strip (narrow) or has been removed (wide)
 
     def compose(self):
@@ -878,7 +899,7 @@ class MainScreen(CardHost, Screen):
             with Vertical(id="right-column"):
                 with TabbedContent(id="right", initial=TAB_PLAN):
                     with TabPane(strings.text(TAB_LIVE_TITLE), id=TAB_LIVE):
-                        with VerticalScroll(id="live-pane"):
+                        with LivePane(id="live-pane"):
                             yield Static("", id="live", markup=False)
                     with TabPane(strings.text(TAB_PLAN_TITLE), id=TAB_PLAN):
                         with PlanPanel(id="plan-pane"):
@@ -968,6 +989,7 @@ class MainScreen(CardHost, Screen):
         if self.closing:
             return
         self.render_live()
+        self.render_status()  # S1b: leaving `/scheme`, the chat pane's width is only known now
         self.call_after_refresh(self.verify_live, attempt)
 
     def verify_live(self, attempt=0):
@@ -1020,6 +1042,11 @@ class MainScreen(CardHost, Screen):
         canvas = self.query_one("#right-column")
         shown_chat = self.chat_shown if self.narrow else True
         shown_canvas = not self.chat_shown if self.narrow else True
+        if self.scheme_full:  # T4e: the canvas alone, whatever the width; a typed `/` brings the prompt up at the bottom
+            shown_chat, shown_canvas = self.scheme_cmd, True
+        self.set_class(self.scheme_full, "scheme-full")
+        self.set_class(self.scheme_full and self.scheme_cmd, "scheme-cmd")
+        self.query_one("#activity").display = not self.scheme_full
         focused = self.focused
         hands_off = (not shown_canvas and canvas.display and focused is not None
                      and canvas in focused.ancestors_with_self)
@@ -1160,6 +1187,8 @@ class MainScreen(CardHost, Screen):
         `chat_note`, `chat_outcome`, `chat_refusal`) wrapped in full, so a remedy and a catalog code stay readable
         at any width. The area is capped at 40% of the pane and loses its top rows first (the activity row), so
         the lines nearest the input are the last to go."""
+        if getattr(self, "scheme_full", False):  # S1b: the chat pane is hidden (width 0): nothing is measured or stored
+            return
         app = self.app
         pane = self.query_one("#chat-pane")
         room = max(pane.content_region.width, 20)
@@ -1227,7 +1256,7 @@ class MainScreen(CardHost, Screen):
             tail = flow_draw.wrap_status(self.live_status(True), width)
             # I1b/A1: the scheme gets the pane's content height minus the legend line and the status lines (never
             # below 6), so the drawing, the legend and the tail fit the pane together.
-            height = max(6, pane.scrollable_content_region.height - len(tail) - 1)
+            height = SCHEME_FULL_ROWS if self.scheme_full else max(6, pane.scrollable_content_region.height - len(tail) - 1)
             drawn = scheme.render(self.scheme_root(known if known is not None else milestone.TASK_ITERATIONS),
                                   scheme.observation_from_flow(data), width, height, limits=limits)
             legend = scheme.legend()
@@ -1238,9 +1267,69 @@ class MainScreen(CardHost, Screen):
                     body.append("\n")
                 body.append_text(line)
             live.update(body)
+            if self.scheme_full:
+                self.call_after_refresh(self.reveal_running, drawn.plain.split("\n"))
         else:
             self.live_lines = self.live_view()
             live.update(Text("\n".join(wrapped(self.live_lines, width))))
+
+    def reveal_running(self, drawn):
+        """T4e/F2: on the whole screen the drawing is taller than the pane, so after each repaint the pane scrolls just
+        far enough for the running step to be visible: the heavy frame of a running box (box mode), else the row with
+        the running mark (the one-line modes). The owner's own scroll is left alone while that row is in view."""
+        if self.closing or not self.scheme_full:
+            return
+        row = next((i for i, line in enumerate(drawn) if "┏" in line), None)
+        if row is None:
+            row = next((i for i, line in enumerate(drawn) if scheme.SPIN[0] in line), None)
+        if row is not None:
+            pane = self.query_one("#live-pane")
+            pane.scroll_to_region(Region(0, row, max(1, pane.scrollable_content_region.width), 3), animate=False)
+
+    def toggle_scheme_full(self):
+        """T4e `/scheme`: the Scheme tab on the whole window — the chat, the activity pane and the input are not drawn —
+        and, shown again, back to the layout, tab and focus it had. The engine is not asked anything: only this
+        screen's layout moves."""
+        right = self.query_one("#right", TabbedContent)
+        if self.scheme_full:
+            tab, target, chat_shown = self.full_return
+            self.scheme_full, self.scheme_cmd, self.full_return, self.chat_shown = False, False, None, chat_shown
+            self.apply_narrow()
+            if tab in self.view_tab_ids():
+                right.active = tab
+            if target is None or not target.is_attached or not target.focusable:
+                target = self.query_one("#input")
+            target.focus()
+            self.render_state()
+            self.settle_scheme()
+            return
+        self.full_return = (right.active, self.focused, self.chat_shown)
+        self.show_tab(TAB_LIVE)
+        self.scheme_full = True
+        self.apply_narrow()
+        self.render_state()
+        self.settle_scheme()
+
+    def close_scheme_cmd(self):
+        """T4e: put the prompt away again on the whole-screen scheme: the input is emptied, the palette hidden and the
+        focus goes back to the scheme's scroll."""
+        self.scheme_cmd = False
+        self.query_one("#input", Input).value = ""
+        self.query_one("#palette").display = False
+        self.apply_narrow()
+        self.query_one("#live-pane").focus()
+
+    def settle_scheme(self):
+        """T4e: redraw the Scheme tab after the layout change of `toggle_scheme_full` — the panes that came or went
+        change the tab's width; `LivePane.on_resize` repaints again once the width is really known."""
+        self.scheme_repaints = 3
+        self.call_after_refresh(self.render_settled)
+        if self.scheme_full:  # the hidden input must not keep the keys: the focus goes to the tab once it is shown
+            self.call_after_refresh(self.focus_scheme)
+
+    def focus_scheme(self):
+        if self.scheme_full and not self.closing and self.app.screen is self:
+            self.query_one("#live-pane").focus()
 
     def scheme_root(self, rounds):
         """I1b: the stage graph of one attempt, built once per review-loop bound (`milestone.milestone_graph` is a
@@ -1390,6 +1479,8 @@ class MainScreen(CardHost, Screen):
         (`focus_on_resume`) the widget that held the focus when it opened gets it back — the input stays the input,
         so text typed next is not read as the pane's letter keys, and the pane stays the pane."""
         target, self.focus_on_resume = self.focus_on_resume, None
+        if target is not None and self.scheme_full and not self.scheme_cmd and target.id == "input":
+            target = self.query_one("#live-pane")  # T4e: the input is not drawn on the whole-screen scheme
         if target is not None and target.is_attached and target.focusable:
             self.tab_focus_deferred = False  # the focus it held at opening wins over a move deferred under the screen
             target.focus()
@@ -1677,6 +1768,9 @@ class MainScreen(CardHost, Screen):
         if event.character != "/" or isinstance(self.focused, (Input, TextArea)):
             return
         field = self.query_one("#input", Input)
+        if self.scheme_full and not self.scheme_cmd:  # T4e: on the whole-screen scheme the `/` brings the prompt up
+            self.scheme_cmd = True
+            self.apply_narrow()
         if not self.query_one("#chat-pane").display:
             return
         event.stop()
@@ -1689,6 +1783,9 @@ class MainScreen(CardHost, Screen):
         """i2/A1: every change of the chat input re-decides the `/` palette — `show_for` hides it unless the value
         starts with `/` and lists the commands `slash` allows in the current state."""
         if event.input.id == "input":
+            if self.scheme_cmd and not event.value.startswith("/"):  # the prompt is for commands only here
+                self.close_scheme_cmd()
+                return
             self.query_one("#palette", palette.Palette).show_for(event.value, screen_slash_state(self.app))
             self.show_keys()
             self.sync_card_keys()
@@ -1730,6 +1827,8 @@ class MainScreen(CardHost, Screen):
         self.remember(line)
         field.value = ""
         self.query_one("#palette").display = False
+        if getattr(self, "scheme_cmd", False):  # T4e (a stub screen of the older tests has no such flag)
+            self.close_scheme_cmd()
 
     def remember(self, line):
         """O3: keep one accepted line for Up to recall (a line equal to the newest is kept once)."""
@@ -1806,12 +1905,18 @@ class MainScreen(CardHost, Screen):
                          lambda: app.controller.stop_planner(app.deliver(stopped)))
 
     def action_cancel_turn(self):
-        """[esc] (i2 + i5): the open `/` palette first — hide it and clear its input; otherwise close the file/diff
+        """[esc] (i2 + i5): the open `/` palette first — hide it and clear its input; otherwise (T4e) close the
+        whole-screen scheme (`/scheme`); otherwise close the file/diff
         canvas tab the canvas shows (returning to the tab that was active before it opened); otherwise cancel the
         running architect turn. Never a milestone's stop key."""
         if self.query_one("#palette").display:
             self.query_one("#palette").display = False
             self.query_one("#input", Input).value = ""
+            if self.scheme_cmd:
+                self.close_scheme_cmd()
+            return
+        if getattr(self, "scheme_full", False):
+            self.toggle_scheme_full()
             return
         if self.close_active_view_tab():
             return

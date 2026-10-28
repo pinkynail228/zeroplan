@@ -1,8 +1,8 @@
 """Native control-flow qualification of the milestone driver graph (orchestrator, Linux test host).
 
 Runs the pinned native binary against a scripted synthetic Responses provider on loopback.
-Answers are scripted per node (dispatch by the last `ZPLAN_NODE=<name>` marker in the request)
-and validated against that request's output schema; nothing calls a real provider. This proves
+Answers are scripted per node (dispatch by the last `ZPLAN_NODE=<name>` marker in the request; production graphs
+carry no marker, the qualification adds it to the graphs the builders return: `mark`, `marked`) and validated against that request's output schema; nothing calls a real provider. This proves
 graph control flow only, not agent behaviour.
 
 Scenarios a..j run the graph through the bare CLI. Adapter scenarios (k_adapter_*..m_adapter_*) drive
@@ -33,7 +33,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from terminal_planner import milestone  # noqa: E402
+from terminal_planner import engine, milestone  # noqa: E402
 from terminal_planner.authority import Authority, Blocked, atomic_state, canonical, decode  # noqa: E402
 from terminal_planner.engine import NativeEngine, fixture_proposal  # noqa: E402
 from terminal_planner.runs import SLICE, TERMINAL, MilestoneRuns, NativeDriver  # noqa: E402
@@ -51,6 +51,39 @@ TYPES = {"null": lambda v: v is None, "boolean": lambda v: isinstance(v, bool), 
 
 class QualError(Exception):
     pass
+
+
+def mark(graph):
+    """The dispatch marker `ZPLAN_NODE=<node name>` put first in the instructions of every node of a built graph
+    (in place; the builders return fresh documents). Production graphs carry no marker."""
+    def walk(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("instructions"), str) and isinstance(value.get("name"), str):
+                value["instructions"] = "ZPLAN_NODE=%s\n%s" % (value["name"], value["instructions"])
+            value = list(value.values())
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+    walk(graph)
+    return graph
+
+
+MARKED_BUILDERS = ((milestone, "milestone_graph"), (engine, "planner_graph_v2"), (engine, "task_gate_graph"),
+                   (engine, "merge_critic_graph"))
+
+
+@contextmanager
+def marked():
+    """Within the scope the production graph builders return marked graphs, so the graph a lifecycle adapter digests
+    and submits carries the markers; after it the builders are the production ones again."""
+    saved = [(module, name, getattr(module, name)) for module, name in MARKED_BUILDERS]
+    try:
+        for module, name, build in saved:
+            setattr(module, name, lambda *args, _build=build, **options: mark(_build(*args, **options)))
+        yield
+    finally:
+        for module, name, build in saved:
+            setattr(module, name, build)
 
 
 def valid(schema, value):
@@ -122,7 +155,8 @@ class Provider:
         count = sum(name == node for name, _ in self.calls) + 1
         contract = schema["properties"]["response"]
         label = None
-        if "signals" in contract.get("properties", {}):
+        properties = contract.get("properties", {})
+        if properties.get("signals", {}).get("properties"):
             entries = self.script.get(node)
             if not entries:
                 raise QualError("%s: unexpected call #%s" % (node, count))
@@ -138,7 +172,11 @@ class Provider:
         else:
             if node in self.script:
                 raise QualError("%s: scripted labels for a step" % node)
-            response = strings(contract, node, count)
+            if "signals" in properties:  # a verifier without signals (`select`): its output and a diagnostic
+                response = {"output": strings(properties["output"], node, count), "signals": {},
+                            "diagnostic": strings(properties["diagnostic"], node, count)}
+            else:
+                response = strings(contract, node, count)
         if not valid(schema, {"response": response}):
             raise QualError("%s: scripted answer #%s violates the request schema" % (node, count))
         self.calls.append((node, label))
@@ -279,6 +317,25 @@ SCENARIOS = {
         tasks=1, script={"select_init": ["open"], "acceptance_review": ["conflict"], "code_review": ["accepted"]},
         order=["preflight", "select_init", "select", "select_verify", "worker", *REVIEWERS],
         terminal={"status": "failed", "reason": "review_conflict"}),
+    # A final check that could not finish (H1) runs once more with the previous findings; twice incomplete blocks the
+    # run before any repair. The prefixes p_/q_/r_ are free (a..o and the adapter k/l/m use the others).
+    "p_final_incomplete_then_accepted": dict(
+        tasks=1, script={"select_init": ["open"], "acceptance_review": ["accepted"], "code_review": ["accepted"],
+                         "steward_decide": ["done"], "final_verify": ["incomplete", "accepted"]},
+        order=["preflight", "select_init"] + task(1) + ["final_verify"] * milestone.FINAL_ATTEMPTS,
+        output=output("done", "final_verify message #2")),
+    "q_final_incomplete_blocked": dict(
+        tasks=1, script={"select_init": ["open"], "acceptance_review": ["accepted"], "code_review": ["accepted"],
+                         "steward_decide": ["done"], "final_verify": ["incomplete"] * milestone.FINAL_ATTEMPTS},
+        order=["preflight", "select_init"] + task(1) + ["final_verify"] * milestone.FINAL_ATTEMPTS,
+        output=output("blocked", "final_verify message #%s" % milestone.FINAL_ATTEMPTS)),
+    "r_reverify_incomplete_blocked": dict(
+        tasks=1, script={"select_init": ["open"], "acceptance_review": ["accepted"], "code_review": ["accepted"],
+                         "steward_decide": ["done"], "final_verify": ["rejected"], "scope_verify": ["accepted"],
+                         "final_reverify": ["incomplete"] * milestone.FINAL_ATTEMPTS},
+        order=["preflight", "select_init"] + task(1) + ["final_verify", "repair", "scope_verify"]
+        + ["final_reverify"] * milestone.FINAL_ATTEMPTS,
+        output=output("blocked", "final_reverify message #%s" % milestone.FINAL_ATTEMPTS)),
 }
 for _scenario in SCENARIOS.values():
     # Every task iteration passes the read-only selection gate unless a scenario scripts it.
@@ -709,11 +766,13 @@ def main(argv=None):
     try:
         for name in names:
             started = time.monotonic()
-            if name in ADAPTER:
-                problems = run_adapter(name, ADAPTER[name], args.binary, root, args.timeout or 900, version)
-            else:
-                scenario = SCENARIOS[name]
-                problems = run_native(name, scenario, args.binary, root, args.timeout or 120 + 20 * len(scenario["order"]))
+            with marked():
+                if name in ADAPTER:
+                    problems = run_adapter(name, ADAPTER[name], args.binary, root, args.timeout or 900, version)
+                else:
+                    scenario = SCENARIOS[name]
+                    problems = run_native(name, scenario, args.binary, root,
+                                          args.timeout or 120 + 20 * len(scenario["order"]))
             failed += bool(problems)
             print("%s %s (%ss)%s" % ("FAIL" if problems else "PASS", name, int(time.monotonic() - started),
                                      "".join("\n  - " + p for p in problems)), flush=True)

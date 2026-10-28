@@ -6,7 +6,7 @@ import re
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
-LIVE = ("README.md", "docs/USER_FLOW.md", "docs/INSTALLATION.md", "docs/UPGRADE.md", "docs/REFERENCE.md")
+LIVE = ("README.md", "docs/USER_FLOW.md", "docs/INSTALLATION.md", "docs/UPGRADE.md", "docs/REFERENCE.md", "docs/ARCHITECTURE.md")
 LIST = re.compile(r"\s*(?:[-*+] |\d+[.)] )")
 TABLE = re.compile(r"\s*\|")
 LINE_UI = "\n# Line UI\n"

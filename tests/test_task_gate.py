@@ -57,12 +57,12 @@ def pinned_binary():
 
 # sha256 of the canonical documents captured on the base (6e23523), except the two graph goldens: C0a (the review
 # bar) adds the plan critic's bar to the v1 and v2 verifier text and A2a (the task brief) the brief fields to the
-# planner and verifier text and RC1 the milestone-isolation sentence to both, so a newly built graph carries it while the stored
+# planner and verifier text and RC1 the milestone-isolation sentence to both and H3 the dod sentence to the planner and H2 turns the v2 planner into a verifier (kind, empty signals, diagnostic) and H4 removes the dev marker from the node texts, rewrites DRIVER_MECHANICS and the critic's authority sentence and H5 words the final check once per milestone, so a newly built graph carries it while the stored
 # documents of already prepared, submitted or approved revisions keep their bytes. The runtime, input and the bare
 # configuration are still the base's bytes.
 BASE_GOLDEN = {
-    "v2_graph_2": "2d237bab4c2617d381fd9a9abf7f97e39b11b76a18c95a16bc1a49e3ba9f4f0b",
-    "v2_graph_3": "9cdaf964d2c30fbfa68a17e388b36319b8a4821bb3f0e483206996c3665fbd75",
+    "v2_graph_2": "90ab5eaf94da4347d5e1ca905bf648920421c3743372754bb902ecd48f12ac20",
+    "v2_graph_3": "50e2e9782acf2dd30f26e3e9446f15476c723007edaabfaef8d9667769eb28d4",
     "v2_runtime": "0f579a7650f32d8ca355a4129f4417e036e0a3d91f59c6a6da0d89775c448d00",
     "v2_input": "6caa2a7c3b63a299280836de9776f0003dc4d8ac26a8bd47e2c065f3bee0b2a1",
     "config_digest": "4cd20d1393ccd81f56cc118262e2be210bf9ab71bd3b27edb10960e9a84e407f",

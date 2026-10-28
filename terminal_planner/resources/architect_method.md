@@ -21,7 +21,7 @@ The Controller enforces the level, gates and checks.
 ## Brief
 - Goal; write-set as files (never functions or lines).
 - At most 5 acceptance criteria, each a visible behavior with one example: input or state -> what they see.
-- Non-goals reviewers must not require. Done = the task's new and changed tests pass, not the suite.
+- Non-goals reviewers must not require. Done = the task's DoD passes, not the suite.
 - An unconditional word ("any", "all", "never") or a text/parsing contract lists its inputs; numeric targets are measured.
 - Before a start: every value a criterion reads is reachable from the write-set; every test file pinning a string or name the brief changes (search them) is in the write-set or non-goals.
 - Replacing a UI element deletes the tests pinning its text or keys; one invariant test covers the surface.

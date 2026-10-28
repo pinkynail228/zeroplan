@@ -25,7 +25,11 @@ from . import toolchain
 from .authority import HISTORICAL_EFFORTS, NATIVE_EFFORTS, Blocked, canonical, decode, require
 
 
-ROLE_DEFAULTS = {"planner": "high", "plan_verifier": "high", "worker": "medium", "reviewer": "high", "steward": "high"}
+# Role defaults outside the process profile (the profile's own are in process.PRESETS): the efforts, the model every
+# role takes unless MODEL_OVERRIDES names it.
+ROLE_DEFAULTS = {"planner": "high", "plan_verifier": "high", "worker": "max", "reviewer": "high", "steward": "high"}
+DEFAULT_MODEL = "gpt-6.1-sol"
+MODEL_OVERRIDES = {"worker": "gpt-6.1-terra"}
 EFFORTS = NATIVE_EFFORTS
 
 def data_root():
@@ -43,7 +47,8 @@ def native_state_root():
 
 
 def default_roles():
-    return {role: {"model": "gpt-6.1-sol", "effort": effort} for role, effort in ROLE_DEFAULTS.items()}
+    return {role: {"model": MODEL_OVERRIDES.get(role, DEFAULT_MODEL), "effort": effort}
+            for role, effort in ROLE_DEFAULTS.items()}
 
 
 def validate_roles(value):

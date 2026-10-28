@@ -48,6 +48,13 @@ CONTENT_RULES = (
         r"[A-Za-z0-9._-]+")),
 )
 
+IMAGE_DIR = "docs/img/"
+IMAGE_MAX_BYTES = 2 * 1024 * 1024
+IMAGE_SIGNATURES = {
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+}
+
 REPORT_ORDER = (
     "openai", "anthropic", "github", "aws", "slack", "google", "yandex",
     "private-key", "jwt", "credential", "url-userinfo", "bearer", "home-path",
@@ -193,6 +200,17 @@ def printable(text):
     """
     text = text.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
     return text.translate(_PATH_ESCAPES)
+
+
+def is_readme_image(path, blob):
+    """The one non-UTF-8 blob the export accepts: a GIF or PNG under docs/img/.
+
+    The path, the format's signature and the size must all hold.
+    """
+    if not path.startswith(IMAGE_DIR) or len(blob) > IMAGE_MAX_BYTES:
+        return False
+    signatures = IMAGE_SIGNATURES.get(posixpath.splitext(path)[1])
+    return signatures is not None and blob.startswith(signatures)
 
 
 def line_digest(line):
@@ -449,13 +467,19 @@ def check(repo, rev, dir_path=None, private_terms=None):
             continue
         blob = proc.stdout
         contents[path] = blob
+        image = False
         try:
             text = blob.decode("utf-8")
         except UnicodeDecodeError:
-            add("unreadable", path, 0)
-            continue
+            if not is_readme_image(path, blob):
+                add("unreadable", path, 0)
+                continue
+            # An accepted image is still scanned for private terms on its raw
+            # bytes, so a GIF comment or a PNG text chunk cannot leak one.
+            image = True
+            text = blob.decode("latin-1")
         for number, text_line in enumerate(iter_lines(text), 1):
-            for rule, rx in CONTENT_RULES:
+            for rule, rx in (() if image else CONTENT_RULES):
                 if rx.search(text_line):
                     add(rule, path, number, raw_line=text_line)
             if private_terms:

@@ -266,7 +266,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(set(critic["input"]["fields"]), {"identity", "reasons", "paths", "briefs"})
         self.assertEqual(set(critic["signals"]), {"verdict"})
         self.assertEqual(critic["signals"]["verdict"], ["go", "block"])
-        self.assertIn("ZPLAN_NODE=critic", critic["instructions"])
+        self.assertNotIn("ZPLAN_NODE", critic["instructions"])  # H1: the qualification adds its marker
         self.assertEqual([b["value"]["channel"] for b in critic["writeBindings"]], ["signal", "diagnostic"])
         self.assertEqual([b["target"] for b in critic["writeBindings"]], [["verdict"], ["findings"]])
         self.assertEqual([n["name"] for n in nodes(graph["root"]) if n["kind"] == "fail"], ["critic_failed"])

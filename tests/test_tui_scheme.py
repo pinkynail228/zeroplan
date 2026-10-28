@@ -345,6 +345,33 @@ class SchemeTests(unittest.TestCase):
             with self.subTest(engine_name):
                 self.assertNotIn(engine_name, plain)  # no engine name survives
 
+    def test_final_check_retry_is_a_count_on_its_box_not_a_frame(self):
+        """H1/I5: the final check's retry loop has no frame of its own; a retry observation puts `↻2/2` on the final
+        check box at 120 columns, and nothing is added before the retry (count 1) or without a count."""
+        graph = self.milestone_graph()
+        loops = lambda text: [line for line in text.split("\n") if "↻" in line]  # noqa: E731
+        base = scheme.render(graph, {}, 120, 60).plain
+        retry = scheme.render(graph, {"final_verify_loop": {"count": 2}, "final_verify": {"state": "running"}}, 120, 60)
+        self.assertTrue(all(cell_len(line) <= 120 for line in retry.plain.split("\n")))
+        self.assertIn("final check ↻2/2", retry.plain)
+        self.assertEqual(len(loops(retry.plain)), len(loops(base)) + 1)
+        self.assertEqual(len(loops(base)), len(loops(scheme.render(graph, {"final_verify_loop": {"count": 1}}, 120, 60).plain)))
+        self.assertNotIn("final verify loop", scheme.render(graph, {"final_verify_loop": {"count": 2}}, 70, 60).plain)
+
+    def test_l2_the_flows_final_attempt_is_the_count_of_its_retry_loop(self):
+        """L2: `observation_from_flow` puts the final check's attempt as `count` on the loop of the check named in
+        the flow; the scheme draws `↻2/2` for attempt 2 and nothing for attempt 1, on the final check before a repair and on the
+        final re-check (the role word of that box) after one."""
+        graph = self.milestone_graph()
+        for check, title in (("final_verify", "final check"), ("final_reverify", "final re-check")):
+            for attempt, drawn in ((2, True), (1, False)):
+                flow = {"final": {"state": "running", "attempt": attempt, "check": check}}
+                with self.subTest(check=check, attempt=attempt):
+                    obs = scheme.observation_from_flow(flow)
+                    self.assertEqual(obs[check + "_loop"], {"count": attempt})
+                    self.assertEqual(title + " ↻2/2" in scheme.render(graph, obs, 120, 60).plain, drawn)
+        self.assertNotIn("_loop", "".join(scheme.observation_from_flow({"final": {"state": "running"}})))
+
     def test_u1b_a2_waiting_step_in_optional_branch_says_state_if_needed(self):
         """U1b A2: a waiting step inside an "if needed" branch shows `state.if_needed` as its word, never the
         branch name.

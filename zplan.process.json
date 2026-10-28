@@ -13,8 +13,8 @@
       "effort": "high"
     },
     "worker": {
-      "model": "gpt-6.1-sol",
-      "effort": "medium"
+      "model": "gpt-6.1-terra",
+      "effort": "max"
     },
     "reviewer": {
       "model": "gpt-6.1-sol",

@@ -98,6 +98,7 @@ COMMAND_ACTIONS = {
     "/retry": card_route("/retry"),
     # typed `/details` is the pane's former [i] unless an error card owns it (the card's route runs as before)
     "/details": card_route("/details", lambda screen, argument, key: screen.app.action_milestone_details()),
+    "/scheme": lambda screen, argument, key: screen.toggle_scheme_full(),
     "/open": lambda screen, argument, key: screen.open_file_tab(argument),
     "/diff": lambda screen, argument, key: screen.open_diff_tab(),
     "/language": lambda screen, argument, key: screen.choose_language(argument or None),

@@ -657,6 +657,8 @@ class ArchitectTests(unittest.TestCase):
         self.assertNotIn("## Brief", update)
         self.assertLessEqual(len(raw), 4600)
         self.assertNotIn("devtools/", method)
+        self.assertNotIn("new and changed tests", method)
+        self.assertIn("Done = the task's DoD passes, not the suite.", method)
         self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{4}", method))
         for text in (text, update):
             self.assertIn("zplan_state_update", text)

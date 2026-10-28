@@ -49,6 +49,7 @@ EXPECTED = (
     ("/log", "cmd.log", EVERYWHERE, None),
     ("/details", "cmd.details", EVERYWHERE, None),
     ("/retry", "cmd.retry", EVERYWHERE, None),
+    ("/scheme", "cmd.scheme", EVERYWHERE, None),
 )
 
 # A3's table, spelled out again (a name -> the states it acts in), so the check does not just read A1's tuple back.
@@ -84,16 +85,16 @@ class SlashRegistryTests(unittest.TestCase):
         offered.start()
         self.addCleanup(offered.stop)
 
-    def test_a1_commands_are_the_twenty_frozen_records_in_order(self):
-        """A1: `COMMANDS` is a tuple of frozen `Command(name, description_id, states, arg)` records — the twenty
+    def test_a1_commands_are_the_twenty_one_frozen_records_in_order(self):
+        """A1: `COMMANDS` is a tuple of frozen `Command(name, description_id, states, arg)` records — the twenty-one
         commands, with the state sets given, in the order given."""
         self.assertIsInstance(COMMANDS, tuple)
-        self.assertEqual(len(COMMANDS), 20)
+        self.assertEqual(len(COMMANDS), 21)
         self.assertEqual([(c.name, c.description_id, c.states, c.arg) for c in COMMANDS], list(EXPECTED))
         self.assertEqual([c.name for c in COMMANDS],
                          ["/plan", "/approve", "/decline", "/run", "/merge", "/diff", "/open", "/status", "/stop",
                           "/language", "/setup", "/help", "/new", "/quit", "/view", "/attempt", "/answer", "/log",
-                          "/details", "/retry"])
+                          "/details", "/retry", "/scheme"])
         for command in COMMANDS:
             with self.subTest(command.name):
                 self.assertIsInstance(command, Command)
@@ -163,11 +164,11 @@ class SlashRegistryTests(unittest.TestCase):
         self.assertEqual([c.name for c in matches("/", state="merge")],
                          ["/run", "/merge", "/diff", "/open", "/status", "/language", "/setup", "/help", "/new",
                           "/quit", "/view", "/attempt", "/answer", "/log", "/details", "/retry",
-                          "/plan", "/approve", "/decline", "/stop"])
+                          "/scheme", "/plan", "/approve", "/decline", "/stop"])
         self.assertEqual([c.name for c in matches("/", state="idle")],
                          ["/plan", "/run", "/diff", "/open", "/status", "/language", "/setup", "/help", "/new",
                           "/quit", "/view", "/attempt", "/answer", "/log", "/details", "/retry",
-                          "/approve", "/decline", "/merge", "/stop"])
+                          "/scheme", "/approve", "/decline", "/merge", "/stop"])
         self.assertEqual([c.name for c in matches("/d", state="idle")], ["/diff", "/details", "/decline"])
         self.assertEqual([c.name for c in matches("/d", state="merge")], ["/diff", "/details", "/decline"])
         # the prefix is matched as typed (see the module docstring): a different case reaches no command

@@ -40,13 +40,15 @@ class VersionTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertIn('\nversion = "%s"\n' % __version__, project)
         self.assertEqual(install.VERSION, __version__)
-        self.assertEqual(install.VERSION, "0.8.0")
-        self.assertIn("0.4.0", install.OWNED)  # the 0.8.0 installer keeps recognising the 0.4.0 launcher as ours
+        self.assertEqual(install.VERSION, "0.8.1")
+        self.assertIn("0.4.0", install.OWNED)  # the 0.8.1 installer keeps recognising the 0.4.0 launcher as ours
         self.assertIn("0.6.0", install.OWNED)  # and the 0.6.0 launcher too
         self.assertIn("0.6.1", install.OWNED)  # and the 0.6.1 launcher too
         self.assertIn("0.6.2", install.OWNED)  # and the 0.6.2 launcher
         self.assertIn("0.6.3", install.OWNED)  # and the 0.6.3 launcher
         self.assertIn("0.7.0", install.OWNED)  # and the 0.7.0 launcher
+        self.assertIn("0.8.0", install.OWNED)  # and the 0.8.0 launcher
+        self.assertEqual(install.OWNED[-1], install.VERSION)
         self.assertIn("0.5.0", install.OWNED)  # and the 0.5.0 launcher too
         self.assertIn("0.5.1", install.OWNED)  # and the 0.5.1 launcher too
         self.assertIn("0.5.2", install.OWNED)  # and the 0.5.2 launcher too
@@ -319,7 +321,7 @@ class InstalledGateTests(unittest.TestCase):
             self.assertFalse(str(Path(path).resolve()).startswith(str(checkout)), path)
 
     def test_launcher_prints_version_and_older_install_is_untouched(self):
-        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.8.0")
+        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.8.1")
         self.assertEqual(self.launcher.resolve(), (self.app / "bin/zplan").resolve())
         after = {path: value for path, value in tree(self.root / "data").items()
                  if not path.startswith("planning-kit/app/%s/" % install.VERSION)}
@@ -530,6 +532,21 @@ class InstallerUpgradeTests(unittest.TestCase):
         (backup,) = made.parent.glob("v3.backup-0.7.0-*")
         self.assertEqual((backup / "planning.json").read_text(), "original")
         self.assertIn(str(self.apps / "0.7.0"), output)
+        self.assertEqual(entry.resolve(), self.apps / install.VERSION / "bin/zplan")
+
+    def test_the_0_8_0_launcher_is_ours_and_is_the_rollback_target(self):
+        """V2: a 0.8.0 -> 0.8.1 install (and so `zplan update`) backs the store up, prints the 0.8.0 app as the
+        rollback target and swaps the launcher. Interpretations: none."""
+        entry = self.launcher_at("0.8.0")
+        made = self.store()
+        made.mkdir(parents=True)
+        (made / "planning.json").write_text("original")
+        code, output, calls, create = self.install("zplan %s\n" % install.VERSION)
+        self.assertEqual(code, 0)
+        create.assert_called()
+        (backup,) = made.parent.glob("v3.backup-0.8.0-*")
+        self.assertEqual((backup / "planning.json").read_text(), "original")
+        self.assertIn(str(self.apps / "0.8.0"), output)
         self.assertEqual(entry.resolve(), self.apps / install.VERSION / "bin/zplan")
 
     def test_main_turns_the_setup_follows_signal_into_the_login_line(self):

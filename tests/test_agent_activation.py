@@ -595,7 +595,7 @@ class DoctorTests(ActivationCase):
             code, screen = self.main(["doctor"])
         self.assertEqual(code, 1, screen.text())
         self.assertIn("not written yet", screen.text())
-        self.assertIn("zplan.default/2", screen.text())   # the report continued past the profile line (the process profile)
+        self.assertIn("zplan.default/3", screen.text())   # the report continued past the profile line (the process profile)
         self.assertEqual(self.ensures, [])                # doctor still writes nothing
 
 

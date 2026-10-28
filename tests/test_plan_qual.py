@@ -19,6 +19,8 @@ from devtools import driver_qual as dq  # noqa: E402
 from devtools import plan_qual  # noqa: E402
 from devtools.plan_qual import PlanProvider, SCENARIOS  # noqa: E402
 from terminal_planner.authority import Blocked, read_review  # noqa: E402
+from terminal_planner.engine import planner_graph_v2  # noqa: E402
+from test_plan_gate import nodes  # noqa: E402
 
 
 def record(*names):
@@ -26,9 +28,24 @@ def record(*names):
             "additionalProperties": False}
 
 
+def planner_node():
+    return next(n for n in nodes(planner_graph_v2(2)["root"]) if n["name"] == "planner")
+
+
 def contract(node):
     if node == "planner":
-        return record("proposal", "planResponse")
+        # Derived from the graph, so the request contract follows the planner's node kind (step: the bare output).
+        graph_node = planner_node()
+        output = record(*graph_node["output"]["fields"])
+        if graph_node["kind"] != "verifier":
+            return output
+        return {"type": "object", "required": ["output", "signals", "diagnostic"], "additionalProperties": False,
+                "properties": {"output": output,
+                               "signals": {"type": "object", "required": sorted(graph_node["signals"]),
+                                           "additionalProperties": False,
+                                           "properties": {k: {"type": "string", "enum": v}
+                                                          for k, v in graph_node["signals"].items()}},
+                               "diagnostic": record(*graph_node["diagnostic"]["fields"])}}
     return {"type": "object", "required": ["output", "signals", "diagnostic"], "additionalProperties": False,
             "properties": {"output": record("discussion"),
                            "signals": {"type": "object", "required": ["verdict"], "additionalProperties": False,
@@ -65,8 +82,8 @@ def play(scenario, continue_critic=True):
         last = answers
         if last["critic"]["signals"]["verdict"] == "accepted":
             break
-    output = {"schemaVersion": "2", "proposal": last["planner"]["proposal"],
-              "planResponse": last["planner"]["planResponse"], "planVerdict": last["critic"]["signals"]["verdict"],
+    output = {"schemaVersion": "2", "proposal": last["planner"]["output"]["proposal"],
+              "planResponse": last["planner"]["output"]["planResponse"], "planVerdict": last["critic"]["signals"]["verdict"],
               "planFindings": last["critic"]["diagnostic"]["message"],
               "discussion": last["critic"]["output"]["discussion"]}
     try:
@@ -124,6 +141,16 @@ class ScenarioTests(unittest.TestCase):
         provider.answer(request("planner", [{"proposal": "", "planResponse": ""}]))
         provider.answer(request("critic", previous=critic.response_id))
         self.assertEqual(len(provider.problems), 1)  # only the planner's replay lacked its own answer
+
+    def test_the_planner_is_answered_as_a_verifier_with_empty_signals_and_an_output(self):
+        """R3: the planner's request contract is taken from planner_graph_v2's planner node, a verifier without
+        signals, so the scripted answer carries the proposal in output, no signal and a diagnostic. With the node a
+        step again the contract is the bare record and the provider cannot answer it."""
+        self.assertEqual((planner_node()["kind"], planner_node()["signals"]), ("verifier", {}))
+        provider = PlanProvider(SCENARIOS["a_accept_r1"]["script"])
+        answer = provider.answer(request("planner"))
+        self.assertEqual(set(answer["output"]), {"proposal", "planResponse"})
+        self.assertEqual((answer["signals"], set(answer["diagnostic"])), ({}, {"message"}))
 
     def test_answers_are_checked_against_the_request_schema(self):
         provider = PlanProvider(SCENARIOS["a_accept_r1"]["script"])

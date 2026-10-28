@@ -102,8 +102,11 @@ class PlanProvider:
         contract = schema["properties"]["response"]
         if node == "planner":
             self.answered = "%s [%s]" % (response, token)
-            answer = {"proposal": canonical(fixture_proposal()), "planResponse": self.answered}
-            self.check_fields(node, contract, answer)
+            output = {"proposal": canonical(fixture_proposal()), "planResponse": self.answered}
+            answer = {"output": output, "signals": {}, "diagnostic": {"message": self.answered}}
+            if contract["properties"]["signals"].get("properties"):
+                raise dq.QualError("planner: expected no signals, got %s" % list(contract["properties"]["signals"]["properties"]))
+            self.check_fields(node, contract["properties"]["output"], output)
         else:
             text = "%s [%s]" % (findings, token)
             self.reported.append({"round": count, "verdict": verdict, "findings": text, "response": self.answered})
@@ -307,8 +310,9 @@ def main(argv=None):
         for name in names:
             started = time.monotonic()
             scenario = SCENARIOS[name]
-            problems = run_scenario(name, scenario, args.binary, root,
-                                    args.timeout or 180 + 90 * scenario["rounds"], version)
+            with dq.marked():
+                problems = run_scenario(name, scenario, args.binary, root,
+                                        args.timeout or 180 + 90 * scenario["rounds"], version)
             failed += bool(problems)
             print("%s %s (%ss)%s" % ("FAIL" if problems else "PASS", name, int(time.monotonic() - started),
                                      "".join("\n  - " + p for p in problems)), flush=True)

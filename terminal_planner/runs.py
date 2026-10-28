@@ -1665,7 +1665,7 @@ class MilestoneRuns:
         paths = gate_paths(project, head, tree)
         risk = risk_of(config, paths) if "risk" in config else {"tier": "high", "triggers": [], "unmatched": []}
         candidate = commit_candidate(project, r, tree, head, result, identity,
-                                     "Risk-Tier: %s\nChecks: %s passed" % (risk["tier"], digest(config["checks"])))
+                                     "Checks: %s passed" % digest(config["checks"]))
         from .setup import data_root
         try:
             evidence = checks.qualify(project, candidate, tree, config["checks"], data_root() / "checkouts")

@@ -261,8 +261,9 @@ def main(argv=None):
         for name in names:
             started = time.monotonic()
             scenario = SCENARIOS[name]
-            problems = run_scenario(name, scenario, args.binary, root,
-                                    args.timeout or 240 + 90 * scenario["rounds"], version)
+            with dq.marked():
+                problems = run_scenario(name, scenario, args.binary, root,
+                                        args.timeout or 240 + 90 * scenario["rounds"], version)
             failed += bool(problems)
             print("%s %s (%ss)%s" % ("FAIL" if problems else "PASS", name, int(time.monotonic() - started),
                                      "".join("\n  - " + p for p in problems)), flush=True)

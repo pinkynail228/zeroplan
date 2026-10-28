@@ -1,6 +1,6 @@
 # zplan reference
 
-Every command, flag, key, state and error code of zplan 0.3. The tables below are generated from the code
+Every command, flag, key, state and error code of zplan. The tables below are generated from the code
 (`python -m terminal_planner.catalog --write docs/REFERENCE.md`) and a test fails when they drift; the
 sections around them are written by hand. For the first run read README.md; for screen-by-screen behaviour
 read USER_FLOW.md.
@@ -24,8 +24,8 @@ and `?` on any screen lists that screen's keys. None of them needs tools, a logi
 | Git project | The repository you open zplan in (or `--project`). | Branches, worktrees, the merged result. |
 
 zplan never decides run lifecycle itself. It submits, watches and reconciles; after an interruption it asks
-Zeroshot what happened (`[g]`) instead of submitting again. A model never runs unless you press the key that
-says so; `--fixture` replaces the engine with a deterministic demo that spends no tokens.
+Zeroshot what happened (`[g]`) instead of submitting again. At autonomy `manual` a model never runs unless you
+approve it; at `auto` and `supervised` zplan starts runs itself. `--fixture` replaces the engine with a deterministic demo that spends no tokens.
 
 ### Pinned tools versus global installs
 
@@ -107,7 +107,7 @@ shown as `approved despite the check` next to the unchanged rejected verdict.
 
 Each milestone is run as one Zeroshot run, an *attempt*. A failed or blocked attempt is never edited: `[t]`
 starts a new attempt (numbered `a1`, `a2`, ...), `[g]` continues a `failed_recoverable` run in its worktree.
-Only one attempt may write per project at a time.
+Up to 3 attempts may run per project at a time, with disjoint write-sets.
 
 ### Worktrees and branches
 
@@ -129,8 +129,8 @@ differences») when one of them, or a parent of one, exists in the project as un
 ignored `.env` is never overwritten. If your set of uncommitted changes differs right after the landing from right before
 it, the merge stays landed and the run records it; zplan never resets or checks out. While a merge is unfinished in the
 project (`MERGE_HEAD`) every `[m]` is refused (`milestone.merge_refused`): finish it or run `git merge --abort`.
-With `gates.merge: required` the merge first builds a candidate commit (the message carries `Risk-Tier:` and `Checks:`
-lines), runs the profile `checks` on exactly that commit, and only if they pass and HEAD and the profile are unchanged
+With `gates.merge: required` the merge first builds a candidate commit (the message carries a `Checks:`
+line), runs the profile `checks` on exactly that commit, and only if they pass and HEAD and the profile are unchanged
 fast-forwards the destination to it (`merge.checks_failed` otherwise). The evidence is kept in the run's `gate` record.
 
 ### State and data directories
@@ -160,7 +160,7 @@ file without asking and refuses when one exists.
 
 | Key | Type | Allowed values | Acts in this version |
 | --- | --- | --- | --- |
-| `preset` | string | `zplan.default/1` (frozen once shipped; a later preset arrives as `/2` with a migration) | Names the defaults for every key you omit. |
+| `preset` | string | `zplan.default/1`, `/2` or `/3` (each frozen once shipped; a change arrives as a new version). `/3`, the one a new profile gets, defaults the worker to `gpt-6.1-terra` at effort `max` and every other role to `gpt-6.1-sol` high; `/1` and `/2` keep `gpt-6.1-sol` for every role | Names the defaults for every key you omit. |
 | `roles` | object | keys `planner`, `critic`, `worker`, `reviewer`, `steward`, `architect`; each `{"model": ..., "effort": ...}` with effort `low`, `medium`, `high`, `xhigh` or `max` | Yes: feeds the role preferences of every new plan revision and milestone attempt. `critic` is the former `plan_verifier`; `architect` sets the model and effort of each architect chat turn (the full-screen chat re-reads the role before every turn). Existing revisions and attempts keep the roles they were frozen with; restart, revise, a new attempt, an answer and an accepted proposal take the file's current roles. |
 | `gates` | object | keys `plan`, `task`, `merge`; each `required` or `off` | `plan` must be `required`: the critic reviews every plan and approval needs its acceptance. `task` is accepted, but `required` blocks milestone start with a named refusal (`process.unbuilt`) until the gate exists. `merge: required` gates the merge (see `checks`); `off` is shown as «no check». |
 | `limits` | object | keys `plan_rounds`, `task_rounds`, `merge_rounds`; integers 1–10, `plan_rounds` 1–5 | `plan_rounds` is the number of plan–critic rounds a new plan revision may use; it is frozen into the revision with the rules and roles (preset `zplan.default/1` keeps 3). `task_rounds` bounds the repair rounds of every task review loop of a milestone run from that revision: the loop runs one implementation pass plus `task_rounds` repairs (preset `zplan.default/1` keeps 2, so 3 iterations); it is frozen into the revision like `plan_rounds`, and a milestone built without a frozen profile keeps the fixed 4. `merge_rounds` is stored and shown only. |
@@ -177,7 +177,7 @@ only shows the roles (they live in the file).
 {
   "preset": "zplan.default/1",
   "rules": ["AGENTS.md"],
-  "roles": {"worker": {"model": "gpt-6.1-sol", "effort": "medium"}},
+  "roles": {"worker": {"model": "gpt-6.1-terra", "effort": "max"}},
   "gates": {"plan": "required", "task": "off", "merge": "off"},
   "limits": {"plan_rounds": 3, "task_rounds": 2, "merge_rounds": 2},
   "checks": [{"name": "unit", "argv": ["npm", "test"], "timeout_s": 1800}]

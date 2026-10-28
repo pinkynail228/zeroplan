@@ -6,9 +6,9 @@ criterion, plus the invariants the gate can break (the destination moving or the
 run, the tree and the store after a refusal).
 
 Interpretations (none of them waives a stated requirement):
-- The candidate's `Risk-Tier:` line is written into its own message, so the risk is read from `git diff --name-only
-  --no-renames -z <head> <candidate tree>` - the same paths as the diff against the candidate itself, known before the
-  commit exists. `--no-renames` lists a rename's old path too, so a moved secret file still counts.
+- The risk is read from `git diff --name-only --no-renames -z <head> <candidate tree>` - the same paths as the diff
+  against the candidate itself, known before the commit exists; it is stored in the gate record and the candidate's
+  message does not carry it (H4: no `Risk-Tier:` line). `--no-renames` lists a rename's old path too, so a moved secret file still counts.
 - The message says `Checks: <digest> passed` when the commit is written, before the checks run; the commit only lands
   if they passed.
 - A checkout refusal (no evidence exists) saves no gate record; any run that produced evidence, passed or failed,
@@ -115,7 +115,8 @@ class MergeGateTests(tpr.ProfileTest):
         self.assertEqual(self.parents(candidate), [head, result_commit])
         self.assertEqual((stored["delivery"], stored["integration"]["commit"]), ("integrated", candidate))
         message = self.git("log", "-1", "--format=%B", candidate).decode()
-        self.assertIn("Risk-Tier: high", message)  # a /1 profile has no risk rules: the highest tier
+        self.assertNotIn("Risk-Tier", message)  # H4: the risk lives in the gate record, not in the commit
+        self.assertEqual(gate["risk"]["tier"], "high")  # a /1 profile has no risk rules: the highest tier
         self.assertIn("Checks: %s passed" % digest(CHECKS), message)
         self.assertEqual(gate["candidate"], candidate)
         self.assertEqual((gate["head"], gate["result"], gate["destination"]), (head, result_commit, "refs/heads/main"))

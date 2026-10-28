@@ -1,7 +1,7 @@
 """The `/` command registry of the chat input: the main screen's commands, their states and their arguments.
 
 Pure data and functions — no app, no I/O, no engine call, nothing imports this module yet (the integration run i2
-wires it to the app's actions). `COMMANDS` is the one ordered tuple of the twenty commands; each frozen `Command`
+wires it to the app's actions). `COMMANDS` is the one ordered tuple of the twenty-one commands; each frozen `Command`
 carries its English name, the id of its description in the string catalog (u2 owns the texts, this module keeps
 only the ids), the screen states it acts in, and its argument rule (`arg`). `parse(line)` turns one typed line into
 a `Parsed` — the resolved command or None for an unknown name, the raw name as typed, and the argument text — or
@@ -53,8 +53,8 @@ class Command:
     arg: Arg | None = None
 
 
-# The twenty commands, in the order the palette and the help list them: /plan, /approve, /decline, /run, /merge, /diff,
-# /open, /status, /stop, /language, /setup, /help, /new, /quit, /view, /attempt, /answer, /log, /details, /retry. K1a: the last
+# The twenty-one commands, in the order the palette and the help list them: /plan, /approve, /decline, /run, /merge, /diff,
+# /open, /status, /stop, /language, /setup, /help, /new, /quit, /view, /attempt, /answer, /log, /details, /retry, /scheme. K1a: the last
 # five are the plan pane's former letter keys (p, o and w, t, e, i); they act in every state, as the keys did, and
 # follow the original fourteen so the palette's seven rows (`palette.MAX_ROWS`) still open with the same commands.
 # K1b: `/plan` acts where a goal can start or an open draft card is sent (idle, draft) and after a failure (error); its
@@ -63,7 +63,8 @@ class Command:
 # while a milestone or the planner runs; `/run` acts in every state, as the pane's `g` did (K1a: a ready stage is
 # started beside an open draft, a merge wait or an owner question; with nothing to run it says so); the rest act in
 # every state. RS2: `/retry` is the failure and readiness cards' «try again» button typed; it acts in every state
-# (a card outlives the state it was raised in) and, with no open card that offers it, says `note.not_now`.
+# (a card outlives the state it was raised in) and, with no open card that offers it, says `note.not_now`. T4e: `/scheme`
+# acts in every state and toggles the block scheme on the whole window.
 COMMANDS = (
     Command("/plan", "cmd.plan", frozenset(("idle", "draft", "error")), Arg("goal")),
     Command("/approve", "cmd.approve", frozenset(("plan_ready", "question", "error"))),
@@ -86,6 +87,7 @@ COMMANDS = (
     Command("/log", "cmd.log", STATES),
     Command("/details", "cmd.details", STATES),
     Command("/retry", "cmd.retry", STATES),
+    Command("/scheme", "cmd.scheme", STATES),
 )
 
 _BY_NAME = {command.name: command for command in COMMANDS}

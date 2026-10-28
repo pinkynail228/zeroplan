@@ -10,6 +10,7 @@ No terminal, no Textual, no store: pure helpers over plain dicts, plus the one b
 
 from collections import deque
 from datetime import datetime, timezone
+import itertools
 import json
 import os
 import re
@@ -37,12 +38,13 @@ VERDICT_TEXT = 160  # characters of a remembered one-line reason kept (C4a)
 VERDICT_KEYS = frozenset({"at", "task", "round", "role", "verdict", "text"})  # one stored verdict's keys (C4a)
 STEPS_LIMIT = 16  # planner graph steps kept per attempt (P2a): oldest dropped
 KEYS = frozenset({"started", "last_event", "heartbeat", "detached", "nodes", "journal", "executions", "cursors",
-                  "task", "workers", "repairs", "progress", "amendments", "command", "verdicts", "steps"})
-# A live record written before C3a has no `command` key, one written before C4a no `verdicts` and one written before
-# P2a no `steps`; every older shape is accepted, anything else is refused.
-ACCEPTED_KEYS = tuple(KEYS - set(missing) for missing in (
-    (), ("command",), ("verdicts",), ("steps",), ("command", "verdicts"), ("command", "steps"),
-    ("verdicts", "steps"), ("command", "verdicts", "steps")))
+                  "task", "workers", "repairs", "progress", "amendments", "command", "verdicts", "steps", "finals"})
+# A live record written before C3a has no `command` key, one written before C4a no `verdicts`, one written before
+# P2a no `steps` and one written before the final check's attempt no `finals`; every older shape is accepted,
+# anything else is refused.
+LATER_KEYS = ("command", "verdicts", "steps", "finals")
+ACCEPTED_KEYS = tuple(KEYS - set(missing) for size in range(len(LATER_KEYS) + 1)
+                      for missing in itertools.combinations(LATER_KEYS, size))
 # Native node (any graph) -> the role the owner reads. Unknown nodes keep their raw name.
 ROLES = {"worker": "worker", "code_review": "code review", "acceptance_review": "acceptance",
          "steward_apply": "steward", "final_verify": "final check", "final_reverify": "final check",
@@ -56,7 +58,7 @@ PLANNER_ROLES = dict(ROLES, repair="plan rework")
 def new():
     return {"started": None, "last_event": None, "heartbeat": None, "detached": None, "nodes": [], "journal": [],
             "executions": [], "cursors": [], "task": None, "workers": 0, "repairs": 0, "progress": None,
-            "amendments": None, "command": None, "verdicts": [], "steps": []}
+            "amendments": None, "command": None, "verdicts": [], "steps": [], "finals": 0}
 
 
 def valid(value):
@@ -101,6 +103,7 @@ def valid(value):
             and strings(value["executions"], EXECUTIONS_LIMIT) and strings(value["cursors"], CURSORS_LIMIT)
             and (value["task"] is None or isinstance(value["task"], str))
             and all(counter(value[k]) for k in ("workers", "repairs", "progress", "amendments"))
+            and counter(value.get("finals"))
             and command(value.get("command"))
             and ("verdicts" not in value or verdicts(value["verdicts"]))
             and ("steps" not in value or steps(value["steps"])))
@@ -238,8 +241,11 @@ def stages(live, status, stamp, tasks=()):
             text = "%s: recording the result" % owner if owner is not None else "recording the result"
         elif node == "repair":
             live["repairs"] += 1
+            live["finals"] = 0  # the repair starts a new run of final checks
             text = "final check: repair %s" % live["repairs"]
         elif node in ("final_verify", "final_reverify", "scope_verify"):  # the milestone's final check and its retries
+            if node != "scope_verify":
+                live["finals"] = live.get("finals", 0) + 1  # an older record counts from here
             text = "final check"
         elif node in ROLES:
             text = ROLES[node]
@@ -364,8 +370,10 @@ def flow(live, started, now, rounds=None):
     two task reviewers (acceptance then code, exactly two) each read running while active, otherwise the newest
     `verdicts` entry for this task, round and role, otherwise waiting, with that matching entry's one-line text kept
     available whenever it exists (a reviewer can reappear for a later retry while its verdict is still stored) or "";
-    the last step (a `final_verify`/`final_reverify`/`scope_verify`/`repair` node) and whether a task-picking node
-    is active;
+    the last step (a `final_verify`/`final_reverify`/`scope_verify`/`repair` node) with the final check's attempt
+    (`live["finals"]`: its executions since the last repair, None when none ran, an older record has none) and the
+    check that attempt belongs to (`final_verify` before any repair, `final_reverify` after one), and whether a
+    task-picking node is active;
     the ROLES words of the active nodes in order and without duplicates; the seconds since `started` and since the
     later of `live["last_event"]` and the command's stamp (never negative, None when a stamp is unknown); the echoed
     command text; and the detachment stamp."""
@@ -416,10 +424,12 @@ def flow(live, started, now, rounds=None):
     if command is not None and (not activity or parse(command["at"]) > parse(activity)):
         activity = command["at"]
 
+    attempt = live.get("finals") or None
+    check = None if attempt is None else "final_reverify" if live["repairs"] else "final_verify"
     return {"task": task or None, "round": number, "rounds": rounds, "worker": {"state": worker_state},
             "reviewers": reviewers,
             "final": {"state": "running" if on("final_verify", "final_reverify", "scope_verify", "repair")
-                      else "waiting"},
+                      else "waiting", "attempt": attempt, "check": check},
             "select": on("select_init", "select", "select_verify", "steward_apply", "steward_decide"),
             "active": seen, "elapsed": seconds_between(started, now), "silence": seconds_between(activity, now),
             "command": command["text"] if command is not None else None, "detached": live["detached"]}

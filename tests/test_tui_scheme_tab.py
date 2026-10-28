@@ -46,13 +46,13 @@ def reviewer(role, name, state):
     return {"role": role, "name": name, "state": state, "text": ""}
 
 
-def flow(worker="running", round=2, rounds=4, reviewers=None, final="waiting"):
+def flow(worker="running", round=2, rounds=4, reviewers=None, final="waiting", attempt=None):
     """A `live.flow` (F1) of a running worker in round 2 of 4, both reviewers running (`live.flow`'s own shape)."""
     if reviewers is None:
         reviewers = [reviewer("acceptance_review", "приёмка", "running"),
                      reviewer("code_review", "ревью кода", "running")]
     return {"task": "T1", "round": round, "rounds": rounds, "worker": {"state": worker}, "reviewers": reviewers,
-            "final": {"state": final}, "select": True, "active": ["исполнитель"],
+            "final": {"state": final, "attempt": attempt, "check": "final_verify" if attempt else None}, "select": True, "active": ["исполнитель"],
             "elapsed": 300, "silence": 5, "command": "python3.13 -m unittest tests.test_tui_scheme_tab",
             "detached": None}
 
@@ -324,6 +324,139 @@ class SchemeTabTests(MilestoneShell):
             counted = scheme.render(loop_graph, observation, 60, 30, limits={"review_loop": 4}).plain
             self.assertIn("↻2/4", counted)
 
+    async def test_l2_the_final_check_attempt_is_drawn_in_the_scheme_tab(self):
+        """L2: a flow whose final check runs at attempt 2 draws `final check ↻2/2` in the Scheme tab text, attempt
+        1 draws no count (a flow without the attempt, as an older record gives, draws as before)."""
+        self.approve(running=True)
+        async with self.shell(size=(120, 60)) as pilot:
+            await self.loaded(pilot)
+            await self.drawn(pilot)
+            await self.inject(pilot, flow(final="running", attempt=2))
+            self.assertIn("final check ↻2/2", "\n".join(self.main().live_lines))
+            await self.inject(pilot, flow(final="running", attempt=1))
+            self.assertNotIn("final check ↻", "\n".join(self.main().live_lines))
+
+    async def test_t4e_scheme_on_the_whole_screen_draws_boxes_and_scrolls_to_the_running_one(self):
+        """T4e F1/F2/F4: `/scheme` hides the chat, the activity pane and the input; the canvas is the window width
+        minus the frame, the padding and the scrollbar (6 cells) and holds box frames (`acceptance review` and
+        `code review` side by side), also at 120x30 where the Scheme tab's own pane draws the one-line list; the
+        running box's row is inside the visible region after a repaint; with no flow the text is today's `live_view()`.
+        Interpretations: the Esc and `/scheme`-again halves are `test_t4e_esc_...`; "box frames" are read from the
+        live text (the `╭` rows holding both reviewer titles), "visible" from the pane's scroll offset and height."""
+        self.approve(running=True)
+        async with self.shell(size=(120, 30)) as pilot:
+            await self.loaded(pilot)
+            await self.inject(pilot, flow(worker="done"))
+            await self.drawn(pilot)
+            screen = self.main()
+            self.assertNotIn("╭", "".join(screen.live_lines[:1]), screen.live_lines)  # the 40% column: the list
+            screen.run_command("/scheme")
+            await self.until(pilot, lambda: "flow" in self.live().classes and not self.app.query_one("#chat-pane").display
+                             and any("acceptance review" in line and "code review" in line for line in screen.live_lines))
+            await pilot.pause()
+            for hidden in ("#chat-pane", "#activity", "#input"):
+                self.assertEqual(self.app.query_one(hidden).region.width, 0, hidden)
+            self.assertGreaterEqual(self.pane().scrollable_content_region.width, 120 - 6)
+            top = next(i for i, line in enumerate(screen.live_lines) if "┏" in line)  # the running box's frame
+            region = self.pane().scrollable_content_region
+            self.assertTrue(region.height < len(screen.live_lines))  # the drawing is not cut to the pane: it scrolls
+            self.assertTrue(self.pane().scroll_y <= top and top + 2 < self.pane().scroll_y + region.height)
+            self.pane().scroll_to(y=self.pane().max_scroll_y, animate=False)  # the owner scrolled away ...
+            await pilot.pause()
+            self.app.changed()  # ... and the next repaint brings the running box back into view
+            await self.until(pilot, lambda: self.pane().scroll_y <= top < self.pane().scroll_y + region.height)
+            self.app.snapshot = replace(self.app.snapshot, flow=None)
+            self.app.changed()
+            await self.until(pilot, lambda: list(screen.live_lines) == screen.live_view())  # F4: today's text
+
+    async def test_t4e_esc_and_a_second_scheme_restore_the_layout_the_tab_and_the_focus(self):
+        """T4e F3/F5: `/scheme` typed on the whole screen (the `/` brings the prompt and the palette up at the bottom)
+        or Esc restores the chat, the activity pane, the 40% column, the tab and the focus (the input) it had; an open
+        palette takes the first Esc, the whole screen the second; `/scheme` is offered by the palette.
+        Interpretation: the starting tab is "Plan" (the fixture's), so the restore is checked against it; the prompt
+        on the whole screen is a strip over the bottom of the canvas, closed again by Esc, an emptied input or a
+        command."""
+        self.approve(running=True)
+        async with self.shell(size=(120, 40)) as pilot:
+            await self.loaded(pilot)
+            screen = self.main()
+            palette = self.app.query_one("#palette")
+            column = self.app.query_one("#right-column").region.width
+            tab = self.app.query_one("#right").active
+            self.assertEqual(self.app.focused.id, "input")
+            await pilot.press("/", "s", "c", "h")
+            await pilot.pause()
+            self.assertIn("/scheme", [command.name for command in palette.found])
+            await pilot.press("e", "m", "e", "enter")
+            for leave in ("esc", "/scheme"):
+                await self.until(pilot, lambda: screen.scheme_full and self.app.focused.id == "live-pane")
+                self.assertEqual(self.app.query_one("#right").active, "tab-live")
+                self.assertFalse(self.app.query_one("#chat-pane").display)
+                # a `/` on the whole screen opens the palette; Esc closes it first and the whole screen stays
+                await pilot.press("/")
+                await self.until(pilot, lambda: palette.display and self.app.focused.id == "input")
+                await pilot.press("escape")
+                await self.until(pilot, lambda: not palette.display and self.app.focused.id == "live-pane")
+                self.assertTrue(screen.scheme_full)
+                self.assertFalse(self.app.query_one("#chat-pane").display)
+                if leave == "esc":
+                    await pilot.press("escape")
+                else:
+                    await pilot.press("/", "s", "c", "h", "e", "m", "e", "enter")
+                await self.until(pilot, lambda: not screen.scheme_full and self.app.query_one("#chat-pane").display)
+                await pilot.pause()
+                self.assertEqual(self.app.query_one("#right").active, tab)
+                self.assertEqual(self.app.focused.id, "input")
+                self.assertTrue(self.app.query_one("#activity").display)
+                self.assertEqual(self.app.query_one("#right-column").region.width, column)
+                if leave == "esc":
+                    await pilot.press("/", "s", "c", "h", "e", "m", "e", "enter")
+
+
+    async def test_s1b_leaving_the_scheme_wraps_the_status_at_the_chat_panes_real_width(self):
+        """S1b B1/B2: Esc from `/scheme` called `render_state` before the layout returned, so `render_status` measured
+        the hidden `#chat-pane` (content width 0 -> 20 cells) and kept "_invalid]" of the message until its text moved.
+        B1: after Esc, once the layout has settled, `#status` holds the lines it had before `/scheme`. B2: a status
+        update while the scheme is shown stores nothing, and after Esc the lines are those of the pane's real width.
+        Interpretations: "the same lines as before" is read from `status_text`; "the lines at 68 cells" from the
+        chat pane's content width at 120x40 (asserted, so a layout change cannot hollow the test out)."""
+        message = "zplan tools are not installed: run zplan setup. [code: setup.tools_invalid]"
+        later = "zplan tools are damaged: run zplan setup again, then restart. [code: setup.tools_damaged]"
+        self.approve(running=True)
+        async with self.shell(size=(120, 40)) as pilot:
+            await self.loaded(pilot)
+            screen = self.main()
+            pane = self.app.query_one("#chat-pane")
+            self.app.chat_note = message
+            screen.render_state()
+            await pilot.pause()
+            before = screen.status_text
+            self.assertEqual(pane.content_region.width, 68)
+            self.assertIn("setup.tools_invalid]", before)
+            self.assertIn("zplan tools are not installed", before)
+            for change in (None, later):  # B1: nothing changed during `/scheme`; B2: the status changed during it
+                shown = screen.status_text
+                screen.run_command("/scheme")
+                await self.until(pilot, lambda: screen.scheme_full and pane.content_region.width == 0)
+                if change:
+                    self.app.chat_note = change
+                    screen.render_state()
+                    await pilot.pause()
+                    self.assertEqual(screen.status_text, shown)  # nothing measured at width 0 is stored
+                await pilot.press("escape")
+                await self.until(pilot, lambda: not screen.scheme_full and pane.content_region.width == 68)
+                await pilot.pause()
+                await pilot.pause()
+                settled = screen.status_text
+                screen.status_text = None  # what a repaint at the settled width stores
+                screen.render_status()
+                self.assertEqual(settled, screen.status_text)
+                if not change:
+                    self.assertEqual(settled, before)
+                else:
+                    self.assertNotEqual(settled, before)
+                self.assertIn("setup.tools_" + ("damaged" if change else "invalid") + "]", screen_text(self.app))
+
 
 @unittest.skipUnless(HAVE_RICH, RICH_REASON)
 class SchemeContractTests(unittest.TestCase):
@@ -349,7 +482,7 @@ class SchemeContractTests(unittest.TestCase):
     def test_a9_one_test_per_criterion_through_the_shell(self):
         """A9: this module keeps exactly one test per acceptance criterion A1-A8 (and this one for A9), each driving
         the real shell through `tests/tui_support.py` (`SchemeContractTests`' two are the pure halves A8 needs)."""
-        names = [name for cls in (SchemeTabTests, SchemeContractTests) for name in dir(cls) if name.startswith("test_")]
+        names = [name for cls in (SchemeTabTests, SchemeContractTests) for name in dir(cls) if name.startswith("test_a")]
         for criterion in "123456789":
             with self.subTest(criterion=criterion):
                 self.assertEqual(len([name for name in names if name.startswith("test_a%s_" % criterion)]), 1, names)

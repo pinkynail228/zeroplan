@@ -35,6 +35,7 @@ COMMIT_MESSAGE = "zplan profile"
 STATE_FILE = "process-state.json"
 PRESET = "zplan.default/1"
 PRESET_V2 = "zplan.default/2"
+PRESET_V3 = "zplan.default/3"
 ROLES = ("planner", "critic", "worker", "reviewer", "steward", "architect")
 GATES = ("plan", "task", "merge")
 LIMITS = ("plan_rounds", "task_rounds", "merge_rounds")
@@ -81,6 +82,8 @@ STATE_NAMES = {"never": "not accepted", "later": "not saved (postponed)", "accep
 # the autonomy gate, the wake-up and stuck rules, admission): the autonomy level and `max_runs` act today and are
 # shown as they are; the rest of the section is shown "for later stages". The whole-number defaults and bounds come from ARCHITECT_DESIGN 4.2/4.3 (a worker
 # round past 45 min, a run past 2 h, round 3, three runs, the wake-up hourly cap, the architect retry limit).
+#
+# zplan.default/3 is /2 with the worker on gpt-6.1-terra at effort max; what a first start proposes.
 PRESETS = {
     PRESET: {
         "roles": {"planner": ("gpt-6.1-sol", "high"), "critic": ("gpt-6.1-sol", "high"),
@@ -117,6 +120,9 @@ PRESETS = {
         },
     },
 }
+# zplan.default/3 is /2 as it is (gates, limits, `autonomy`, `risk`); only the worker binding differs.
+PRESETS[PRESET_V3] = dict(copy.deepcopy(PRESETS[PRESET_V2]),
+                          roles=dict(PRESETS[PRESET_V2]["roles"], worker=("gpt-6.1-terra", "max")))
 
 
 class ProfileChanged(Blocked):
@@ -143,7 +149,7 @@ def binding(key, value, efforts=NATIVE_EFFORTS):
         raise invalid(key, "an object {\"model\": ..., \"effort\": ...} is required",
                       "Give model and effort, or delete the key to take the preset's value.")
     if not (isinstance(value["model"], str) and MODEL.fullmatch(value["model"])):
-        raise invalid(key + ".model", "invalid model id", "Give a model ID, for example gpt-6.1-sol.")
+        raise invalid(key + ".model", "invalid model id", "Give a model ID, for example gpt-6.1-terra.")
     if not (isinstance(value["effort"], str) and value["effort"] in efforts):
         raise invalid(key + ".effort", "allowed: " + ", ".join(sorted(efforts)), "Fix the value.")
     return {"model": value["model"], "effort": value["effort"]}
@@ -674,12 +680,12 @@ def propose(project, saved):
     """The profile a first start offers: the preset with the roles the owner already saved, the rules files found
     and the obvious test command. Written verbatim on accept. The merge gate is offered `required` only where a check
     was found (a required gate without checks refuses every merge); the preset's constants are not changed."""
-    base = resolve({"preset": PRESET_V2}, saved, project)
+    base = resolve({"preset": PRESET_V3}, saved, project)
     checks = detect_checks(project)
     gates = dict(base.config["gates"])
     if checks:
         gates["merge"] = "required"
-    return {"preset": PRESET_V2, "rules": found_rules(project),
+    return {"preset": PRESET_V3, "rules": found_rules(project),
             "roles": {name: dict(base.config["roles"][name]) for name in ROLES},
             "gates": gates, "limits": dict(base.config["limits"]),
             "autonomy": dict(base.config["autonomy"]), "checks": checks}
@@ -1246,7 +1252,7 @@ def bootstrap_lines(status):
         lines = ["Project process profile: found %s - its values are shown." % PROFILE_FILE]
     else:
         lines = ["Project process profile (%s): proposal." % (resolved.config["preset"] if resolved is not None
-                                                             else PRESET_V2)]
+                                                             else PRESET_V3)]
     rules = [p for p, _ in resolved.rules] if resolved is not None else []
     lines.append("  Rules for agents (apply when planning): %s" % (", ".join(rules) if rules
                                                                              else "none found (AGENTS.md, CLAUDE.md)"))

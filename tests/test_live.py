@@ -533,7 +533,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(out["reviewers"],
                          [{"role": "acceptance_review", "name": "acceptance", "state": "waiting", "text": ""},
                           {"role": "code_review", "name": "code review", "state": "waiting", "text": ""}])
-        self.assertEqual(out["final"], {"state": "waiting"})
+        self.assertEqual(out["final"], {"state": "waiting", "attempt": None, "check": None})
         self.assertFalse(out["select"])
         self.assertEqual(out["active"], ["worker"])
         self.assertEqual(out["command"], "pytest")
@@ -605,9 +605,41 @@ class FlowTests(unittest.TestCase):
     def test_a1_a_final_verify_node_reads_as_the_final_running_step(self):
         data = self.record(task="T1", workers=1, nodes=[["final_verify", "T1-f1"]])
         out = live.flow(data, START, self.NOW)
-        self.assertEqual(out["final"], {"state": "running"})
+        self.assertEqual(out["final"], {"state": "running", "attempt": None, "check": None})
         self.assertFalse(out["select"])
         self.assertEqual(out["worker"], {"state": "waiting"})  # no worker node is active
+
+    def test_l1_the_final_checks_attempt_counts_its_executions_since_the_last_repair(self):
+        """L1/L3: `stages` counts the executions of `final_verify`/`final_reverify` (`live["finals"]`) and a repair
+        starts the count over; `flow` carries that count as `final.attempt` with the check it belongs to.
+
+        Interpretations: the check is `final_verify` before any repair and `final_reverify` after one (the repair
+        counter tells them apart; the stored executions are told apart by their node names); `scope_verify` is not a
+        run of the final check; the count also stays while the repair or another node is the active one, 0 -> None;
+        a record written before the count has no `finals` key, is valid as it is and reads as attempt None."""
+        def run(data, node, tag):
+            live.stages(data, {"activeExecutions": [{"node": node, "execution": "nv2-" + tag * 64}]}, START, ("T1",))
+            return live.flow(data, START, self.NOW)["final"]
+
+        data = live.new()
+        self.assertEqual(live.flow(data, START, self.NOW)["final"], {"state": "waiting", "attempt": None, "check": None})
+        self.assertEqual(run(data, "final_verify", "a"), {"state": "running", "attempt": 1, "check": "final_verify"})
+        self.assertEqual(run(data, "final_verify", "b")["attempt"], 2)
+        self.assertEqual(run(data, "final_verify", "b")["attempt"], 2)  # the same execution is not counted twice
+        self.assertEqual(run(data, "repair", "c"), {"state": "running", "attempt": None, "check": None})
+        self.assertEqual(run(data, "scope_verify", "d")["attempt"], None)
+        self.assertEqual(run(data, "empty_final_reverify", "e"),
+                         {"state": "running", "attempt": 1, "check": "final_reverify"})
+        self.assertEqual(run(data, "final_reverify", "f")["attempt"], 2)
+        self.assertTrue(live.valid(data))
+        older = live.new()
+        del older["finals"]
+        self.assertTrue(live.valid(older))
+        out = live.flow(self.record(nodes=[["final_verify", "x"]], **{}), START, self.NOW)
+        self.assertEqual(out["final"]["attempt"], None)
+        old_flow = live.flow(older, START, self.NOW)
+        self.assertEqual(old_flow["final"], {"state": "waiting", "attempt": None, "check": None})
+        json.dumps(old_flow)
 
 
 class FlowHomeTests(LiveTest):

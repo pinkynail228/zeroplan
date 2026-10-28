@@ -211,6 +211,16 @@ def _loop_bound(node, limits):
     return limits.get(node.get("name", "?"))
 
 
+# The loops that run a final check once more when it could not finish (`milestone_graph`, either prefix): drawn
+# without a frame.
+RETRY_LOOPS = ("final_verify_loop", "final_reverify_loop")
+
+
+def _bare(name):
+    """A node name without the `empty_` prefix of the no-open-task stage."""
+    return name[len("empty_"):] if name.startswith("empty_") else name
+
+
 def _state(node, obs):
     raw = (obs.get(node.get("name"), {}) or {}).get("state", "idle")
     if raw == "failed":
@@ -267,6 +277,14 @@ def project(node, obs, optional=None, words=None, limits=None):
     if kind == "loop":
         o = obs.get(node.get("name"), {}) or {}
         items = project(node["body"], obs, optional, words, limits)
+        if _bare(node.get("name", "")) in RETRY_LOOPS:
+            # No frame: the final check is drawn alone and a retry is a count on its box (`final check ↻2/2`).
+            count = o.get("count")
+            if count and count > 1:
+                for item_kind, value in items:
+                    for leaf in value if item_kind == "stage" else []:
+                        leaf["title"] += " ↻%s/%s" % (count, node["maxIterations"])
+            return items
         return [("loop", dict(title=_one_line(o.get("title")) if o.get("title") else node_title(node.get("name", "?"), words),
                               max=_loop_bound(node, limits), count=o.get("count"),
                               active=_touched(node["body"], obs), items=items))]
@@ -582,8 +600,9 @@ def observation_from_flow(flow):
     """The scheme observation of one attempt from `terminal_planner.live.flow`'s facts (F1). `None` or `{}` -> `{}`.
 
     The worker's state, the two reviewers (a verdict maps accepted -> succeeded, rejected -> failed), a running
-    final step as `final_verify`, a task-picking step as `select`, the review round as `review_loop.count`, and the
-    echo of the running command as the worker's detail."""
+    final step as `final_verify`, a task-picking step as `select`, the review round as `review_loop.count`, the
+    final check's attempt as `count` on the retry loop the check sits in, and the echo of the running command as the
+    worker's detail."""
     if not flow:
         return {}
     obs = {}
@@ -594,8 +613,11 @@ def observation_from_flow(flow):
         name, state = reviewer.get("role"), REVIEW_STATE.get(reviewer.get("state"))
         if name and state:
             obs[name] = {"state": state}
-    if (flow.get("final") or {}).get("state") == "running":
+    final = flow.get("final") or {}
+    if final.get("state") == "running":
         obs["final_verify"] = {"state": "running"}
+    if final.get("attempt") and final.get("check"):
+        obs.setdefault(final["check"] + "_loop", {})["count"] = final["attempt"]
     if flow.get("select"):
         obs["select"] = {"state": "running"}
     if flow.get("round") is not None:

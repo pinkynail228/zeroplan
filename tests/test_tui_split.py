@@ -1,12 +1,12 @@
 """S0 of 0.5.2 (docs/RELEASE_0.5.2_PLAN.md): the `terminal_planner/tui/app.py` split into `text`, `chat_view`, `modals`
 and `screens`. A1: app.py no longer defines the moved blocks and each new module holds exactly its block. A2: every
 name `dir(terminal_planner.tui.app)` listed before the change is still an attribute of it, and each moved name *is*
-the moved module's own object. A4: the README code map names the four modules, one line each.
+the moved module's own object. A4: the code map in docs/ARCHITECTURE.md names the four modules, one line each.
 
 The moved names below are the contract the rest of the TUI suite already reaches through the app module
 (`app_module.CHAT_MIN_ROWS`, `app_module.chat_head`, ...), so they are listed here rather than derived: the test
 pins what the other tests and callers used before the split. The identity assertions import Textual; the source and
-README scans read files and need neither Textual nor Rich.
+code map scans read files and need neither Textual nor Rich.
 
 Interpretations recorded here (the worker's session summary never reaches the reviewers):
 
@@ -32,7 +32,7 @@ Interpretations recorded here (the worker's session summary never reaches the re
 - `BLOCK_RECHECK_SECONDS` is patched as `terminal_planner.tui.app.BLOCK_RECHECK_SECONDS` in tests/test_tui_live.py;
   `ZplanApp` reads it and stays in app.py, so no patch target had to move or change.
 - A `--fixture ID` run of this suite on a machine without the Textual wheelhouse skips the identity assertions
-  (the app module cannot be imported) and still runs the source and README scans.
+  (the app module cannot be imported) and still runs the source and code map scans.
 
 """
 
@@ -231,11 +231,13 @@ class CardSplitTests(unittest.TestCase):
 
 
 class CodeMapTests(unittest.TestCase):
-    """A4: the README code map names the four modules, one line each."""
+    """A4: the code map in docs/ARCHITECTURE.md names every moved module (the four of `MOVED` and the two of
+    `CARD_MOVED`), one line each. Interpretation: the card modules count as moved modules for the code map, so
+    dropping the `tui/card_host.py` line fails too."""
 
-    def test_the_readme_code_map_gives_each_new_module_one_line(self):
-        lines = (REPO / "README.md").read_text(encoding="utf-8").split("\n")
-        for module in MOVED:
+    def test_the_architecture_code_map_gives_each_new_module_one_line(self):
+        lines = (REPO / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8").split("\n")
+        for module in (*MOVED, *CARD_MOVED):
             entry = "tui/" + module + ".py: "
             named = [line for line in lines if line.startswith("- " + entry)]
             with self.subTest(module=module):

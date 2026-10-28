@@ -20,6 +20,7 @@ MAX_INITIAL_TASKS = MAX_MILESTONE_TASKS
 MAX_ADDITIONS = 6
 TASK_ITERATIONS = 4  # 1 implementation + 3 repairs; the bound when the milestone has no frozen profile
 FINAL_REPAIRS = 3
+FINAL_ATTEMPTS = 2  # executions of one final check (the first and one retry) before an incomplete check blocks the run
 STATUSES = ("open", "done", "dropped")
 ORIGINS = ("plan", "amendment")
 KINDS = ("add", "split", "reorder", "reword", "drop")
@@ -30,6 +31,11 @@ ALL_REQUIREMENTS = "Every requirement of the milestone is satisfied."
 REVIEW_BAR = ("A review rejects only when a check or the title of input.task fails on a realistic path, or the change "
               "breaks existing behaviour on a realistic path; anything else goes into diagnostic.message as a "
               "non-blocking note marked `note:` and never rejects the change.")
+# The verification rule the worker follows (H3): proportionate to the change, the project's own way. Tests assert it.
+VERIFY_RULE = ("Verify the change the project's own way and in proportion to it: in a project with a test setup, a "
+               "behaviour change (a new feature included) gets a relevant test, and a test the task asks for (a "
+               "project's first included) is written; a change to docs, copy or config files alone gets no new test, "
+               "only the project's existing checks.")
 MANIFEST = ".zplan/milestone.json"
 BASELINE = ".zplan/baseline.json"
 BEFORE = ".zplan/milestone.before.json"
@@ -42,6 +48,12 @@ CONFLICT_BAR = ("Signal verdict=conflict only for an evidenced defect of the bri
                 "implementation defect stays rejected, a remark stays a `note:`, and a missing tool or a failed "
                 "command is never a conflict.")
 ERRORS = ["timeout", "crash", "malformed", "refusal"]
+# The final checks' verdicts (H1): `incomplete` is a required check that could not run to the end; a seen defect is
+# `rejected`. FINAL_VERDICTS feeds the state enum and the signal sets of final_verify and final_reverify; the routes
+# and loops read its two parts.
+FINAL_DECIDED = ["accepted", "rejected"]
+FINAL_INCOMPLETE = ["incomplete"]
+FINAL_VERDICTS = FINAL_DECIDED + FINAL_INCOMPLETE
 
 
 class Invalid(Blocked):
@@ -293,7 +305,10 @@ ROLES = {"preflight": "reviewer", "select_init": "steward", "select": "steward",
 def milestone_state():
     state = record(*STATE_FIELDS)
     for name in VERDICTS:
-        values = ["pending", "accepted", "rejected"] + (["conflict"] if name in REVIEW_VERDICTS else [])
+        if name == "finalVerdict":
+            values = ["pending"] + FINAL_VERDICTS
+        else:
+            values = ["pending", "accepted", "rejected"] + (["conflict"] if name in REVIEW_VERDICTS else [])
         state["fields"][name] = {"type": {"kind": "enum", "values": values}, "required": True}
     for name in OUTCOMES:
         # Graph bindings have no literals; outcome labels come from validated input constants.
@@ -309,10 +324,10 @@ def milestone_output():
     return output
 
 
-def instructions(name, body, tool=TOOL):
+def instructions(body, tool=TOOL):
     commands = ("Manifest: %s. Immutable baseline: %s (never edit it). Validate with: %s check %s --baseline %s"
                 % (MANIFEST, BASELINE, tool, MANIFEST, BASELINE))
-    return "ZPLAN_NODE=%s\n%s\n%s" % (name, commands, body)
+    return "%s\n%s" % (commands, body)
 
 
 def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
@@ -352,7 +367,7 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
     def executable(kind, name, body, inputs, output="report", writes=(), timeout=CONTROL_TIMEOUT, **extra):
         # Distinct worker refs: admission rejects one ref reused with different node contracts.
         return {"kind": kind, "name": name, "worker": "zplan.milestone.%s@1" % name.replace("_", "-"),
-                "instructions": instructions(name, body, tool),
+                "instructions": instructions(body, tool),
                 "input": {"kind": "record", "fields": {i: state["fields"][i] for i in inputs}},
                 "output": record(output) if output else {"kind": "null"},
                 "inputBindings": [state_binding(i) for i in inputs], "writeBindings": list(writes),
@@ -388,20 +403,34 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
         final_body = read_only + (
             "Final milestone verification: check the workspace against every frozen requirement and every derived "
             "milestone check in input.baseline, with fresh evidence you gather yourself. verdict=accepted only when all "
-            "hold; otherwise rejected with actionable findings in diagnostic.message.")
+            "hold; verdict=rejected with actionable findings in diagnostic.message only for a defect you saw; "
+            "verdict=incomplete when a required check could not run to the end (a missing tool, a "
+            "timeout, evidence you could not gather), naming that check in diagnostic.message. A non-empty "
+            "finalFindings holds the previous verdict's findings.")
         # The milestone's own final reviewers re-run the milestone checks, so they get the worker's budget; both
         # the normal and the no-open-task ("empty_" prefix) stage do (a resumed attempt with every task done takes
         # just as long).
         review_timeout = WORKER_TIMEOUT
-        final_verify = verifier(n("final_verify"), final_body, context, "verdict", ["accepted", "rejected"],
-                                "finalVerdict", "finalFindings", timeout=review_timeout)
-        final_reverify = verifier(n("final_reverify"), final_body, final_inputs, "verdict", ["accepted", "rejected"],
-                                  "finalVerdict", "finalFindings", timeout=review_timeout)
+        retry_state = ["finalVerdict", "finalFindings"]
+
+        def retried(node):
+            # An incomplete check runs once more with the previous findings; any other verdict or an error ends the
+            # loop. `attempts` retries crashes only and a timeout is an error, so neither can express this.
+            name = node["name"]
+            return {"kind": "loop", "name": name + "_loop", "state": state,
+                    "body": seq(name + "_attempt", [node], retry_state),
+                    "until": {"kind": "any", "guards": [failed(name), guard(name, "signal", FINAL_DECIDED, "verdict")]},
+                    "maxIterations": FINAL_ATTEMPTS, "promotedStatePaths": [[p] for p in retry_state]}
+
+        final_verify = retried(verifier(n("final_verify"), final_body, context + ["finalFindings"], "verdict", FINAL_VERDICTS,
+                                        "finalVerdict", "finalFindings", timeout=review_timeout))
+        final_reverify = retried(verifier(n("final_reverify"), final_body, final_inputs, "verdict", FINAL_VERDICTS,
+                                          "finalVerdict", "finalFindings", timeout=review_timeout))
         repair = executable("step", n("repair"), (
             "Repair the milestone so that finalFindings (and scopeFindings, when nonempty) are resolved, staying inside "
-            "the frozen milestone scope. You may change no manifest field and must not edit anything under .zplan/. "
-            "Do not commit, push or rewrite Git history. Return report: what changed and the commands you ran with "
-            "results."),
+            "the frozen milestone scope. " + VERIFY_RULE + " You may change no manifest field and must not edit anything "
+            "under .zplan/. Do not commit, push or rewrite Git history. Return report: what changed and the commands "
+            "you ran with results."),
             final_inputs, writes=[write("repairReport", n("repair"), "out", "report")], timeout=WORKER_TIMEOUT)
         scope = verifier(n("scope_verify"), read_only + (
             "Check that the last repair (repairReport and the workspace diff) stayed inside the frozen milestone scope: "
@@ -412,12 +441,16 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
                        "body": seq(n("repair_iteration"), [repair, guarded(n("repair"), seq(n("verify_stage"), [
                            scope, guarded(n("scope_verify"), final_reverify, FINAL_STATE)], FINAL_STATE), FINAL_STATE)],
                            FINAL_STATE),
-                       "until": {"kind": "any", "guards": [failed(n("final_reverify")), {"kind": "all", "guards": [
+                       "until": {"kind": "any", "guards": [failed(n("final_reverify")),
+                                                           guard(n("final_reverify"), "signal", FINAL_INCOMPLETE, "verdict"),
+                                                           {"kind": "all", "guards": [
                            guard(n("scope_verify"), "signal", ["accepted"], "verdict"),
                            guard(n("final_reverify"), "signal", ["accepted"], "verdict")]}]},
                        "maxIterations": FINAL_REPAIRS, "promotedStatePaths": [[p] for p in FINAL_STATE]}
         repair_result = choice(n("final_repair_result"), [
             (failed(n("final_reverify")), fail(n("final_reverify_failed"))),
+            (guard(n("final_reverify"), "signal", FINAL_INCOMPLETE, "verdict"),
+             success(n("reverify_incomplete"), "blockedSignal", [("message", "finalFindings")])),
             (guard(n("repair_loop"), "group", ["converged"], "terminated"),
              success(n("repaired"), "doneSignal", [("message", "finalFindings")])),
         ], success(n("final_exhausted"), "blockedSignal", [("message", "finalFindings")]))
@@ -425,6 +458,8 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
             (failed(n("final_verify")), fail(n("final_verify_failed"))),
             (guard(n("final_verify"), "signal", ["accepted"], "verdict"),
              success(n("done"), "doneSignal", [("message", "finalFindings")])),
+            (guard(n("final_verify"), "signal", FINAL_INCOMPLETE, "verdict"),
+             success(n("final_incomplete"), "blockedSignal", [("message", "finalFindings")])),
         ], seq(n("final_repair"), [repair_loop, repair_result]))
         return seq(n("final_stage"), [final_verify, final_route])
     preflight = verifier("preflight", read_only + (
@@ -442,14 +477,15 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
         "corrupt manifest); otherwise queue=open when the manifest lists at least one task with status open, "
         "queue=empty otherwise. diagnostic.message: one line with the open task ids or the validation error."),
         context, "queue", ["open", "empty", "invalid"], writes=[])
-    # A failed selection never reaches a writer: select returns no error text and the
+    # Read-only (a verifier carries no dependency-install guidance). A failed selection never reaches a writer: select returns no error text and the
     # read-only select_verify gate routes anything but a verified contract to a failure.
-    select = executable("step", "select", (
+    select = executable("verifier", "select", (
         "Run exactly: %s select %s --baseline %s --before %s\nIt validates the manifest, writes the snapshot %s and prints "
         "the first open task contract as JSON. Return that stdout unchanged as task. You may change no manifest field "
         "and no other file. If the command fails or cannot run, return the empty string as task (never error text)."
         % (tool, MANIFEST, BASELINE, BEFORE, BEFORE)),
-        context, output="task", writes=[write("task", "select", "out", "task")])
+        context, output="task", writes=[write("task", "select", "out", "task")], signals={},
+        diagnostic=record("message"))
     select_verify = verifier("select_verify", read_only + (
         "Run exactly: %s check %s --baseline %s --before %s\nSignal selection=selected only when it exits 0 and input.task "
         "is the JSON task contract of the first task with status open in the manifest; otherwise selection=invalid "
@@ -457,8 +493,8 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
         "id or the error." % (tool, MANIFEST, BASELINE, BEFORE)),
         context + ["task"], "selection", ["selected", "invalid"], writes=[])
     worker = executable("step", "worker", (
-        "Implement input.task (a task contract JSON) in the workspace, smallest coherent change in the project's style, "
-        "with tests. When acceptanceVerdict or codeVerdict is rejected, their findings describe that rejected review: "
+        "Implement input.task (a task contract JSON) in the workspace, smallest coherent change in the project's style. "
+        + VERIFY_RULE + " When acceptanceVerdict or codeVerdict is rejected, their findings describe that rejected review: "
         "repair those findings. Findings marked `note:` are non-blocking and may be left as they are. You may change no "
         "manifest field and must not edit anything under .zplan/. Do not commit, push or rewrite Git history. Return "
         "report: what changed and the commands you ran with results."),

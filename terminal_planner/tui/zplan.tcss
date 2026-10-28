@@ -201,6 +201,23 @@ MainScreen.narrow #right-column {
     width: 1fr;
 }
 
+/* T4e: `/scheme` draws the canvas column alone (`app.py` hides the chat pane and the activity pane). */
+MainScreen.scheme-full #right-column {
+    width: 1fr;
+}
+
+/* T4e: a `/` typed on the whole-screen scheme brings the prompt (and its palette) up as a strip at the bottom. */
+MainScreen.scheme-cmd #chat-pane {
+    dock: bottom;
+    width: 100%;
+    height: auto;
+}
+
+MainScreen.scheme-cmd #chat,
+MainScreen.scheme-cmd #status {
+    display: none;
+}
+
 MainScreen.narrow #chat > Card {
     margin: 0;
 }

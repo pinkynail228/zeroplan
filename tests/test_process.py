@@ -337,7 +337,7 @@ class ResolverTests(ProfileTest):
         self.accept_file()
         self.assertEqual(self.peek().status().state, "accepted")
         document = json.loads(self.file.read_text(encoding="utf-8"))
-        self.assertEqual(document["roles"]["worker"]["effort"], "medium")
+        self.assertEqual(document["roles"]["worker"]["effort"], "max")  # the proposal is /3: the legacy value is not saved, the preset worker applies
 
     def test_rules_content_change_changes_the_digest_with_the_same_path(self):
         (self.project / "AGENTS.md").write_text("one\n")
@@ -418,6 +418,26 @@ class AutonomyPresetTests(ProfileTest):
         status = self.peek().status()
         self.assertIsNotNone(status.resolved, status.problem)
         return status.resolved
+
+    def test_preset3_moves_only_the_worker_and_keeps_preset2_as_it_is(self):
+        """M1 the proposal and /3 carry the worker on gpt-6.1-terra / max, every other role gpt-6.1-sol / high;
+        M2 a file naming /2 with no roles still resolves the worker to gpt-6.1-sol / medium and a /3 file with
+        `autonomy.level` manual is valid. Interpretation: /3's gates, limits, autonomy and risk are compared with /2's
+        as data (nothing else of /3 is pinned)."""
+        sol = {"model": "gpt-6.1-sol", "effort": "high"}
+        roles = process.propose(self.project, {})["roles"]
+        self.assertEqual(process.propose(self.project, {})["preset"], "zplan.default/3")
+        self.assertEqual(roles["worker"], {"model": "gpt-6.1-terra", "effort": "max"})
+        self.assertEqual({name: roles[name] for name in roles if name != "worker"},
+                         {name: sol for name in process.ROLES if name != "worker"})
+        self.write({"preset": process.PRESET_V2})
+        self.assertEqual(self.resolved().config["roles"]["worker"], {"model": "gpt-6.1-sol", "effort": "medium"})
+        self.write({"preset": process.PRESET_V3, "autonomy": {"level": "manual"}})
+        three = self.resolved()
+        self.assertEqual(three.config["preset"], "zplan.default/3")
+        self.assertEqual(three.config["autonomy"]["level"], "manual")
+        for key in ("gates", "limits", "risk"):
+            self.assertEqual(three.config[key], process.resolve({"preset": process.PRESET_V2}, {}, self.project).config[key])
 
     def test_preset2_is_preset1_roles_gates_and_limits_plus_autonomy(self):
         one = process.resolve(None, {}, self.project)
@@ -545,13 +565,13 @@ class AutonomyPresetTests(ProfileTest):
         self.assertEqual(process.resolve(None, {}, self.project).config["preset"], process.PRESET)
         status = self.peek().status()
         self.assertEqual(status.state, "never")
-        self.assertEqual(status.proposal["preset"], process.PRESET_V2)
-        self.assertEqual(status.proposal["autonomy"], process.PRESETS[process.PRESET_V2]["autonomy"])
+        self.assertEqual(status.proposal["preset"], process.PRESET_V3)
+        self.assertEqual(status.proposal["autonomy"], process.PRESETS[process.PRESET_V3]["autonomy"])
         self.assertEqual(status.proposal["autonomy"]["level"], "auto")
-        self.assertEqual(process.propose(self.project, {})["preset"], process.PRESET_V2)
+        self.assertEqual(process.propose(self.project, {})["preset"], process.PRESET_V3)
         self.accept_file()
         written = json.loads(self.file.read_text(encoding="utf-8"))
-        self.assertEqual((written["preset"], written["autonomy"]["level"]), (process.PRESET_V2, "auto"))
+        self.assertEqual((written["preset"], written["autonomy"]["level"]), (process.PRESET_V3, "auto"))
         accepted = self.peek()
         self.assertEqual(accepted.status().state, "accepted")
         self.assertEqual(autonomy.level(accepted), "auto")
@@ -922,7 +942,7 @@ class StateTests(ProfileTest):
         self.assertIsNotNone(record["snapshot"])
         reopened = self.peek().status()
         self.assertEqual(reopened.state, "accepted")  # across a reopen, without any project file
-        self.assertEqual(reopened.resolved.config["preset"], process.PRESET_V2)
+        self.assertEqual(reopened.resolved.config["preset"], process.PRESET_V3)
         code, out, _ = self.zplan(*self.fixture_args("profile", "init"))
         self.assertEqual(code, 1)
         self.assertIn("does not overwrite it", out)
@@ -1863,7 +1883,9 @@ class RepositoryProfileTests(unittest.TestCase):
             self.assertTrue(status.present)
             self.assertEqual(status.problem, "")
             self.assertIsNotNone(status.resolved)
-            self.assertEqual(status.resolved.config["roles"], process.resolve(None, {}, ROOT).config["roles"])
+            # The file binds the worker itself (terra / max, since a3abe5e); every other role is the preset's.
+            roles = dict(process.resolve(None, {}, ROOT).config["roles"], worker=document["roles"]["worker"])
+            self.assertEqual(status.resolved.config["roles"], roles)
             self.assertEqual(status.resolved.config["limits"], process.resolve(None, {}, ROOT).config["limits"])
 
     def test_the_summary_line_reports_the_task_rounds_in_effect(self):

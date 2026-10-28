@@ -12,4 +12,4 @@ Invariants:
 - Unit tests run locally with deterministic fixtures; native and installed qualification runs on the Linux test host, not macOS.
 - Rule files (AGENTS.md, devtools/zeroshot/ORCHESTRATOR.md, devtools/zeroshot/preamble.md) are locked; changes need the owner's unlock.
 
-Live docs: README.md (code map), docs/USER_FLOW.md, docs/INSTALLATION.md, docs/TERMINAL_UX_BRIEF.md, the plan named in STATE.md.
+Live docs: README.md (the product page: only what a first-time reader needs), docs/ARCHITECTURE.md (code map, development), docs/USER_FLOW.md, docs/INSTALLATION.md, docs/TERMINAL_UX_BRIEF.md, the plan named in STATE.md.

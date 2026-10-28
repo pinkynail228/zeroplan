@@ -78,7 +78,7 @@ STATES = [
      [], 0, [("◐", "yellow", "waiting · 0:12")],
      [("esc", "cancel")]),
     ("autonomy", 4, "How much should the architect do on its own?",
-     ["Models: [b]gpt-6.1-sol[/b] (all roles) · checks: [b]npm test[/b] (from package.json)",
+     ["Models: [b]gpt-6.1-sol[/b] (worker [b]gpt-6.1-terra/max[/b]) · checks: [b]npm test[/b] (from package.json)",
       "Change any of this later with [b]/settings[/b]."],
      [("Auto", "recommended · plans, starts and merges by itself"),
       ("Supervised", "asks before it starts or merges anything"),

@@ -1,8 +1,12 @@
 """Export of a verified snapshot to a local branch; real temporary Git repos."""
 
+import importlib.util
 import io
 import shutil
 import subprocess
+import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from test_terminal_planner import ProjectTest
@@ -250,3 +254,59 @@ class BranchTests(ProjectTest):
         with self.assertRaisesRegex(Blocked, "conversion"):
             self.export(verify=lambda: True)
         self.assertEqual(self.zplan_refs(), "")
+
+
+class ReadmeImageTests(unittest.TestCase):
+    """E1-E3: devtools/export_check.py accepts a GIF or PNG under docs/img/ and nothing else that is not UTF-8.
+
+    Interpretation: an accepted image is scanned only for private terms (the content rules target text), as a
+    substring match on its latin-1 decoding."""
+
+    GIF = b"GIF89a\xc0\x03\xff\xfe" + bytes(range(256))
+    PNG = b"\x89PNG\r\n\x1a\n\xff\x00" + bytes(range(256))
+    TERM = "hidden-client-name"
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("export_check", Path(__file__).resolve().parents[1] / "devtools" / "export_check.py")
+        self.check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.check)
+        self.repo = Path(tempfile.mkdtemp(prefix="zs-img-"))
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        git(self.repo, "init", "-q")
+        (self.repo / "devtools").mkdir()
+        (self.repo / "devtools" / "export-manifest.txt").write_text("+ docs/\n+ tests/\n")
+
+    def run_check(self, files, out=None, terms=("zzz-unused",)):
+        for rel, data in files.items():
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_bytes(data)
+        git(self.repo, "add", "-A")
+        git(self.repo, "-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "--allow-empty", "-qm", "x")
+        return sorted((row["rule"], row["raw_path"]) for row in self.check.check(str(self.repo), "HEAD", out, list(terms)))
+
+    def test_image_is_accepted_only_under_all_four_conditions(self):
+        """E1: the accepted shape gives no finding; every deviation stays `unreadable`."""
+        big = self.check.IMAGE_MAX_BYTES
+        pad = lambda size: self.GIF + b"\0" * (size - len(self.GIF))
+        ok = {"docs/img/demo.gif": self.GIF, "docs/img/old.gif": b"GIF87a\xff", "docs/img/a.png": self.PNG, "docs/img/edge.gif": pad(big)}
+        bad = {"tests/demo.gif": self.GIF, "docs/other/demo.gif": self.GIF, "docs/img/random.gif": b"\xff\xfe\x00\x01" * 8,
+               "docs/img/wrong.gif": self.PNG, "docs/img/wrong.png": self.GIF, "docs/img/big.gif": pad(big + 1),
+               "docs/img/clip.png": self.PNG[:7], "docs/img/photo.jpg": b"\xff\xd8\xff\xe0", "docs/img/GIF89a.dat": self.GIF}
+        self.assertEqual(self.run_check({**ok, **bad}), sorted(("unreadable", path) for path in bad))
+
+    def test_accepted_image_is_scanned_for_private_terms_on_raw_bytes(self):
+        """E2: a term in a GIF comment or a PNG tEXt chunk is found, case-insensitively; a clean image is not."""
+        gif = b"GIF89a\x01\x00\xff\xfe\x20" + self.TERM.upper().encode() + b"\x00;"
+        png = self.PNG + b"\x00\x00\x00\x20tEXtComment\x00" + self.TERM.encode() + b"\xff\xfe"
+        found = self.run_check({"docs/img/a.gif": gif, "docs/img/a.png": png, "docs/img/clean.gif": self.GIF}, terms=(self.TERM,))
+        self.assertEqual(found, [("private-term", "docs/img/a.gif"), ("private-term", "docs/img/a.png")])
+
+    def test_dir_mode_compares_an_accepted_image_byte_for_byte(self):
+        """E3: the export tree's image with one changed byte is `dir-changed`; the identical one is clean."""
+        out = self.repo.parent / (self.repo.name + "-out")
+        self.addCleanup(shutil.rmtree, out, ignore_errors=True)
+        (out / "docs" / "img").mkdir(parents=True)
+        (out / "docs" / "img" / "demo.gif").write_bytes(self.GIF)
+        self.assertEqual(self.run_check({"docs/img/demo.gif": self.GIF}, out=str(out)), [])
+        (out / "docs" / "img" / "demo.gif").write_bytes(self.GIF[:-1] + b"\x00")
+        self.assertEqual(self.run_check({}, out=str(out)), [("dir-changed", "docs/img/demo.gif")])

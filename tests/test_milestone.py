@@ -122,6 +122,8 @@ def interpret(case, graph, value, provider, error=None):
                 else:
                     channels[(name, "signal")] = response["signals"]
                     channels[(name, "diagnostic")] = response["diagnostic"]
+                    if response["output"] is not None:
+                        channels[(name, "out")] = response["output"]
                 state.update(bind(node["writeBindings"], state))
         elif kind == "seq":
             for child in node["children"]:
@@ -158,7 +160,8 @@ def interpret(case, graph, value, provider, error=None):
 
 
 def flow(case, scenario, error=None):
-    graph, _, value = driver_qual.documents(scenario)
+    with driver_qual.marked():
+        graph, _, value = driver_qual.documents(scenario)
     provider = driver_qual.Provider(scenario["script"])
     result, calls = interpret(case, graph, value, provider, error)
     return result, calls, provider
@@ -454,8 +457,28 @@ class GraphStructureTests(unittest.TestCase):
     def test_bounds_are_fixed_by_the_formula(self):
         for tasks in range(milestone.MAX_INITIAL_TASKS + 1):
             loops = {n["name"]: n["maxIterations"] for n in nodes(milestone.milestone_graph(tasks)["root"]) if n["kind"] == "loop"}
-            self.assertEqual(loops, {"task_loop": 2 * (tasks + 6) + 2, "review_loop": 4, "repair_loop": 3, "empty_repair_loop": 3})
+            self.assertEqual(loops, {"task_loop": 2 * (tasks + 6) + 2, "review_loop": 4, "repair_loop": 3, "empty_repair_loop": 3,
+                                     **{prefix + name: milestone.FINAL_ATTEMPTS for prefix in ("", "empty_")
+                                        for name in ("final_verify_loop", "final_reverify_loop")}})
             self.assertLessEqual(max(loops.values()), 100)
+
+    def test_select_is_a_verifier_without_signals_and_the_writers_stay_steps(self):
+        """H2 R2/R3: `select` only runs the checker and reports its stdout, so it is a `verifier` (read-only guidance,
+        no dependency-install guidance) with empty signals, a diagnostic, the same `task` output and write binding;
+        the nodes that edit the workspace stay steps. A scripted run answers it with a non-null output."""
+        graph = milestone.milestone_graph(1)
+        every = {n["name"]: n for n in nodes(graph["root"]) if n["kind"] in EXECUTABLES}
+        select = every["select"]
+        self.assertEqual((select["kind"], select["signals"], select["diagnostic"]), ("verifier", {}, milestone.record("message")))
+        self.assertEqual(set(select["output"]["fields"]), {"task"})
+        self.assertEqual([(w["target"], w["value"]) for w in select["writeBindings"]],
+                         [(["task"], {"node": "select", "channel": "out", "path": ["task"]})])
+        self.assertEqual(select["worker"], "zplan.milestone.select@1")
+        self.assertEqual({n for n, node in every.items() if node["kind"] == "step"},
+                         {"worker", "repair", "steward_apply", "empty_repair"})
+        result, calls, provider = flow(self, driver_qual.SCENARIOS["a_two_tasks_done"])
+        self.assertEqual(calls[:4], ["preflight", "select_init", "select", "select_verify"])
+        self.assertEqual((result["status"], provider.calls[2]), ("succeeded", ("select", None)))
 
     def test_the_review_bar_rejects_only_a_broken_check_or_title(self):
         """A1/D1: both milestone reviews carry the review bar - a review rejects only when a check or the title of
@@ -463,7 +486,7 @@ class GraphStructureTests(unittest.TestCase):
         other remark is a non-blocking `note:` - and the worker instruction repairs the findings of a rejected review
         while leaving `note:` items. The bar's sentences are asserted, not a whole-prompt snapshot."""
         graph = milestone.milestone_graph(2)
-        bodies = {node["name"]: node["instructions"].split("\n", 2)[2]
+        bodies = {node["name"]: node["instructions"].split("\n", 1)[1]
                   for node in nodes(graph["root"]) if node["kind"] == "verifier"}
         for name in ("acceptance_review", "code_review"):
             with self.subTest(node=name):
@@ -475,6 +498,25 @@ class GraphStructureTests(unittest.TestCase):
         worker = next(node for node in nodes(graph["root"]) if node["name"] == "worker")["instructions"]
         self.assertIn("rejected, their findings describe that rejected review: repair those findings", worker)
         self.assertIn("`note:` are non-blocking and may be left", worker)
+
+    def test_the_worker_and_repair_verify_in_proportion_to_the_change(self):
+        """H3 P1/P2/P4: the worker and both repair texts carry the one VERIFY_RULE constant (own way, in proportion; a
+        behaviour change gets a relevant test, a requested test is written, docs/copy/config alone get none), "with
+        tests" is in no node's instructions, and the final check's `incomplete` no longer lists a failed command (a
+        check that runs and fails is rejected) while a missing tool stays. Interpretation: none."""
+        rule = milestone.VERIFY_RULE
+        for part in ("the project's own way and in proportion", "behaviour change (a new feature included) gets a "
+                     "relevant test", "a project's first included", "docs, copy or config files alone gets no new test"):
+            self.assertIn(part, rule)
+        by_name = {n["name"]: n for n in nodes(milestone.milestone_graph(2)["root"])}
+        for name in ("worker", "repair", "empty_repair"):
+            self.assertIn(rule, by_name[name]["instructions"], name)
+        for node in by_name.values():
+            self.assertNotIn("with tests", node.get("instructions", ""), node["name"])
+        for name in ("final_verify", "final_reverify", "empty_final_verify", "empty_final_reverify"):
+            text = by_name[name]["instructions"]
+            self.assertNotIn("a failed command", text, name)
+            self.assertIn("a missing tool", text, name)
 
     def test_the_review_loop_bound_follows_the_frozen_task_rounds(self):
         """A2/D2: the review loop's bound is one implementation pass plus the revision's frozen limits.task_rounds
@@ -505,7 +547,9 @@ class GraphStructureTests(unittest.TestCase):
         succeed = {n["name"]: n for n in every if n["kind"] == "succeed"}
         signals = {"done": "doneSignal", "repaired": "doneSignal", "final_exhausted": "blockedSignal",
                    "needs_owner": "needsOwnerSignal", "steward_blocked": "blockedSignal", "task_loop_exhausted": "blockedSignal",
-                   "empty_done": "doneSignal", "empty_repaired": "doneSignal", "empty_final_exhausted": "blockedSignal"}
+                   "empty_done": "doneSignal", "empty_repaired": "doneSignal", "empty_final_exhausted": "blockedSignal",
+                   "final_incomplete": "blockedSignal", "reverify_incomplete": "blockedSignal",
+                   "empty_final_incomplete": "blockedSignal", "empty_reverify_incomplete": "blockedSignal"}
         self.assertEqual({k: v["bindings"][0]["value"]["path"][0] for k, v in succeed.items()}, signals)
         for node in succeed.values():
             self.assertEqual(node["output"], milestone.milestone_output())
@@ -532,6 +576,42 @@ class GraphStructureTests(unittest.TestCase):
                                     or reader + "_result" in {c["name"] for c in choices}, (loop["name"], reader))
         self.assertNotIn("succeed", {n["kind"] for n in every if n["name"].endswith(("_loop", "_iteration"))})
 
+    def test_final_checks_say_incomplete_and_retry_once(self):
+        """I1/I2/I3: both final checks (both prefixes) signal accepted/rejected/incomplete, and the finalVerdict
+        enum lists them, all from the one FINAL_VERDICTS constant (a patched constant moves both), and sit in a loop of FINAL_ATTEMPTS executions that ends on accepted, rejected or an
+        error; the first check also reads finalFindings (the retry's previous findings). Twice incomplete is a blocked
+        business exit, before the repair (final_verify) or ends the repair loop (final_reverify)."""
+        self.assertEqual(milestone.FINAL_VERDICTS, ["accepted", "rejected", "incomplete"])
+        with mock.patch.object(milestone, "FINAL_VERDICTS", ["accepted", "rejected", "unfinished"]):
+            patched = milestone.milestone_graph(1)
+        self.assertEqual(patched["initialInput"]["fields"]["finalVerdict"]["type"]["values"],
+                         ["pending", "accepted", "rejected", "unfinished"])
+        self.assertEqual({n["signals"]["verdict"][-1] for n in nodes(patched["root"]) if n["name"].endswith("final_verify")
+                          or n["name"].endswith("final_reverify")}, {"unfinished"})
+        graph = milestone.milestone_graph(2)
+        by_name = {n["name"]: n for n in nodes(graph["root"])}
+        for prefix in ("", "empty_"):
+            for name in ("final_verify", "final_reverify"):
+                with self.subTest(prefix + name):
+                    check = by_name[prefix + name]
+                    self.assertEqual(check["signals"], {"verdict": milestone.FINAL_VERDICTS})
+                    self.assertIn("finalFindings", check["input"]["fields"])
+                    self.assertIn("verdict=incomplete", check["instructions"])
+                    loop = by_name[prefix + name + "_loop"]
+                    self.assertEqual((loop["maxIterations"], loop["body"]["children"]), (milestone.FINAL_ATTEMPTS, [check]))
+                    ends = [(g["value"]["name"], g["value"]["source"], g["labels"]) for g in guards(loop["until"])]
+                    self.assertEqual(ends, [(prefix + name, "error", milestone.ERRORS),
+                                            (prefix + name, "signal", ["accepted", "rejected"])])
+            route = by_name[prefix + "final_result"]
+            self.assertEqual([b["node"]["name"] for b in route["branches"]],
+                             [prefix + "final_verify_failed", prefix + "done", prefix + "final_incomplete"])
+            self.assertEqual([c["name"] for c in route["otherwise"]["children"]], [prefix + "repair_loop", prefix + "final_repair_result"])
+            self.assertEqual([c["name"] for c in route["otherwise"]["children"][0]["body"]["children"]], [prefix + "repair", prefix + "repair_result"])
+            repaired = by_name[prefix + "final_repair_result"]
+            self.assertEqual([b["node"]["name"] for b in repaired["branches"]],
+                             [prefix + "final_reverify_failed", prefix + "reverify_incomplete", prefix + "repaired"])
+            self.assertIn(["incomplete"], [g["labels"] for g in guards(by_name[prefix + "repair_loop"]["until"])])
+
     def test_preflight_and_conflict_routes(self):
         """C1/C2: the root is `seq(preflight, preflight_result)`; `preflight` is a read-only reviewer-role verifier
         (no writes, input milestone + baseline, signal ready/conflict) whose error and conflict end the run and whose
@@ -548,7 +628,7 @@ class GraphStructureTests(unittest.TestCase):
         self.assertEqual((preflight["kind"], preflight["writeBindings"], preflight["signals"], milestone.ROLES["preflight"]),
                          ("verifier", [], {"preflight": ["ready", "conflict"]}, "reviewer"))
         self.assertEqual(set(preflight["input"]["fields"]), {"milestone", "baseline"})
-        text = preflight["instructions"].split("\n", 2)[2]
+        text = preflight["instructions"].split("\n", 1)[1]
         self.assertTrue(text.startswith("Read only"))
         for word in ("F1", "F2", "F4", "write_set", "non_goal"):
             self.assertIn(word, text)
@@ -561,13 +641,12 @@ class GraphStructureTests(unittest.TestCase):
         for name in ("acceptance_review", "code_review"):
             self.assertEqual(by_name[name]["signals"], {"verdict": ["accepted", "rejected", "conflict"]})
             self.assertIn("conflict", by_name[name]["instructions"])
-        for name in ("final_verify", "final_reverify", "scope_verify"):
-            self.assertEqual(by_name[name]["signals"], {"verdict": ["accepted", "rejected"]})
+        self.assertEqual(by_name["scope_verify"]["signals"], {"verdict": ["accepted", "rejected"]})
         fields = graph["initialInput"]["fields"]
         self.assertEqual({n: f["type"]["values"] for n, f in fields.items() if n in milestone.VERDICTS},
                          {"acceptanceVerdict": ["pending", "accepted", "rejected", "conflict"],
                           "codeVerdict": ["pending", "accepted", "rejected", "conflict"],
-                          "finalVerdict": ["pending", "accepted", "rejected"], "scopeVerdict": ["pending", "accepted", "rejected"]})
+                          "finalVerdict": ["pending"] + milestone.FINAL_VERDICTS, "scopeVerdict": ["pending", "accepted", "rejected"]})
         self.assertEqual(milestone.milestone_output()["fields"]["signal"]["type"]["values"], list(milestone.SIGNALS))
         self.assertEqual(by_name["reviews"]["join"], {"kind": "all"})
         conflicts = [g["value"]["name"] for g in guards(by_name["review_loop"]["until"]) if g["labels"] == ["conflict"]]
@@ -608,7 +687,7 @@ class GraphStructureTests(unittest.TestCase):
                          ({"name": "select_verify", "source": "signal", "field": "selection"}, ["invalid"], "fail"))
         for name in ("select_init", "select_verify"):
             self.assertEqual(by_name[name]["writeBindings"], [])
-            self.assertTrue(by_name[name]["instructions"].split("\n", 2)[2].startswith("Read only"))
+            self.assertTrue(by_name[name]["instructions"].split("\n", 1)[1].startswith("Read only"))
         self.assertNotIn("error text as task", by_name["select"]["instructions"])
         self.assertIn("return the empty string as task", by_name["select"]["instructions"])
         writers = [(n["name"], trail) for n, trail in found if n["kind"] == "step" and n["writeBindings"]
@@ -637,7 +716,7 @@ class GraphStructureTests(unittest.TestCase):
         self.assertEqual(sorted(names), sorted(milestone.ROLES))
         self.assertEqual(len({n["worker"] for n in executables}), len(executables))
         for node in executables:
-            self.assertTrue(node["instructions"].startswith("ZPLAN_NODE=%s\n" % node["name"]))
+            self.assertNotIn("ZPLAN_NODE", node["instructions"])  # H1: only the qualification marks a graph
             self.assertIn("zplan-check check .zplan/milestone.json --baseline .zplan/baseline.json", node["instructions"])
             long = node["name"] in ("worker", "repair", "empty_repair", "acceptance_review", "code_review",
                                     "final_verify", "final_reverify", "empty_final_verify", "empty_final_reverify")
@@ -682,9 +761,19 @@ class FlowTests(unittest.TestCase):
                            + ["empty_repair", "empty_scope_verify", "empty_final_reverify"] * 3,
                            output=driver_qual.output("blocked", "empty_final_reverify message #3"))
 
+    EMPTY_INCOMPLETE = dict(tasks=1, script={"preflight": ["ready"], "select_init": ["empty"], "empty_final_verify": ["incomplete"] * 2},
+                            order=["preflight", "select_init"] + ["empty_final_verify"] * 2,
+                            output=driver_qual.output("blocked", "empty_final_verify message #2"))
+    EMPTY_REVERIFY_INCOMPLETE = dict(
+        tasks=1, script={"preflight": ["ready"], "select_init": ["empty"], "empty_final_verify": ["rejected"],
+                         "empty_scope_verify": ["accepted"], "empty_final_reverify": ["incomplete"] * 2},
+        order=["preflight", "select_init", "empty_final_verify", "empty_repair", "empty_scope_verify"] + ["empty_final_reverify"] * 2,
+        output=driver_qual.output("blocked", "empty_final_reverify message #2"))
+
     def test_scenarios_and_every_business_exit(self):
         exits = set()
-        scenarios = dict(driver_qual.SCENARIOS, empty_repaired=self.EMPTY_REPAIRED, empty_exhausted=self.EMPTY_EXHAUSTED)
+        scenarios = dict(driver_qual.SCENARIOS, empty_repaired=self.EMPTY_REPAIRED, empty_exhausted=self.EMPTY_EXHAUSTED,
+                         empty_incomplete=self.EMPTY_INCOMPLETE, empty_reverify_incomplete=self.EMPTY_REVERIFY_INCOMPLETE)
         for name, scenario in scenarios.items():
             with self.subTest(name):
                 result, calls, provider = flow(self, scenario)
@@ -699,6 +788,29 @@ class FlowTests(unittest.TestCase):
                     self.assertEqual(finals, [], "needs_owner/blocked bypass the final phase")
         graph = milestone.milestone_graph(2)
         self.assertEqual(exits, {n["name"] for n in nodes(graph["root"]) if n["kind"] == "succeed"})
+
+    def test_incomplete_final_check_retries_with_its_findings_and_never_repairs(self):
+        """I2/I3/I4: the retry of an incomplete final check receives the previous finalFindings; an accepted retry
+        ends the run done and a rejection after an incomplete try still repairs; a second incomplete blocks with
+        the findings and no repair or scope check runs in between. Scenarios p/q/r also run in the loop above."""
+        for name, retry in (("p_final_incomplete_then_accepted", "final_verify"), ("r_reverify_incomplete_blocked", "final_reverify")):
+            with self.subTest(name):
+                seen = []
+                with driver_qual.marked():
+                    graph, _, value = driver_qual.documents(driver_qual.SCENARIOS[name])
+                provider = driver_qual.Provider(driver_qual.SCENARIOS[name]["script"])
+                answer = provider.answer
+                provider.answer = lambda request: (seen.append(request["input"][0]["content"][0]["text"]), answer(request))[1]
+                result, calls = interpret(self, graph, value, provider)
+                runs = [text for text in seen if "ZPLAN_NODE=%s\n" % retry in text]
+                self.assertEqual(len(runs), 2)
+                self.assertIn('"finalFindings": "%s message #1"' % retry, runs[1])
+                self.assertEqual(result["output"]["message"], "%s message #2" % retry)
+                self.assertEqual(calls.count("repair"), 0 if name.startswith("p_") else 1)
+        script = {"preflight": ["ready"], "select_init": ["empty"], "empty_final_verify": ["incomplete", "rejected"],
+                  "empty_scope_verify": ["accepted"], "empty_final_reverify": ["accepted"]}
+        result, calls, _ = flow(self, dict(tasks=1, script=script))
+        self.assertEqual((result["output"]["signal"], calls.count("empty_final_verify"), calls.count("empty_repair")), ("done", 2, 1))
 
     def test_native_errors_stay_failures(self):
         script = {"preflight": ["ready"], "select_init": ["open"] * 2, "acceptance_review": ["accepted"] * 2,
@@ -742,6 +854,40 @@ class QualificationHarnessTests(unittest.TestCase):
         if schema is not None:
             request["text"]["format"]["schema"] = schema
         return request
+
+    def test_the_marker_is_added_by_the_qualification_scope_not_by_the_builders(self):
+        """H1: no production graph carries `ZPLAN_NODE=`; within `driver_qual.marked()` the graphs the builders return
+        (the ones a lifecycle adapter digests and submits) carry one marker per node, named as the node, and after the
+        scope the builders are marker-free again. Interpretation: none."""
+        from terminal_planner import engine
+        builders = {"milestone": lambda: milestone.milestone_graph(2), "plan": lambda: engine.planner_graph_v2(3),
+                    "task gate": lambda: engine.task_gate_graph(2), "merge critic": lambda: engine.merge_critic_graph()}
+        for name, build in builders.items():
+            self.assertNotIn("ZPLAN_NODE", json.dumps(build()), name)
+        with driver_qual.marked():
+            for name, build in builders.items():
+                graph = build()
+                found = [n for n in nodes(graph["root"]) if "instructions" in n]
+                self.assertTrue(found, name)
+                for node in found:
+                    self.assertTrue(node["instructions"].startswith("ZPLAN_NODE=%s\n" % node["name"]), (name, node["name"]))
+                    self.assertEqual(node["instructions"].count("ZPLAN_NODE="), 1)
+        with self.assertRaises(RuntimeError):
+            with driver_qual.marked():
+                raise RuntimeError("scenario failed")
+        for name, build in builders.items():
+            self.assertNotIn("ZPLAN_NODE", json.dumps(build()), name)
+
+    def test_a_bare_cli_scenario_graph_carries_each_marker_once(self):
+        """H5: inside `driver_qual.marked()` the graph `documents()` returns has exactly one `ZPLAN_NODE=` marker at the
+        start of every node's instructions (`documents()` does not mark again). Interpretation: none."""
+        with driver_qual.marked():
+            graph, _, _ = driver_qual.documents(driver_qual.SCENARIOS["a_two_tasks_done"])
+        found = [n for n in nodes(graph["root"]) if "instructions" in n]
+        self.assertTrue(found)
+        for node in found:
+            self.assertTrue(node["instructions"].startswith("ZPLAN_NODE=%s\n" % node["name"]), node["name"])
+            self.assertEqual(node["instructions"].count("ZPLAN_NODE="), 1, node["name"])
 
     def test_dispatch_uses_the_last_marker(self):
         provider = driver_qual.Provider({"acceptance_review": ["rejected"], "code_review": ["accepted"]})
@@ -874,7 +1020,8 @@ class QualificationHarnessTests(unittest.TestCase):
     def test_adapter_script_with_hooks_reaches_done_through_the_graph(self):
         q = self.adapter()
         scenario = driver_qual.ADAPTER["k_adapter_done_merge"]
-        graph, _, value = driver_qual.documents({"tasks": 1})
+        with driver_qual.marked():
+            graph, _, value = driver_qual.documents({"tasks": 1})
         seen = []
         provider = driver_qual.Provider(scenario["script"], repeat=True,
                                         hooks={node: (lambda node=node: seen.append(node)) for node in scenario["hooks"]})
@@ -971,7 +1118,9 @@ class AdmissionTests(unittest.TestCase):
             env = dict(os.environ, ZEROSHOT_STATE_DIR=str(root / "state"), ZEROSHOT_CONFIG_DIR=str(root / "config"))
             for tasks in (1, milestone.MAX_INITIAL_TASKS):
                 with self.subTest(tasks=tasks):
-                    for kind, value in zip(("graph", "runtime", "input"), driver_qual.documents({"tasks": tasks})):
+                    with driver_qual.marked():
+                        documents = driver_qual.documents({"tasks": tasks})
+                    for kind, value in zip(("graph", "runtime", "input"), documents):
                         (root / (kind + ".json")).write_text(json.dumps(value))
                     result = subprocess.run([str(pinned_binary()), "run", "--title", "zplan driver admission",
                                              "--graph", str(root / "graph.json"), "--runtime-config", str(root / "runtime.json"),

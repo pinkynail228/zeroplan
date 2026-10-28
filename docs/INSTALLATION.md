@@ -1,8 +1,8 @@
-# Installation: zplan 0.8.0
+# Installation: zplan 0.8.1
 
-Supported: macOS arm64 and Linux (x86_64, aarch64). Not supported: Windows and Intel macOS (no pinned toolchain
-for them; `zplan setup` stops). Runs execute natively as your user; no container runtime is needed. Qualification
-of native runs happens on Linux x86_64; macOS runs the unit suite. The interface is in English only; there
+Supported: macOS on Apple silicon (arm64). Not supported: Linux (for now: this release is qualified on macOS
+only), Windows and Intel macOS (no pinned toolchain for the last two; `zplan setup` stops). Runs execute natively as
+your user; no container runtime is needed. The interface is in English only; there
 is no language chooser, and a stored `"ru"` falls back to English.
 
 ## Prerequisites
@@ -14,8 +14,6 @@ is no language chooser, and a stored `"ru"` falls back to English.
 - A Codex login with model access (next section).
 
 ```sh
-# Debian / Ubuntu
-sudo apt-get update && sudo apt-get install -y python3 python3-venv git curl nodejs npm
 # macOS (Homebrew; Git from Xcode Command Line Tools or Homebrew; the Command Line Tools' python3 is 3.9, too old)
 brew install python node
 ```
@@ -23,7 +21,7 @@ brew install python node
 ## Before you log in
 
 - **Account and model.** `zplan login` signs Codex in with your own account (device code), and that account needs
-  access to the models the roles use: every role defaults to `gpt-6.1-sol` (Setup, login, doctor: Roles).
+  access to the models the roles use: the worker defaults to `gpt-6.1-terra` (effort max), every other role to `gpt-6.1-sol` (Setup, login, doctor: Roles).
 - **Cost.** Every planner revision, milestone run and architect turn spends model tokens on that account; zplan
   gives no estimate up front. A milestone run keeps running, and spending, after you quit zplan or close the
   terminal, until it finishes or you stop it.
@@ -64,7 +62,7 @@ pinned Codex through `npm ci`, so **Node.js ≥ 16 with npm** must be on PATH as
 name the prerequisite — it never reports a half-ready install you cannot log in to; install Node.js and re-run
 the same command (or `<launcher> setup`). A host with only `git` and `python3` cannot end up with a ready zplan.
 `ZEROSHOT_TOOLS` may start with `~` (it is expanded like `install.py` does).
-`ZPLAN_VERSION=0.8.0 sh install.sh` pins a release; `ZPLAN_REPOSITORY` points at another repository. A missing
+`ZPLAN_VERSION=0.8.1 sh install.sh` pins a release; `ZPLAN_REPOSITORY` points at another repository. A missing
 `git`/`python3` or a repository without a `vX.Y.Z` tag stops with one message and a non-zero exit. Once installed,
 `zplan update` moves to a newer release and runs the same `setup` step (docs/UPGRADE.md).
 
@@ -75,12 +73,12 @@ git clone https://github.com/pinkynail228/zeroplan.git
 cd zeroplan
 python3 install.py
 export PATH="${ZEROSHOT_TOOLS:-$HOME/.local}/bin:$PATH"
-zplan --version            # zplan 0.8.0
+zplan --version            # zplan 0.8.1
 zplan setup                # pinned Zeroshot 10.16.0 + Codex 0.162.1
 zplan login                # Codex device login
 ```
 
-`install.py` creates a private venv at `$XDG_DATA_HOME/planning-kit/app/0.8.0` (default `~/.local/share/...`),
+`install.py` creates a private venv at `$XDG_DATA_HOME/planning-kit/app/0.8.1` (default `~/.local/share/...`),
 installs the checkout and its one runtime dependency, Textual 8.2.8 (the full-screen shell), into it and then points the `zplan` launcher
 (`~/.local/bin/zplan`, or `$ZEROSHOT_TOOLS/bin/zplan`) at it. An existing `zplan` that this installer does not
 own is refused. The installed app never imports from the checkout; you can delete the clone afterwards.
@@ -89,9 +87,9 @@ own is refused. The installed app never imports from the checkout; you can delet
 `setuptools-75.8.0-py3-none-any.whl`, `wheel-0.45.1-py3-none-any.whl` and `textual-8.2.8-py3-none-any.whl`
 with the wheels it depends on (rich, markdown-it-py, mdurl, pygments, platformdirs, typing_extensions, …).
 
-**Upgrade from 0.6.x:** 0.8.0 is the first public release. An install of 0.6.x looks for releases in its earlier
+**Upgrade from 0.6.x:** 0.8.0 was the first public release. An install of 0.6.x looks for releases in its earlier
 repository, so point it at this one: `ZPLAN_REPOSITORY=https://github.com/pinkynail228/zeroplan.git zplan update`
-(or run the one-line install). The launcher moves to `app/0.8.0`, the older `app/` directory stays on disk, and the
+(or run the one-line install). The launcher moves to `app/0.8.1`, the older `app/` directory stays on disk, and the
 installer copies the store to `v3.backup-<old version>-<UTC timestamp>` first.
 
 **Older releases (0.2.x to 0.5.x)** were never public. What each step changed in the store, and how to roll back
@@ -139,8 +137,8 @@ zplan doctor    # every line OK: → ready
   zplan's own profile. Each `BLOCKED:` line names its fix; exit 1 if any check is blocked. A `WARN:` line names a
   non-blocking issue and still exits 0. No model request is sent and no secret is printed.
 - Roles: `zplan roles` edits `$XDG_CONFIG_HOME/planning-kit/roles.json` (default `~/.config/...`); Settings in
-  the full-screen shell (`/setup`, button «roles») only shows the resolved roles, it never edits them. Defaults: model `gpt-6.1-sol`; effort high for `planner`, `plan_verifier`, `reviewer`
-  and `steward`, medium for `worker`. An approved plan keeps the roles it was planned with. In a project with a
+  the full-screen shell (`/setup`, button «roles») only shows the resolved roles, it never edits them. Defaults: model `gpt-6.1-sol`, `gpt-6.1-terra` for `worker`; effort high for `planner`, `plan_verifier`, `reviewer`
+  and `steward`, max for `worker`. An approved plan keeps the roles it was planned with. In a project with a
   `zplan.process.json` the roles of the project file win key by key; roles.json fills only the keys the file does
   not set (`plan_verifier` is read as `critic`). See USER_FLOW.md, «First start in a project».
 
@@ -153,12 +151,12 @@ zplan doctor    # every line OK: → ready
 | Pinned tools | `~/.local/share/planning-kit/tools/zeroshot-10.16.0-codex-0.162.1-runtime2/` |
 | Codex home | zplan's own `~/.local/share/planning-kit/codex-home/`; an explicit `$CODEX_HOME` overrides it |
 | Roles | `~/.config/planning-kit/roles.json` |
-| Plan and run records | macOS `~/Library/Application Support/PlanningKit/production/v3/<project>/planning.json`; Linux `~/.local/state/PlanningKit/production/v3/<project>/planning.json` |
+| Plan and run records | `~/Library/Application Support/PlanningKit/production/v3/<project>/planning.json` |
 | Milestone worktrees | `~/.local/share/planning-kit/worktrees/` |
 | Native Zeroshot state | `~/.zp/` (`runs/`, `config/`) |
 
 `~/.local/share` follows `$XDG_DATA_HOME`. Native state lives in the short `~/.zp` because each run's control
-socket (`<state>/runs/runs/<run uuid>/controller.sock`) must stay under 104 bytes on macOS and 108 on Linux; an
+socket (`<state>/runs/runs/<run uuid>/controller.sock`) must stay under 104 bytes on macOS; an
 existing `~/.local/share/planning-kit/native` from an older install keeps being used. `--native-state-dir PATH`
 selects another private directory; `zplan doctor --native-state-dir PATH` checks its length.
 
@@ -175,8 +173,7 @@ rm -f ~/.local/bin/zplan
 rm -rf ~/.local/share/planning-kit       # app/, tools/, codex-home/, worktrees/, architect/, checkouts/
 rm -rf ~/.config/planning-kit            # roles.json, ui.json
 rm -rf ~/.zp                             # native Zeroshot state
-rm -rf ~/Library/"Application Support"/PlanningKit   # macOS plan store
-rm -rf ~/.local/state/PlanningKit                    # Linux plan store
+rm -rf ~/Library/"Application Support"/PlanningKit   # plan store
 ```
 
 A Codex home you chose with `CODEX_HOME` and your own `~/.codex` are yours; zplan never removes them. Your
