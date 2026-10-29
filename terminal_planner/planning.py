@@ -24,6 +24,7 @@ from .engine import STALE, STALE_BINDING, ObservationDetached, SliceEnded, Stale
 PLANNER_SLICE = 15  # seconds per bounded planner watch: phases reach the owner while the planner runs
 HEARTBEAT = 120  # seconds without a new phase before a "still working" line
 GOAL_LIMIT = 8192
+REVISION_LINES = 5  # revision requests the plan screen lists; earlier ones are counted
 GOAL_PROBLEM = "A non-empty goal of up to 8192 characters is required."
 OBSERVING = ("observing", "detached", "observation_blocked")  # a receipt exists; the planner may still run
 FAILED = ("run_failed", "proposal_invalid")
@@ -639,8 +640,10 @@ class Planning:
         lines = ["", "Plan r%s · %s · %s · %s" % (version, plural(len(milestones), "milestone", "milestones", "milestones"),
                                                  plural(tasks, "task", "tasks", "tasks"), verdict),
                  goal_line(current["goal"], 200, "plan.requirements")]
-        if current["feedback"]:
-            lines.append("Revision: " + one_line(current["feedback"], 200))
+        requests = [part for part in current["feedback"].split("\n\n") if part.strip()]
+        if len(requests) > REVISION_LINES:
+            lines.append("(%d earlier)" % (len(requests) - REVISION_LINES))
+        lines.extend("Revision: " + one_line(part, 200) for part in requests[-REVISION_LINES:])
         for m in milestones:
             lines.append("  %s %s  (after: %s)" % (m["id"], one_line(m["title"], 80), ", ".join(m["depends_on"]) or "—"))
             for s in m["slices"]:

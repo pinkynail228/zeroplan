@@ -406,6 +406,7 @@ class Controller:
         self.on_observed = None
         self.snapshot_source = None
         self.on_merge_wait = None  # the screen's hook: the milestone whose merge waits for the critic, None at its end
+        self.on_start_wait = None  # the screen's hook: (milestone, "begin"/"done"/"failed") of a start the architect's tool makes
         self._feed = None
         self._opened = False  # the session open (and the feed bootstrap, when requested) is over; guarded
 
@@ -653,6 +654,17 @@ class Controller:
             self._queue.put((label, work, done, protect, kind in OBSERVATIONS and not mutating))
         return True
 
+    def origin_fix(self):
+        """The readiness item's fix text for a project whose `origin` is not a GitHub repository ("" when it is one,
+        or the project is unknown). Read from `setup.check_target`, the item the plan block shows."""
+        if self.project is None:
+            return ""
+        from .. import setup  # lazily, like the other readiness callers
+        for found in setup.check_target(self.project):
+            if found["id"] == "origin":
+                return "" if found["ok"] else found["detail"]
+        return ""
+
     # Bridge: the architect's action tools --------------------------------------
     # The MCP server of the architect's Codex runs in its own process (the store is locked to this one); it reaches
     # these tools over the endpoint's socket. `zplan_status` posts the rows job and waits, bounded, on the socket
@@ -795,7 +807,14 @@ class Controller:
             revision = self._argument(args, "revision", int)
             if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
                 raise Blocked("Invalid argument revision.", family="architect.request_invalid")
-            return self._start_tool(app, milestone, revision)
+            self._start_wait(milestone, "begin")
+            try:
+                started = self._start_tool(app, milestone, revision)
+            except BaseException:
+                self._start_wait(milestone, "failed")
+                raise
+            self._start_wait(milestone, "done")
+            return started
         if tool == "zplan_stop":
             return self._stop_tool(app, self._argument(args, "milestone", str),
                                    self._argument(args, "run_id", str))
@@ -1508,6 +1527,13 @@ class Controller:
             if done is not None:
                 done(outcome, error)
         return self._job("merge", run, settle)
+
+    def _start_wait(self, milestone, state):
+        if self.on_start_wait is not None:
+            try:
+                self.on_start_wait(milestone, state)
+            except Exception:  # the UI went away
+                pass
 
     def _merge_wait(self, milestone):
         if self.on_merge_wait is not None:

@@ -249,6 +249,9 @@ class ThemeTests(unittest.TestCase):
         run(screen, "", None)
         screen.status_note.assert_called_with(strings.text("note.theme", name="light"))
         run(screen, "auto", None)
+        theme.process.light = True
+        run(screen, "", None)  # T2: auto names the theme in effect
+        screen.status_note.assert_called_with(strings.text("note.theme", name="auto (light)"))
         self.assertEqual((screen.app.theme, strings.stored_theme()), ("ansi-dark", "auto"))
         theme.process.light = True
         theme.apply(screen.app)

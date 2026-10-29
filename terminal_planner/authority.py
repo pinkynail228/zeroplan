@@ -831,12 +831,16 @@ class Authority:
         return revision
 
     def amended_feedback(self, request):
-        """The feedback of a revision that amends the current one. Requests made since the latest proposal all
-        reach the planner, each once: while the current revision has no proposal (unsent, renewed, failed) its
-        feedback already holds them; a proposal absorbs them and the new request stands alone."""
-        current = self.current
-        if current["proposal"] is None and current["feedback"]:
-            return current["feedback"] + "\n\n" + request
+        """The feedback of a revision that amends the current one: every request made for the current goal, in
+        order, each once, then `request`. Each revision's feedback already holds the requests before it, so the
+        latest non-empty one is the list; an edit revision (a draft, no feedback) is passed over, and the list ends
+        at the revision that began the goal (no feedback, no draft)."""
+        self.current  # refuses without a saved plan
+        for r in reversed(self.state["revisions"]):
+            if r["feedback"]:
+                return r["feedback"] + "\n\n" + request
+            if "draft" not in r:
+                break
         return request
 
     @property

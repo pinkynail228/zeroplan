@@ -339,7 +339,7 @@ class StartTests(unittest.TestCase):
         _, result = self.run_app(home, look)
         self.assertEqual(seen["rows"], ["Another folder", "Quit"])
         self.assertIn("cannot be a project", seen["home"])
-        self.assertIn("mkdir ~/my-project", seen["home"])
+        self.assertIn("mkdir ~/my-project", seen["home"])  # T3: the home hint keeps ~
         self.assertNotIn("Create a project here", seen["home"])
         self.assertEqual(seen["step"], ("other",))
         self.assertFalse((home / ".git").exists())
@@ -369,6 +369,8 @@ class StartTests(unittest.TestCase):
             self.run_app(disk, look)
             self.assertEqual(seen["rows"], ["Another folder", "Quit"])
             self.assertIn("The home folder or the top of a disk cannot be a project.", seen["text"])
+            self.assertIn("%s/my-project" % disk.resolve(), seen["text"])  # T3: a folder on that disk, not ~
+            self.assertNotIn("~/my-project", seen["text"])
             self.assertTrue(seen["error"])
             self.assertFalse((disk / ".git").exists())
             with self.assertRaises(start.StartError):

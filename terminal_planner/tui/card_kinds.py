@@ -663,6 +663,8 @@ def plan_card_source(screen):
     snapshot = getattr(screen.app, "snapshot", None)
     if snapshot is None or snapshot.version is None or snapshot.status != "proposed":
         return
+    if getattr(screen.app, "revising", None) == snapshot.version:
+        return  # a revision of this proposal was asked for: its card offers nothing until the new snapshot
     stages, tasks = plan_card_counts(snapshot.plan)
     yield plan_card_spec("plan:%s" % snapshot.version, card_clock(), stages, tasks, stale=plan_stale(snapshot),
                          auto=plan_auto_approves(snapshot), narrow=bool(getattr(screen, "narrow", False)))

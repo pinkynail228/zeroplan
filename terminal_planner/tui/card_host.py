@@ -126,7 +126,9 @@ class CardHost:
         spec = self.card_specs.get(key)
         if spec is None:
             return
-        self.draft_cards.pop(key, None)
+        draft = self.draft_cards.pop(key, None)
+        if draft is not None:  # a sent draft: its «Goal draft» tab closes once its plan revision exists
+            self.sent_drafts[key] = draft
         self.show_card(cards.closed(spec, done_text))
 
     def drop_card(self, key):
@@ -161,11 +163,16 @@ class CardHost:
         if not self.ready or self.closing:
             return
         keyed = self.keyed_card()
+        if keyed is None or keyed.spec.key != self.tab_cycle_card:
+            self.tab_cycle_card = None  # d3c: another keyed card (or none) ends the arrows' tab cycle for good
         for card in self.card_widgets.values():
             card.set_keyed(card is keyed)
         field = self.query_one("#input")
-        field.placeholder = strings.text("chat.placeholder_card" if keyed is not None and not field.value
-                                         else "chat.placeholder")
+        if keyed is None or field.value:
+            hint = "chat.placeholder"
+        else:  # D3: a card with a row of buttons is walked with ←→ as well
+            hint = "chat.placeholder_card_row" if len(keyed.spec.buttons) > 1 else "chat.placeholder_card"
+        field.placeholder = strings.text(hint)
 
     def newest_card_for(self, command):
         """The key of the newest open card whose kind routes the shared `command` (`CARD_ROUTES`), or None."""
@@ -308,9 +315,10 @@ class CardHost:
         Same check as the creation (`chat.stale_reason` against `plan_identity_now`), but only against a snapshot
         that names a plan: before the first snapshot, or while no plan exists, the identity has not moved (a refused
         `/plan` writes nothing), so the card stays. The card is unmounted, its key stays in `cards_seen` and its
-        «Goal draft» canvas tab closes as esc closes it."""
+        «Goal draft» canvas tab closes as esc closes it. D6: a draft that was sent (`close_card`) keeps its tab until the
+        snapshot names its plan revision, then the tab closes the same way."""
         snapshot = self.app.snapshot
-        if not self.draft_cards or snapshot is None or snapshot.version is None:
+        if snapshot is None or snapshot.version is None:
             return
         current = self.plan_identity_now()
         for key, draft in list(self.draft_cards.items()):
@@ -318,8 +326,17 @@ class CardHost:
                 continue
             self.cards_seen.add(key)
             self.unmount_card(key)
-            for tab_id in [tab for tab, opened in self.view_paths.items() if opened == key and tab in self.view_tabs]:
-                self.close_view_tab(tab_id)
+            self.close_draft_tab(key)
+        # A sent draft's card is its receipt already; once the snapshot names the plan built from it the tab goes too.
+        for key, draft in list(self.sent_drafts.items()):
+            if chat_module.stale_reason(draft.identity, current):
+                del self.sent_drafts[key]
+                self.close_draft_tab(key)
+
+    def close_draft_tab(self, key):
+        """Close the «Goal draft» canvas tab opened for the draft `key`, as esc closes it."""
+        for tab_id in [tab for tab, opened in self.view_paths.items() if opened == key and tab in self.view_tabs]:
+            self.close_view_tab(tab_id)
 
     def draft_reply_widget(self, draft):
         """The `#chat` entry widget of the newest reply that carries `draft` (the one `draft_card_of` keys the card

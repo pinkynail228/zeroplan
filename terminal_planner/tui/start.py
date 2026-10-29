@@ -185,6 +185,9 @@ def origin_url(root) -> str:
         return ""
 
 
+SKIP = "Skip — zplan cannot plan until the project has a GitHub origin"
+
+
 def needs_origin(root) -> bool:
     """`origin` is missing or not a GitHub URL: Zeroshot cannot name the project (the readiness check refuses it)."""
     return not GITHUB_ORIGIN.fullmatch(origin_url(root))
@@ -322,8 +325,8 @@ class StartApp(App):
             return [("Continue", "open")]
         if kind == "origin":
             if self.old_origin:
-                return [("Skip", "skip"), ("Replace origin", "add")]
-            return [("Add origin", "add"), ("Skip", "skip")]
+                return [(SKIP, "skip"), ("Replace origin", "add")]
+            return [("Add origin", "add"), (SKIP, "skip")]
         return []
 
     def card_width(self) -> int:
@@ -340,7 +343,7 @@ class StartApp(App):
             card.append(clip(short(self.info.path), self.card_width()) + "\n", style="dim")
             if not self.info.ready and self.info.exists and cannot_be_project(self.info.path):
                 card.append("The home folder or the top of a disk cannot be a project.\nMake a folder for it: "
-                            "mkdir ~/my-project\n", style="yellow")
+                            "mkdir %s\n" % short(Path(self.info.path).resolve() / "my-project"), style="yellow")
         elif kind == "other":
             card.append("Another folder\n", style="bold")
             card.append("The path to a project folder or to a new folder.\n", style="dim")

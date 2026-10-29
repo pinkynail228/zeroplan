@@ -461,7 +461,7 @@ class _Screen:
 
     def __init__(self):
         self.box, self.app = _Slot(), _Pad()
-        self.card_widgets, self.card_specs, self.draft_cards, self.cards_seen = {}, {}, {}, set()
+        self.card_widgets, self.card_specs, self.draft_cards, self.sent_drafts, self.cards_seen = {}, {}, {}, {}, set()
 
     def query_one(self, selector, *args):
         if selector == "#chat":

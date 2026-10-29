@@ -191,10 +191,13 @@ class RunCommandShell(MilestoneShell):
             self.assertFalse(self.app.screen.query_one("#palette").display)
             right = self.app.screen.query_one("#right")
             first = right.active
+            await pilot.press("tab")  # D3: the plan card is open, so ←→ walk its buttons; the pane first, then the tab
             await pilot.press("left")
             self.assertNotEqual(right.active, first)
-            await pilot.press("right")
-            self.assertEqual((right.active, self.app.focused.id), (first, "input"))
+            await pilot.press("tab")  # the input is empty with the card open: →  would pick a button, Tab brings the pane back
+            self.assertEqual((right.active, self.app.focused.id), (first, "plan-pane"))
+            await pilot.press("tab")
+            self.assertEqual(self.app.focused.id, "input")
             await self.type(pilot, "/approve\n")
             await self.until(pilot, lambda: any(r.startable for r in self.app.rows()))
             await self.type(pilot, "/run\n")

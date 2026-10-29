@@ -3,7 +3,7 @@
 Updated: 2026-10-29. Rules: devtools/zeroshot/ORCHESTRATOR.md (section STATE.md); merge history in `git log`, per-run numbers in devtools/zeroshot/CALIBRATION.md.
 
 ## Production
-Version: v0.8.1 PUBLIC at github.com/pinkynail228/zeroplan since 2026-10-28 (export 9a4cedf of 6713650; GitHub Release v0.8.1 latest; critic rel081b GO; macOS only). Previous: v0.8.0 (export 6893e2f of 6795a0c). v0.7.0 tag deleted (history is one commit). Branch main, pushed to the private origin only through the gated push (ORCHESTRATOR.md step 5).
+Version: v0.8.2 PUBLIC latest at github.com/pinkynail228/zeroplan since 2026-10-29 (tag on export 7296f91 of 657bd3b, the rc1 commit; soak NO BLOCKER; clean-HOME install and `zplan update` from 0.8.1 both give 0.8.2). Previous: v0.8.1 (9a4cedf). Branch main, pushed to the private origin only through the gated push (ORCHESTRATOR.md step 5).
 Linux: dropped by the owner 2026-10-28 (no Linux gate or host; last Linux-qualified SHA a007b6e = v0.6.3); qualification is macOS only.
 
 ## Direction
@@ -13,9 +13,9 @@ Designs (critic-reviewed, in the pause dir): 0.7.1-dirty-login.md, 0.8-english-u
 Input (owner 2026-10-25): no single-letter keys; every action is a / command in the chat.
 
 ## Now
-Track A (docs/RELEASE_0.8.2_PLAN.md) done 2026-10-28/29: A1 s4, A1b s5, A2 l2+l2b, A3 s3a+s3b, A4 s2a+s2b, A6, A7 p1, A8, A9, A10 a10+a10b+a10c; merge commits and gates in `git log`. Residuals: a terminal reply tail >100 ms after a stall is typed as text; no single key empties a multi-line input.
-Track C (docs/RELEASE_0.8.2_WALK_PLAN.md, from a real walk on 2026-10-29) done 2026-10-29: c1 + c1b, c2, c3, c4 merged; v082 (version 0.8.2) merged; UPGRADE.md: 0.8.1 refuses a 0.8.2 store, so rollback only to the installer's backup. Candidate 1552ea4: suite 2378 tests, 1 failure (STATE.md budget, fixed); critic rel082 AGREE WITH CHANGES (c5 stale-plan Next merged; README auto merge; notes; spike not exported); rc1 re-walk: U1, U2, U4, U5 PASS, U3 partial; N1 (merge asks again while the critic works) fixed by c6, c6b-c6d (critics rel082b-d), N3/N5 by c7; N2, N4, N6, N7 in the walk plan.
-Owner's go 2026-10-29 (overnight, limits lifted, past 0.8.2 too): tag v0.8.2-rc1 as a pre-release, soak walk (real project, clean HOME, every past case), final v0.8.2 if no blocker (no wait), else rc2; then Track B research (B1-B7; B8 is the owner's).
+0.8.2 (plans moved to the private archive 2026-10-29): tracks A and C done, v0.8.2 public; merges and gates in `git log`.
+0.8.3: d1-d6, v083, d5b, d3b, d3c merged; flake MergeCardDraftShell passes alone (13/13); critic rel083b argue turn AGREE (d3c closes finding 2, no blocker; d5b accepted, O5 overrule in the plan). Whole Mac suite on 69b44f3 (2026-10-29): 2407 tests OK, 377 s (suite-083c.log in the pause dir); product code unchanged since. Waiting for the owner's go on v0.8.3-rc1.
+Plan (2026-10-30): docs/PLAN_0.9.md (milestones P1-P7). Owner 2026-10-30 (overnight go): Q1-Q5 and H1-H3 as recommended (A2 test policy, B1 cut `--plain`, W4+R8 into 0.9.0, no profile commit by default, local origin identity); release v0.8.3 in stages (rc1, soak, final if no blocker); implement the plan, release, then a feedback review and the next plan (UX). The 1.5x budget goes; the critic is gpt-6-astra xhigh.
 Claude lane for every run. Process (owner 2026-10-27, after "first idea, no design"): facts -> design doc -> independent critic -> owner's product decision -> briefs.
 Test audit 2026-10-28 (REPORT.md in the pause dir, folder test-prune): no safe mass deletion; cost is agents running tests (54% of agent time) and growth. Its rule diffs are applied (2026-10-28): reviewers run at most one test id, repairs extend tests, budget.py in the DoD and the gate (counts untracked files).
 Incident 2026-10-27: an R6 brief had an agent copy ~/.codex auth and run `zplan login`, which revoked the owner's token. Automated tests never use the owner's credentials (fake Codex, isolated HOME). Owner's go 2026-10-29: manual qualification walks may run zplan with the owner's real HOME and ~/.codex in place; never copy, print or move the auth files and never run `zplan login`/`codex login`/logout there (the copy is what revoked the token).
@@ -23,14 +23,13 @@ Test policy (owner 2026-10-28, "overtesting again"): briefs iterate on the faili
 Roles (owner 2026-10-28): worker `gpt-6.1-terra`/max, every other role `gpt-6.1-sol`/high. Preset `zplan.default/3` (t4a) is what a first start proposes; /1 and /2 stay frozen. This repo's and the owner's two projects' zplan.process.json carry the same split (the two projects: edited, not committed, their trees hold the owner's work).
 
 ## Next
-1. Plans: docs/RELEASE_0.8.2_PLAN.md (track A done; track B = 0.9 chat-first design: B0, B4 done; B1 source tracing and B3 draft schema done (spike B1_B3_B4, not exported); open B1 canaries, B2 corpus, B3 probe, B5-B7, B8 the owner's, B10) and docs/RELEASE_0.8.2_WALK_PLAN.md (soak and 0.9 rows). Feedback rows: 0.8.1-testers.md in the pause dir, folder feedback.
-2. Owner R6 0.8.0 items (F3-F5, F7-F8) and the demo cards from the cold README run: folded into B5.
-3. Track C, after a measurement: fewer model calls (select trio, scope_verify); merge-critic facts need a design; the empty-queue final check's live count (l1 note).
-4. README: rework from tester feedback (item 1) after the 0.8.2 soak (plan, track C): lead with goal -> checked plan -> your branch, scope changes as your decision; double review credited as Zeroshot's core.
+1. v0.8.3-rc1 export and pre-release, soak walk, final v0.8.3 if no blocker.
+2. Rules: A2 test policy, budget.py removed; harness H1 (one run per milestone), H2, H3.
+3. P1-P5 through Zeroshot, then P6 design + critic, P7; then the 0.9.0 candidate.
+4. Brief preflight: grep tests/ for every value and every graph golden the change touches (p09a, 2026-10-30).
 
 ## Open
 Harness: run.sh exits 0 when milestone_run refuses a brief; check its last line, not the code. Start runs one after the other (same-second starts race). Before a brief, grep tests/ for every value the change touches (preflight conflicts s3a, a10c).
-Owner decision: `/merge` asked in `auto` when a folder has no checks: (a) merge after the reviewer verdict or (b) keep the ask with a "no checks" note.
 Later: critic 5 s polling (audit finding 10); API-key auth; guarded `--approve-for-me`; Russian/Chinese UI back via the catalog.
 Harness: `run.sh --validate-only` leaves a worktree at HEAD (commit the brief first or remove it); two run.sh launches at the same second can fail at start (stagger).
 devtools/ux_walkthrough.py is stale since the project picker (expects the profile choice first); not a 0.8.0 gate.

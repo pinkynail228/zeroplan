@@ -935,6 +935,7 @@ class MainScreen(CardHost, Screen):
     scheme_roots = None  # I1b: the stage graph per review-loop bound, built once in the screen's own dict
     journal_lines = ()  # I1c: what the activity pane shows, line by line (before wrapping); `snapshot.journal`
     tab_chosen = False  # C0c2/A1b: the start tab was picked from the first snapshot
+    tab_cycle_card = None  # D3b/d3c: the key of the keyed card an arrow tab switch was made over: ←→ keep switching tabs, not its row
     owner_tab = False  # F9: the owner chose a tab since their last chat send or command; the app then moves nothing
     history = ()  # O3: the lines the owner sent or ran in this run, oldest first (never saved)
     history_pos = None  # O3: the index of the recalled line the input still holds (None: not recalling)
@@ -1018,6 +1019,7 @@ class MainScreen(CardHost, Screen):
         self.card_widgets = CardSlots(self.sync_cards)
         self.card_specs = {}
         self.draft_cards = {}
+        self.sent_drafts = {}  # the draft of every draft card sent to the planner, until its plan revision exists
         self.cards_seen = set()
         # i3-chat-inline: the entry widgets of `#chat` in order, the display text and the `ChatEntry` each was
         # built from, so a render reuses them and only a real change (an appended entry, a reload) touches the
@@ -1214,7 +1216,10 @@ class MainScreen(CardHost, Screen):
         current choice. The status area says which."""
         if code is not None:
             theme.choose(self.app, code)
-        self.status_note(strings.text("note.theme", name=theme.choice()))
+        name = theme.choice()
+        if name == "auto":
+            name = "auto (%s)" % theme.theme_name().removeprefix("ansi-")
+        self.status_note(strings.text("note.theme", name=name))
 
     def render_state(self):
         if not self.ready:
@@ -1299,9 +1304,10 @@ class MainScreen(CardHost, Screen):
         # The running turn is one escaped row (L-2/L-4); with none, the newest planner or run line is wrapped in full,
         # so an `/attempt` remedy stays readable. The note and the chat's own lines below are wrapped the same way.
         activity = [elide_end(thinking, room)] if thinking else wrapped([newest] if newest else [], room)
-        # One status line while a turn runs: the note waits (it is not cleared) and shows again after the turn.
-        own = [piece for text in (chat_state(app), "" if thinking else app.chat_note, chat_outcome(app),
-                                  chat_refusal(app))
+        # One status line while a turn runs: the note waits (it is not cleared) and shows again after the turn; the
+        # origin notice belongs to the turn it precedes and stays up through it.
+        own = [piece for text in (chat_state(app), "" if thinking else app.chat_note, getattr(app, "origin_note", ""),
+                                  chat_outcome(app), chat_refusal(app))
                if text for piece in plain_lines(command_hints(text))]
         tail = activity + wrapped([note] if note else [], room) + wrapped(own, room)
         text = "\n".join(tail[-rows:])
@@ -1463,6 +1469,8 @@ class MainScreen(CardHost, Screen):
         if not lines:
             step = plan_tab_line(next((line for line in (snapshot.lines if snapshot is not None else ())
                                        if line.startswith("Next:")), ""), plan_auto_approves(snapshot)) or ""
+            if self.app.pending_text():
+                step = ""  # a start is in flight: its `Next:` hint describes a state that is over
             lines = [strings.text(NOTHING_RUNNING) + (" " + step if step else "")]
         return lines
 
@@ -1884,6 +1892,7 @@ class MainScreen(CardHost, Screen):
         """i2/A1: every change of the chat input re-decides the `/` palette — `show_for` hides it unless the value
         starts with `/` and lists the commands `slash` allows in the current state."""
         if event.input.id == "input":
+            self.tab_cycle_card = None  # D3b: typing ends the arrows' tab cycle
             if self.scheme_cmd and not event.value.startswith("/"):  # the prompt is for commands only here
                 self.close_scheme_cmd()
                 return
@@ -1900,6 +1909,7 @@ class MainScreen(CardHost, Screen):
         dispatcher reports that nothing ran, and that is read before the input is cleared)."""
         field = self.query_one("#input", ChatInput)
         line = event.value
+        self.tab_cycle_card = None  # D3b: Enter ends the arrows' tab cycle
         card = self.keyed_card() if not line.strip() else None
         if card is not None and not self.query_one("#palette").display:
             field.value = ""
@@ -2013,6 +2023,7 @@ class MainScreen(CardHost, Screen):
         whole-screen scheme (`/scheme`); otherwise close the file/diff
         canvas tab the canvas shows (returning to the tab that was active before it opened); otherwise cancel the
         running architect turn. Never a milestone's stop key."""
+        self.tab_cycle_card = None  # D3b: Esc ends the arrows' tab cycle
         if self.query_one("#palette").display:
             self.query_one("#palette").display = False
             self.query_one("#input", ChatInput).value = ""
@@ -2044,6 +2055,7 @@ class MainScreen(CardHost, Screen):
         gives the focus back to the input)."""
         panel = self.query_one("#plan-pane")
         field = self.query_one("#input", ChatInput)
+        self.tab_cycle_card = None  # D3b: Tab ends the arrows' tab cycle
         if self.focused is field:
             picked = self.palette_pick(field.value, complete=True)
             if picked is not None:
@@ -2126,13 +2138,28 @@ class MainScreen(CardHost, Screen):
         exactly as before). Any other state — an empty input from any focus — switches the tab (A1). A3: this
         screen's binding only runs while this screen is the active one, so a modal on top or another screen keeps
         the arrow its own — the screen check below is the same guard the scroll keys use, spelled out where the key
-        is."""
+        is.
+
+        D3: with the chat input focused and empty and a keyed card of two or more buttons shown, the arrow moves that
+        card's choice (wrapping) instead, so Enter presses what is drawn picked; the owner reaches the tab by focusing
+        the pane first (`Tab`).
+
+        D3b: an arrow that switched the tab here (wide layout) keeps the arrows on the tabs while the input stays
+        empty, though that switch put the focus back on the input (`restore_tab_focus`) — otherwise the next arrow
+        would move the card and the tabs after the first file tab would be out of reach. Typing, `Tab`, Enter, Esc
+        and another keyed card end it (`tab_cycle_card` holds the card's key: a card refreshed in place keeps
+        it)."""
         field = self.query_one("#input", ChatInput)
         if field.value:
             if self.app.focused is field:
                 field.action_cursor_right() if delta > 0 else field.action_cursor_left()
             return
         if not isinstance(self.app.screen, MainScreen):
+            return
+        card = self.keyed_card()
+        if self.app.focused is field and card is not None and len(card.spec.buttons) > 1 \
+                and self.tab_cycle_card != card.spec.key:
+            card.move_choice(delta)  # D3: the empty input with a keyed card of two or more buttons: ←→ walk its row
             return
         right = self.query_one("#right", TabbedContent)
         if self.narrow:
@@ -2150,6 +2177,7 @@ class MainScreen(CardHost, Screen):
         tabs = self.view_tab_ids()
         current = right.active if right.active in tabs else tabs[0]
         self.show_tab(tabs[(tabs.index(current) + delta) % len(tabs)])
+        self.tab_cycle_card = card.spec.key if card is not None else None
 
     # I5: the file/diff canvas tabs ----------------------------------------------------------------
     def work_running(self):
@@ -2389,6 +2417,8 @@ class ZplanApp(App):
         self.checks = None        # last tuple of readiness Check
         self.plan_error = ""
         self.chat_note = ""
+        self.origin_told = False  # the first accepted chat message checked the origin (D5)
+        self.origin_note = ""     # D5's notice: shown also while that first turn runs, gone at the next accepted message
         self.checking = False
         self.setup_origin = None  # the screen a running setup started from (R-4)
         self.check_seq = 0        # readiness requests are numbered (R-4): a running check never satisfies a later one
@@ -2422,6 +2452,7 @@ class ZplanApp(App):
         self.started_runs = set()    # F9: run ids whose start already showed the Scheme tab
         self.merge_waiting = None  # the milestone whose confirmed merge waits for the merge critic, call after call
         self.pending = None       # (kind, milestone, token before, asked, confirmed at): an action in flight
+        self.revising = None      # the version of the proposed plan a revision was asked for, until a snapshot moves on
         self.finish_note = ""     # how the planner observation ended (the chat pane; the plan screen says it itself)
         self.plan_block = ()      # readiness items behind the last refused submission (re-checked on show)
         self.details_lines = ()   # the lines [i] put under the plan view (a second [i] removes them)
@@ -2435,6 +2466,7 @@ class ZplanApp(App):
             project, lambda: self.chat_prepare(project), binding=lambda: self.chat_binding(project),
             hand_over=self.hand_over, on_change=self.changed, feed=feed_port() if feed_port else None)
         controller.on_merge_wait = lambda milestone: self.from_worker(self.merge_wait_shown, milestone)
+        controller.on_start_wait = lambda milestone, state: self.from_worker(self.start_wait_shown, milestone, state)
         if feed_port is not None:
             controller.snapshot_source = self.chat_snapshot
             controller.on_observed = self.chat.notify
@@ -2538,9 +2570,21 @@ class ZplanApp(App):
         """One Enter in the chat input: one turn on the chat's own thread, or a refusal line. Nothing is queued."""
         if self.chat is None:
             return False, self.chat_off
+        first = not getattr(self, "origin_told", True)  # a host without the D5 fields asks nothing
+        held = self.origin_note if first else ""
+        if first:  # the notice is in place before the turn's thread starts; a refused send gives it back
+            fix = self.controller.origin_fix()
+            if fix:
+                self.origin_note = strings.text("note.origin_needed", fix=fix)
         accepted, line = self.chat.send(value, snapshot=self.chat_snapshot())
         if accepted:
             self.chat_note = ""  # the owner's accepted turn ends the note, whatever set it
+            if first:
+                self.origin_told = True  # once per session, whatever the answer
+            else:
+                self.origin_note = ""  # ... and the origin notice of the turn before
+        elif first:
+            self.origin_note = held
         return accepted, line
 
     def note_chat_transcript(self, size):
@@ -2703,6 +2747,7 @@ class ZplanApp(App):
             self.plan_error = error
         else:
             self.snapshot, self.plan_error = snapshot, ""
+            self.revision_seen(snapshot)
             # i6: the one-time language chooser is triggered by the missing language store alone, never by the
             # profile's state — an existing project that upgraded from a version which stored no language still
             # gets it, whatever its profile says (`state` is `never`, `later` or `accepted`). A profile that still
@@ -3207,6 +3252,11 @@ class ZplanApp(App):
 
     def plan_action_done(self, prefix, outcome, error):
         self.plan_lines = ()
+        if self.revising is not None and (error or outcome.kind == "blocked"):
+            # no revision was made: the proposal's card offers its choices again (its key was seen, so it is let back)
+            for screen in self.screen_stack:
+                getattr(screen, "cards_seen", set()).discard("plan:%s" % self.revising)
+            self.revising = None
         if error:
             self.say_note(prefix + error)
             self.request_refresh()
@@ -3222,8 +3272,18 @@ class ZplanApp(App):
         if not text:
             self.say_note(EMPTY_CHANGE)
             return
+        view = self.snapshot
+        if getattr(view, "status", None) == "proposed":
+            self.revising = view.version  # the old card offers nothing while the revision is asked for
+            self.changed()
         self.controller.revise_plan(text, self.deliver(
             lambda outcome, error: self.plan_action_done("Not done: ", outcome, error)))
+
+    def revision_seen(self, snapshot):
+        """A snapshot that names another revision, or one no longer proposed, shows the revision asked for: the old
+        proposal's card is no question any more, and a new proposal's card is offered as usual."""
+        if self.revising is not None and (snapshot.version != self.revising or snapshot.status != "proposed"):
+            self.revising = None
 
     def plan_is_stale(self):
         """The current proposal is one the project moved away from (`plan.stale`): approving it is refused and a
@@ -3903,7 +3963,13 @@ class ZplanApp(App):
     def merge_wait_shown(self, milestone):
         """The controller's word that the merge of `milestone` waits for the merge critic (None: it ended). The
         end modal of that milestone and the status line say so; the verdict is painted by whoever asked for the merge."""
-        self.merge_waiting = milestone
+        waited, self.merge_waiting = self.merge_waiting, milestone
+        if milestone is None and waited is not None:
+            text = strings.text("note.merge_waiting", stage=waited)
+            if self.run_note == text:
+                self.run_note = ""  # the wait is over, whatever the verdict: the note describes a state that is gone
+            if self.plan_lines == (text,):  # said on the plan screen (`say_note`)
+                self.plan_lines = ()
         if milestone is not None:
             text = strings.text("note.merge_waiting", stage=milestone)
             modal = next((s for s in self.screen_stack if isinstance(s, RunScreen) and s.end.milestone == milestone), None)
@@ -3912,6 +3978,19 @@ class ZplanApp(App):
             else:
                 self.say_note(text)
         self.request_refresh()
+        self.changed()
+
+    def start_wait_shown(self, milestone, state):
+        """The controller's word on a start the architect's tool makes (no owner key began it): "begin" holds the
+        local `starting M1…` pending line, as an owner's start does, until a snapshot shows the run; "failed" lifts it."""
+        if state == "begin":
+            if self.pending is None:
+                self.begin_pending("start", milestone)
+        elif self.pending is not None and self.pending[:2] == ["start", milestone]:
+            if state == "failed":
+                self.clear_pending()
+            else:
+                self.confirm_pending()
         self.changed()
 
     def diff_shown(self, modal, outcome, error):

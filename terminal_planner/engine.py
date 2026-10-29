@@ -683,6 +683,11 @@ def verifier_instructions(tail):
             "task carries them), which rank as stated for the owner's rules. " % (MAX_MILESTONE_TASKS, MAX_MILESTONE_TASKS) + tail)
 
 
+# D4: the revision feedback is the owner's requests for the goal, in order; the goal text alone must not outrank them.
+FEEDBACK_RULE = ("The revision feedback lists the owner's requests in order; each amends the goal, and a later "
+                 "request wins over an earlier one and over the goal text.")
+
+
 def planner_instructions(returns):
     return ("Plan only in the disposable Git checkout. Never edit files, implement, commit, publish, "
             "install software, contact servers, execute the requested feature or start nested agents. "
@@ -801,10 +806,11 @@ PRIOR_REVIEW = (" When task.prior_review is present it is the critic's verdict a
                 "address every finding in the new proposal.")
 
 
-def planner_graph_v2(rounds, edit=False):
+def planner_graph_v2(rounds, edit=False, revised=False):
     """Planner graph 2: the planner and a `critic` that keeps one provider conversation across the rounds of the run
     (`sessionScope: node_instance`); `rounds` is the revision's frozen plan_rounds (the loop bound). The critic
-    writes the cumulative discussion in its output; the planner never does."""
+    writes the cumulative discussion in its output; the planner never does. `revised` (the revision carries
+    requests) adds the sentence that ranks them over the goal; a revision without requests keeps its graph."""
     state = record("schemaVersion", "task", "proposal", "planResponse", "planVerdict", "planFindings", "discussion")
     state["fields"]["planVerdict"]["type"] = {"kind": "enum", "values": ["accepted", "rejected"]}
     output = copy.deepcopy(state)
@@ -832,7 +838,7 @@ def planner_graph_v2(rounds, edit=False):
     # Read-only: a verifier gets the read-only guidance, a step the dependency-install guidance.
     planner = {"kind": "verifier", "name": "planner", "worker": "builtin.agent.software-worker@1",
                "instructions": planner_instructions(V2_PLANNER_RETURNS) + OWNER_RULES
-               + (EDIT_PLANNER if edit else PRIOR_REVIEW),
+               + (EDIT_PLANNER if edit else PRIOR_REVIEW) + (" " + FEEDBACK_RULE if revised else ""),
                "input": record("task", "proposal", "planFindings", "discussion"),
                "output": record("proposal", "planResponse"),
                "inputBindings": [state_binding(n) for n in ("task", "proposal", "planFindings", "discussion")],
@@ -1372,7 +1378,7 @@ class NativeEngine:
             context["owner_rules"] = {
                 "priority": "Owner rules for planning. They rank below the frozen task and the graph mechanics.",
                 "files": [{"path": rule["path"], "text": rule["text"]} for rule in snapshot["rules"]]}
-            documents = [("graph", planner_graph_v2(snapshot["plan_rounds"], "draft" in current)),
+            documents = [("graph", planner_graph_v2(snapshot["plan_rounds"], "draft" in current, bool(current["feedback"]))),
                          ("runtime", planner_runtime_v2(snapshot["roles"])),
                          ("input", planner_input_v2(context))]
         else:
