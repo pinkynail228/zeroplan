@@ -371,7 +371,7 @@ class FailureTests(PlanningShell):
               "Next: wait or check the account limits"),
              ("network", "Planning stopped: no connection to the model service.", "planner.network",
               "Next: check the network"),
-             (None, "the cause is unknown", "planner.unknown", "Next: /details Zeroshot diagnostic commands"))
+             (None, "the cause is unknown", "planner.unknown", "Next: /details — Zeroshot diagnostic commands"))
 
     async def test_a4_each_cause_shows_the_catalog_cause_and_next_step_without_ids(self):
         for cause, line, family, step in self.CASES:
@@ -900,6 +900,7 @@ class PlanScreenInteractionTests(PlanningShell):
             snapshot=None, plan_lines=(), changed=lambda: None, deliver=lambda callback: callback,
             controller=SimpleNamespace(revise_plan=lambda text, done: revised.append(text)))
         app.plan_is_stale = lambda: ZplanApp.plan_is_stale(app)
+        app.say_note = lambda line: setattr(app, "plan_lines", (line,))  # the plan screen's half of `say_note`
 
         def asked(text, family, actions=("revise", "reject", "requirements")):
             revised.clear()

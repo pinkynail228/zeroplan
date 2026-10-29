@@ -662,6 +662,20 @@ class FlowHomeTests(LiveTest):
             json.dumps(home.flow)
 
 
+class StaleHomeTests(LiveTest):
+    def test_c5_home_of_a_proposal_renders_in_another_worktree_and_names_revision(self):
+        """C5: `authority.fresh()` refuses in a linked worktree of the project (the state is shared, the frozen
+        worktree is not); home still renders and its Next line names revision, as for a stale proposal."""
+        with self.authority() as a:
+            self.begin(a)
+            self.propose(a)
+        linked = self.root / "linked"
+        subprocess.run(["git", "-C", str(self.project), "worktree", "add", "--detach", str(linked)], check=True,
+                       capture_output=True)
+        with tp.Authority(self.state, linked) as b:
+            self.assertEqual(self.service(b, None)[0].home().lines[-1], delivery.REVISE_NEXT)
+
+
 class JournalTests(LiveTest):
     def run_out(self, service, r, limit=60):
         steps = 0
@@ -778,6 +792,33 @@ class JournalTests(LiveTest):
             self.assertEqual(r["status"], "failed")
             home = service.home()
             self.assertEqual(home.focus.id, "M1")  # failed_recoverable is the milestone under "Next"
+            self.assertEqual(home.journal, service.journal(r))
+            self.assertTrue(home.journal)
+
+    def test_home_journal_in_a_drafted_plan(self):
+        # C4 J1: a plan that is not approved carries the planner's journal (not an empty one).
+        entries = [{"at": START, "text": "one"}, {"at": START, "text": "two"}]
+        with self.authority() as a:
+            self.begin(a)
+            a.current["live"] = dict(live.new(), journal=entries)
+            service, _ = self.service(a, self.scripted([]))
+            self.assertEqual(service.home().kind, "pending")
+            self.assertEqual(service.home().journal, service.journal_lines({"journal": entries}))
+            self.assertEqual(len(service.home().journal), 2)
+
+    def test_home_journal_after_every_stage_merged(self):
+        # C4 J2: with every stage merged Home keeps the journal of the last stage in plan order that has an attempt.
+        driver = self.scripted([("advance", 5)], outcome="done")
+        with self.authority() as a:
+            self.approved(a)
+            service, controller = self.service(a, driver)
+            for milestone in ("M1", "M2"):
+                r = controller.start(milestone, 1, ROLES)
+                self.run_out(service, r)
+                controller.finish(r)
+                controller.merge(r)
+            home = service.home()
+            self.assertIsNone(home.focus)  # every stage is merged; r is the last one in plan order
             self.assertEqual(home.journal, service.journal(r))
             self.assertTrue(home.journal)
 

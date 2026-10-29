@@ -50,6 +50,7 @@ EXPECTED = (
     ("/details", "cmd.details", EVERYWHERE, None),
     ("/retry", "cmd.retry", EVERYWHERE, None),
     ("/scheme", "cmd.scheme", EVERYWHERE, None),
+    ("/theme", "cmd.theme", EVERYWHERE, Arg("theme", choices=("auto", "dark", "light"))),
 )
 
 # A3's table, spelled out again (a name -> the states it acts in), so the check does not just read A1's tuple back.
@@ -85,16 +86,16 @@ class SlashRegistryTests(unittest.TestCase):
         offered.start()
         self.addCleanup(offered.stop)
 
-    def test_a1_commands_are_the_twenty_one_frozen_records_in_order(self):
-        """A1: `COMMANDS` is a tuple of frozen `Command(name, description_id, states, arg)` records — the twenty-one
+    def test_a1_commands_are_the_twenty_two_frozen_records_in_order(self):
+        """A1: `COMMANDS` is a tuple of frozen `Command(name, description_id, states, arg)` records — the twenty-two
         commands, with the state sets given, in the order given."""
         self.assertIsInstance(COMMANDS, tuple)
-        self.assertEqual(len(COMMANDS), 21)
+        self.assertEqual(len(COMMANDS), 22)
         self.assertEqual([(c.name, c.description_id, c.states, c.arg) for c in COMMANDS], list(EXPECTED))
         self.assertEqual([c.name for c in COMMANDS],
                          ["/plan", "/approve", "/decline", "/run", "/merge", "/diff", "/open", "/status", "/stop",
                           "/language", "/setup", "/help", "/new", "/quit", "/view", "/attempt", "/answer", "/log",
-                          "/details", "/retry", "/scheme"])
+                          "/details", "/retry", "/scheme", "/theme"])
         for command in COMMANDS:
             with self.subTest(command.name):
                 self.assertIsInstance(command, Command)
@@ -153,7 +154,7 @@ class SlashRegistryTests(unittest.TestCase):
 
     def test_a4_matches_filters_by_prefix_and_puts_the_state_s_first(self):
         """A4: the name prefix filters in registry order; with a state the acting commands come first, the rest keep
-        their order after them; a bare `/` lists all twenty."""
+        their order after them; a bare `/` lists all twenty-two."""
         self.assertEqual(matches("/"), list(COMMANDS))          # "/" alone lists all, in registry order
         self.assertEqual([c.name for c in matches("/pl")], ["/plan"])
         self.assertEqual([c.name for c in matches("/op")], ["/open"])
@@ -164,11 +165,11 @@ class SlashRegistryTests(unittest.TestCase):
         self.assertEqual([c.name for c in matches("/", state="merge")],
                          ["/run", "/merge", "/diff", "/open", "/status", "/language", "/setup", "/help", "/new",
                           "/quit", "/view", "/attempt", "/answer", "/log", "/details", "/retry",
-                          "/scheme", "/plan", "/approve", "/decline", "/stop"])
+                          "/scheme", "/theme", "/plan", "/approve", "/decline", "/stop"])
         self.assertEqual([c.name for c in matches("/", state="idle")],
                          ["/plan", "/run", "/diff", "/open", "/status", "/language", "/setup", "/help", "/new",
                           "/quit", "/view", "/attempt", "/answer", "/log", "/details", "/retry",
-                          "/scheme", "/approve", "/decline", "/merge", "/stop"])
+                          "/scheme", "/theme", "/approve", "/decline", "/merge", "/stop"])
         self.assertEqual([c.name for c in matches("/d", state="idle")], ["/diff", "/details", "/decline"])
         self.assertEqual([c.name for c in matches("/d", state="merge")], ["/diff", "/details", "/decline"])
         # the prefix is matched as typed (see the module docstring): a different case reaches no command

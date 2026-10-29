@@ -50,6 +50,8 @@ HAVE_TEXTUAL = ensure_textual()
 CONFIG_HOME = tempfile.mkdtemp(prefix="zs-tui-config-")
 atexit.register(shutil.rmtree, CONFIG_HOME, True)
 os.environ["XDG_CONFIG_HOME"] = CONFIG_HOME
+for _name in ("ZPLAN_THEME", "COLORFGBG"):  # the runner's own terminal never picks the theme a test sees
+    os.environ.pop(_name, None)
 _PINNED_UI = Path(CONFIG_HOME) / "planning-kit" / "ui.json"
 _PINNED_UI.parent.mkdir(parents=True, exist_ok=True)
 _PINNED_UI.write_text('{"language": "ru"}\n', encoding="utf-8")

@@ -14,6 +14,7 @@ Interpretations (the reviewers never see the worker's summary):
 - L4's "asks to confirm" is the `confirm` callable of `setup.login(refresh=True)`; declining changes nothing.
 """
 
+import contextlib
 import fcntl
 import io
 import json
@@ -21,6 +22,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from terminal_planner import cli, planning, setup
@@ -32,6 +34,7 @@ echo "$@" >> "$FAKE_CODEX_LOG"
 case "$*" in *"login status"*) exit "${FAKE_CODEX_STATUS:-1}" ;; esac
 exit 0
 """
+ON_TERMINAL = setup.on_terminal  # the setUp patches it
 STATUS = '-c cli_auth_credentials_store="file" login status'
 DEVICE = '-c cli_auth_credentials_store="file" login --device-auth'
 BINDING = {"executable": "/opt/zeroshot", "state_root": "/tmp/zp", "sha256": "a" * 64, "version": "zeroshot 10.16.0"}
@@ -53,7 +56,8 @@ class LoginHomeTests(unittest.TestCase):
         for name in ("CODEX_HOME", "CODEX_API_KEY", "OPENAI_API_KEY"):
             os.environ.pop(name, None)
         for patcher in (patch.object(setup, "platform_key", return_value=("Darwin", "arm64")),
-                        patch.object(setup, "check_installation", return_value=setup.tools_root())):
+                        patch.object(setup, "check_installation", return_value=setup.tools_root()),
+                        patch.object(setup, "on_terminal", return_value=True)):  # a person is there (L2 tests unpatch)
             patcher.start()
             self.addCleanup(patcher.stop)
         codex = setup.tool_paths()[1]
@@ -107,6 +111,45 @@ class LoginHomeTests(unittest.TestCase):
         self.assertFalse(setup.owned_home(self.mine()))
 
     # L2 -----------------------------------------------------------------------------------------------------
+
+    def streams(self, stdin, stdout):
+        """The process streams as seen by `setup` (the patched `on_terminal` is lifted so the real test runs)."""
+        stream = lambda tty: SimpleNamespace(isatty=lambda: tty)  # noqa: E731
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(setup, "on_terminal", ON_TERMINAL))
+        stack.enter_context(patch.object(setup, "sys", SimpleNamespace(stdin=stream(stdin), stdout=stream(stdout))))
+        return stack
+
+    def test_l2_without_a_terminal_login_says_so_and_touches_nothing(self):
+        """L2 T1/T2/T3/T4: `setup.login` is the one path of `zplan login` and of the TUI callback (`tui_login`), so
+        the guard is judged here. Interpretation: the "usable terminal" is stdin and stdout both a tty (the test
+        `tui_wanted` uses); the line is shown by `login` itself, the CLI's own hint for a nonzero code is not its."""
+        line = "zplan login needs your terminal: run `zplan login` there yourself."
+        for stdin, stdout in ((True, False), (False, True), (False, False)):
+            for refresh in (False, True):
+                with self.subTest(stdin=stdin, stdout=stdout, refresh=refresh), self.streams(stdin, stdout), \
+                        patch.object(setup, "native_environment") as environment:
+                    self.shown.clear()
+                    asked = []
+                    self.assertEqual(self.login(refresh=refresh, confirm=lambda question: asked.append(question)), 2)
+                    self.assertEqual(self.shown, [line])
+                    self.assertEqual((self.calls(), asked), ([], []))
+                    environment.assert_not_called()
+                    self.assertFalse(self.private.exists())  # the home was not made
+        with self.streams(True, True):  # T3: on a terminal the login runs as before
+            os.environ["FAKE_CODEX_STATUS"] = "0"
+            self.assertEqual(self.login(), 0)
+        self.assertEqual((self.calls(), self.shown[-1]), ([STATUS], "Login already present"))
+
+    def test_l2_a_foreign_home_answers_first_and_logout_needs_no_terminal(self):
+        mine = self.mine()
+        with self.streams(False, False):
+            with patch.dict(os.environ, {"CODEX_HOME": str(mine)}):
+                self.assertEqual(self.login(), 0)
+            self.assertIn("This is your Codex (%s): log in via codex login" % mine, self.shown)
+            self.assertNotIn("zplan login needs your terminal", " ".join(self.shown))
+            self.assertEqual(setup.logout(self.shown.append), 0)
+        self.assertEqual(self.calls(), ["logout"])
 
     def test_l2_an_existing_login_is_kept_and_nothing_else_runs(self):
         os.environ["FAKE_CODEX_STATUS"] = "0"

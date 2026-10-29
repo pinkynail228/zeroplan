@@ -26,6 +26,8 @@ STATES = frozenset(("idle", "draft", "planning", "plan_ready", "running", "merge
 
 # The formal /language argument values; anything else after /language is a bad_language note.
 LANGUAGE_CHOICES = ("en", "ru", "zh")
+# S3b: the formal /theme argument values; anything else after /theme is a bad_theme note.
+THEME_CHOICES = ("auto", "dark", "light")
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ COMMANDS = (
     Command("/details", "cmd.details", STATES),
     Command("/retry", "cmd.retry", STATES),
     Command("/scheme", "cmd.scheme", STATES),
+    Command("/theme", "cmd.theme", STATES, Arg("theme", choices=THEME_CHOICES)),
 )
 
 _BY_NAME = {command.name: command for command in COMMANDS}
@@ -154,7 +157,7 @@ def problem(parsed, state):
 
     The first reason wins: an unknown name (`note.unknown_command`) before a state the command does not act in
     (`note.not_now`) before a missing required argument (`note.needs_arg`) or a /language argument outside en|ru|zh
-    (`note.bad_language`)."""
+    (`note.bad_language`) or a /theme argument outside auto|dark|light (`note.bad_theme`)."""
     if parsed.command is None:
         return "note.unknown_command"
     if not available(parsed.command, state):
@@ -165,5 +168,5 @@ def problem(parsed, state):
     if arg.required and not parsed.argument:
         return "note.needs_arg"
     if arg.choices and parsed.argument and parsed.argument not in arg.choices:
-        return "note.bad_language"
+        return "note.bad_theme" if parsed.command.name == "/theme" else "note.bad_language"
     return None

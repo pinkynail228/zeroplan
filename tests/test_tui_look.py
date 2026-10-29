@@ -82,7 +82,7 @@ class LabStyleTests(unittest.TestCase):
                      "#chat-pane:focus-within {\n    border: round ansi_yellow;",
                      "#right {\n    width: 1fr;\n    height: 1fr;\n    border: round ansi_bright_black;",
                      "#right:focus-within {\n    border: round ansi_yellow;",
-                     "#prompt-box {\n    height: 3;\n    border: round ansi_bright_black;",
+                     "#prompt-box {\n    height: auto;\n    border: round ansi_bright_black;",
                      "#prompt-box:focus-within {\n    border: round ansi_yellow;",
                      "#chevron {\n    width: 3;\n    padding-left: 1;\n    color: ansi_yellow;",
                      "#input {\n    border: none;",
@@ -306,14 +306,13 @@ class PolishLineTests(unittest.TestCase):
         self.assertEqual(plan_tab_line("Next: [g] new attempt M1 — from the current HEAD"),
                          "Next: /run — new attempt M1 — from the current HEAD")
         # K1a: the other removed pane keys a line names become their commands (the lines are the line UI's)
-        self.assertEqual(plan_tab_line("Next: [w] watch M1"), "Next: /attempt watch M1")
+        self.assertEqual(plan_tab_line("Next: [w] watch M1"), "Next: /attempt — watch M1")
         self.assertEqual(plan_tab_line("Next: [g] continue M1 — the same attempt; [o] open — a new attempt"),
-                         "Next: /run — continue M1 — the same attempt; /attempt open — a new attempt")
+                         "Next: /run — continue M1 — the same attempt; /attempt — open — a new attempt")
         self.assertEqual(plan_tab_line("All 2 slots are busy (M1, M2): they wait. [w] watch, [g] check."),
                          "All 2 slots are busy (M1, M2): they wait. /attempt watch, /run check.")
         # K1d: every letter of the line UI has its step (`[l]`, `[r]` included); only a letter outside the table is dropped
-        self.assertEqual(plan_tab_line("Next: all stages are merged; [r] revise — a new goal"),
-                         "Next: all stages are merged; /view → revise — a new goal")
+        self.assertEqual(plan_tab_line("Next: [r] revise — a new goal"), "Next: /view → revise — a new goal")
         self.assertEqual(plan_tab_line("Next: [l] refresh login, then [g] check readiness."),
                          "Next: /setup → log in, then /run — check readiness.")
         self.assertIsNone(plan_tab_line("Next: [k] something"))

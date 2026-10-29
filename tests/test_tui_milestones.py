@@ -126,6 +126,17 @@ class MilestoneShell(ShellTest):
     async def shows(self, pilot, text, timeout=8.0):
         await self.until(pilot, lambda: text in self.flat(), timeout)
 
+    async def plan_shows(self, pilot, text, timeout=8.0):
+        """`shows` on the Plan tab. F9: a start shows the Scheme tab once, and the milestone rows and the pending
+        line live on the Plan tab, so a test that reads them puts that tab back (the app's own move, no owner choice)
+        for as long as it waits."""
+        def shown():
+            main = self.app.main_screen()
+            if main is not None and main.query_one("#right").active != "tab-plan":
+                main.show_tab("tab-plan", reveal=False, owner=False)
+            return text in self.flat()
+        await self.until(pilot, shown, timeout)
+
     async def pane_shows(self, pilot, text, timeout=8.0):
         await self.until(pilot, lambda: text in self.pane_flat(), timeout)
 
@@ -190,7 +201,7 @@ class MilestoneShell(ShellTest):
         """A `needs_owner` end no longer pops `RunScreen` on the automatic watch (i3d): its card under the chat is
         the decision, and `[o]` is what opens the end-of-run screen now. The attempt is waited to its end first —
         `begin_run` only starts it — and then `[o]` reaches `action_open_milestone` from the plan pane."""
-        await self.until(pilot, lambda: "needs an answer" in self.flat(), timeout)
+        await self.plan_shows(pilot, "needs an answer", timeout)
         await self.panel(pilot)
         await self.command(pilot, "/attempt")
         await self.shows(pilot, "[esc]", timeout)
@@ -230,7 +241,7 @@ class JourneyTests(MilestoneShell):
             await self.press_button(pilot, "yes")
             await self.until(pilot, self.driver.entered.is_set)
             # Live state before completion: the row carries the phase and the task progress; the left pane the run.
-            await self.shows(pilot, "running · task 1/1 (T1)")
+            await self.plan_shows(pilot, "running · task 1/1 (T1)")
             running = next(row for row in self.app.rows() if row.state == "running")
             self.assertEqual(self.app.query_one("#right").border_title,
                              strings.text("canvas.scheme_running", stage="%s %s" % (running.id, running.title)))
@@ -531,7 +542,7 @@ class StopAndDetachTests(MilestoneShell):
             await self.press_button(pilot, "yes")
             self.driver.gate.set()  # the slice in flight ends; the queued stop is then sent, and lost
             await self.shows(pilot, "Not stopped: force-stop lost")
-            await self.shows(pilot, "stopping")
+            await self.plan_shows(pilot, "stopping")
             self.assertEqual(self.driver.stopped, [])
             self.driver.lose_stop = False
             self.app.screen.query_one("#input").value = "/run"  # no pause: the watch concludes a finished run on its own
@@ -1768,13 +1779,14 @@ class PaneTabTests(MilestoneShell):
 
     async def test_a1b_the_start_tab_is_live_while_something_is_active_and_never_moves_on_its_own(self):
         """A1b through `tui_support` at both supported sizes: the tab shown at start is «Сейчас» while a planner or
-        a milestone attempt is active, else «План»; and the app never switches the tab itself afterwards — only the
-        owner's keys do (the switch to «План» a `Tab` makes is A3's focus move, checked there).
+        a milestone attempt is active, else «План»; and the app switches the tab afterwards only for an approval or a
+        start, once (F9: `tests.test_tui_follow`), never back on its own (the switch to «План» a `Tab` makes is A3's
+        focus move, checked there).
 
         The planner half of the rule is the sibling test in `test_tui_planning` (an observing planner revision):
         keeping a planner live needs that module's planner double. This test covers the milestone half twice: the
         app follows an attempt the store already has running (the tab is «Сейчас», and it stays «Сейчас» once the
-        attempt ends and the watching is over), and an attempt started later from home (the tab stays «План»)."""
+        attempt ends and the watching is over), and an attempt started later from home (F9: the tab moves to «Сейчас» once)."""
         for size in ((160, 45), (120, 40)):
             with self.subTest(size=size, mode="running, not followed"):
                 self.state = self.root / ("state-unwatched-%sx%s" % size)
@@ -1798,14 +1810,14 @@ class PaneTabTests(MilestoneShell):
             with self.subTest(size=size, mode="started later"):
                 self.state = self.root / ("state-idle-%sx%s" % size)
                 self.approve(running=False)
-                self.driver.gate.set()
+                self.driver.gate.clear()  # hold the observe slice: the started attempt stays live until checked
                 async with self.shell(self.controller(), size=size, follow=True) as pilot:
                     await self.loaded(pilot)
                     self.assertEqual(self.tab(), self.ui.TAB_PLAN)  # nothing active at the first snapshot
                     await self.begin_run(pilot)  # [g] [y]: the attempt starts and the app watches it
                     await self.until(pilot, lambda: self.app.run_watch is not None)
                     await pilot.pause(0.2)
-                    self.assertEqual(self.tab(), self.ui.TAB_PLAN)  # started later: no switch of its own
+                    self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # F9: a start shows «Сейчас» once, the owner chose none
                     self.driver.gate.set()
                     await self.until(pilot, lambda: self.app.run_watch is None)
                     await pilot.pause(0.2)

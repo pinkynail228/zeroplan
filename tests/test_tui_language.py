@@ -95,7 +95,7 @@ class MainScreenLanguageTests(ShellTest):
         return [strip.get_tab(tab).label.plain for tab in (ui.TAB_LIVE, ui.TAB_PLAN)]
 
     def placeholder(self):
-        return self.main().query_one("#input", ui.Input).placeholder
+        return self.main().query_one("#input", ui.ChatInput).placeholder
 
     def chat_off(self):
         """The catalog's own refusal line, the one the chat pane draws when no chat is built at all (a `--fixture`

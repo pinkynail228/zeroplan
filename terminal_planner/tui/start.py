@@ -25,6 +25,7 @@ from textual.widgets import Input, Static
 from .. import __version__
 from ..authority import Blocked, discover, git
 from ..setup import GITHUB_ORIGIN
+from . import theme
 
 # `python3 devtools/ui-lab/ascii_logo.py upstream/docs/brand/assets/oec-mascot.png braille 24 128`
 MASCOT = """\
@@ -63,10 +64,12 @@ Screen.compact #mascot { margin-bottom: 0; }
 Screen.compact #brand-box { width: auto; height: 13; align-vertical: middle; }
 #brand { width: 29; height: auto; }
 #wordmark { text-align: center; color: ansi_bright_yellow; }
+#wordmark:light { color: ansi_yellow; }
 #subtitle { text-align: center; }
 #card { border: round ansi_yellow; padding: 0 1; height: auto; margin-top: 1; }
 Screen.compact #card { margin-top: 0; }
 #card Input { border: none; height: 1; padding: 0 1; margin-top: 1; background: ansi_bright_black; }
+#card Input:light { background: ansi_white; }
 #footer { margin-top: 1; text-align: center; }
 """
 
@@ -108,9 +111,29 @@ def inspect(path) -> Folder:
     return Folder(path, True, root, True, branch, commit)
 
 
+COUNT_TIMEOUT = 2  # seconds: a work tree too large to count in this time shows no count
+
+
 def unstaged_files(root) -> int:
-    """Files the work tree has that the last commit does not (untracked included)."""
-    return len([line for line in git(root, "status", "--porcelain", "--untracked-files=all").splitlines() if line])
+    """Entries the work tree has that the last commit does not (an untracked folder counts as one entry). Raises
+    `subprocess.TimeoutExpired` after COUNT_TIMEOUT seconds, `Blocked` or `OSError` when Git cannot say."""
+    result = subprocess.run(["git", "--no-optional-locks", "-c", "diff.autoRefreshIndex=false",
+                             "-c", "core.fsmonitor=false", "-C", str(root), "status", "--porcelain",
+                             "--untracked-files=normal"], capture_output=True, start_new_session=True,
+                            timeout=COUNT_TIMEOUT)
+    if result.returncode:
+        raise Blocked("Could not read the Git project.", family="project.unreadable")
+    return len([line for line in result.stdout.splitlines() if line])
+
+
+def cannot_be_project(path) -> bool:
+    """The home folder, a filesystem root or a mount point (an external disk's top): «Create a project here» is
+    never offered there."""
+    try:
+        path = Path(path).resolve()
+        return path == Path.home().resolve() or path == path.parent or os.path.ismount(path)
+    except (OSError, RuntimeError):
+        return False
 
 
 def run_git(path, *args, input=None):
@@ -140,6 +163,8 @@ def create_project(path, name=None, email=None):
     """`git init` when `path` is in no repo, the identity into the repo's local config when given, then one empty
     commit made from the empty tree, so nothing staged or present in the folder is added to it."""
     path = Path(path)
+    if cannot_be_project(path):
+        raise StartError("The home folder or the top of a disk cannot be a project.")
     try:
         discover(path)
     except Blocked:
@@ -216,13 +241,14 @@ class StartApp(App):
                 Binding("down", "move(1)", show=False), Binding("enter", "select", show=False)]
 
     def __init__(self, start):
-        super().__init__(ansi_color=True)
+        super().__init__(ansi_color=True, driver_class=theme.Driver)
         self.start = Path(start).expanduser()
         self.stack = [("project", self.start)]
         self.info = inspect(self.start)
         self.cursor = 0
         self.error = ""
         self.old_origin = ""  # the origin the origin card would replace
+        self.files = 0        # entries not in the commit, counted when the «created» card is entered
 
     # Layout ------------------------------------------------------------------
 
@@ -244,7 +270,7 @@ class StartApp(App):
             yield Static(id="footer")
 
     def on_mount(self) -> None:
-        self.theme = "ansi-dark"
+        self.theme = theme.theme_name()
         self.show()
         self.fit()
 
@@ -273,6 +299,11 @@ class StartApp(App):
         if kind in ("project", "created"):
             self.info = inspect(rest[0])
         self.cursor, self.error = 0, ""
+        if kind == "created":
+            try:
+                self.files = unstaged_files(self.info.root)
+            except (Blocked, OSError, subprocess.SubprocessError):
+                self.files = 0
         if kind == "origin":
             self.old_origin = origin_url(rest[0])
             self.query_one("#origin", Input).value = suggested_repository(rest[0])
@@ -284,7 +315,8 @@ class StartApp(App):
         if kind == "project":
             if self.info.ready:
                 return [("Open this project", "open"), ("Another folder", "other"), ("Quit", "leave")]
-            create = [("Create a project here (git init + first commit)", "create")] if self.info.exists else []
+            offered = self.info.exists and not cannot_be_project(self.info.path)
+            create = [("Create a project here (git init + first commit)", "create")] if offered else []
             return create + [("Another folder", "other"), ("Quit", "leave")]
         if kind == "created":
             return [("Continue", "open")]
@@ -306,6 +338,9 @@ class StartApp(App):
             else:
                 card.append(("There is no Git project here" if self.info.exists else "The folder does not exist") + "\n", style="bold")
             card.append(clip(short(self.info.path), self.card_width()) + "\n", style="dim")
+            if not self.info.ready and self.info.exists and cannot_be_project(self.info.path):
+                card.append("The home folder or the top of a disk cannot be a project.\nMake a folder for it: "
+                            "mkdir ~/my-project\n", style="yellow")
         elif kind == "other":
             card.append("Another folder\n", style="bold")
             card.append("The path to a project folder or to a new folder.\n", style="dim")
@@ -324,10 +359,7 @@ class StartApp(App):
             info = self.info
             card.append("%s · %s\n" % (info.branch, info.commit), style="bold")
             card.append(clip(short(info.root), self.card_width()) + "\n", style="dim")
-            try:
-                files = unstaged_files(info.root)
-            except (Blocked, OSError):
-                files = 0
+            files = self.files
             if files:
                 card.append("%s not in the commit\n" % ("1 file" if files == 1 else "%d files" % files), style="yellow")
         for i, (label, _) in enumerate(self.rows()):

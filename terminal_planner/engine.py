@@ -327,7 +327,7 @@ class FixtureEngine:
 
 DRIVER_MECHANICS = (
     "The milestone driver already supplies independent acceptance and code reviews and bounded repairs for every "
-    "task, and a final milestone check once per milestone.")
+    "task, and a final milestone check with bounded repairs and re-checks.")
 # A milestone runs in its own worktree; main only receives it afterwards (RC1: checks on main can never hold before
 # the merge). Shared by the planner and the verifier.
 MILESTONE_ISOLATION = (
@@ -795,7 +795,10 @@ EDIT_PLANNER = (" Task.draft is the owner's edit of the prior proposal, already 
                 "proposal in every round, byte for byte, even when the critic finds a problem. Never fix, extend or "
                 "reword it; explain any problem you see in planResponse instead.")
 EDIT_CRITIC = (" Task.draft is the owner's edit of task.prior_proposal and the proposal you judge: the planner may not "
-               "change it. Judge it against the goal and the prior proposal; report any problem as a finding.")
+               "change it. Judge it against the goal and the prior proposal. " + PLAN_CRITIC_BAR)
+# Added to the v2 planner of every revision: the findings of the checked revision whose plan task.prior_proposal is.
+PRIOR_REVIEW = (" When task.prior_review is present it is the critic's verdict and findings on task.prior_proposal: "
+                "address every finding in the new proposal.")
 
 
 def planner_graph_v2(rounds, edit=False):
@@ -829,7 +832,7 @@ def planner_graph_v2(rounds, edit=False):
     # Read-only: a verifier gets the read-only guidance, a step the dependency-install guidance.
     planner = {"kind": "verifier", "name": "planner", "worker": "builtin.agent.software-worker@1",
                "instructions": planner_instructions(V2_PLANNER_RETURNS) + OWNER_RULES
-               + (EDIT_PLANNER if edit else ""),
+               + (EDIT_PLANNER if edit else PRIOR_REVIEW),
                "input": record("task", "proposal", "planFindings", "discussion"),
                "output": record("proposal", "planResponse"),
                "inputBindings": [state_binding(n) for n in ("task", "proposal", "planFindings", "discussion")],
@@ -1354,10 +1357,14 @@ class NativeEngine:
         if git(workspace, "rev-parse", "HEAD") != git(authority.project, "rev-parse", "HEAD") or not authority.fresh():
             raise Blocked("Git changed while the planner snapshot was being created.", family="engine.checkout")
         # The latest plan that exists before this revision, whatever happened to the revisions in between.
-        prior = next((r["proposal"] for r in reversed(authority.state["revisions"][:-1]) if r["proposal"] is not None), None)
+        before = next((r for r in reversed(authority.state["revisions"][:-1]) if r["proposal"] is not None), None)
+        prior = before["proposal"] if before is not None else None
         snapshot = authority.snapshot(current)  # the one frozen configuration all three documents come from
         context = {key: current[key] for key in ("goal", "roles", "feedback", "version")}
         context["prior_proposal"] = prior
+        if before is not None and before["evidence"] is not None:  # the review of that same revision, frozen here
+            context["prior_review"] = {"revision": before["version"], "verdict": before["evidence"]["verdict"],
+                                       "findings": before["evidence"]["findings"]}
         if "draft" in current:
             context["draft"] = current["draft"]
         context["source_revision"] = git(workspace, "rev-parse", "HEAD").decode().strip()

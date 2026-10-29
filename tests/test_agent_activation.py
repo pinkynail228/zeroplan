@@ -257,8 +257,8 @@ class ActivationCase(unittest.TestCase):
     def main(self, argv):
         """`cli.main(argv)` with the line UI replaced by a recording screen; returns (code, screen)."""
         screen = Screen()
-        with patch.object(cli, "Terminal", lambda: screen):
-            code = cli.main(list(argv))
+        with patch.object(cli, "Terminal", lambda: screen), patch.object(setup, "on_terminal", return_value=True):
+            code = cli.main(list(argv))  # a terminal is faked: the guard of `login` (L2) has its own tests
         return code, screen
 
     def engine_env(self, project):

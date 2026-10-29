@@ -29,9 +29,9 @@ from test_terminal_planner import PLAN, ROLES, ScriptedTerminal, fixture_proposa
 # for the review bar A3 adds to the v1 verifier text and again for the task brief A2a adds to the planner and verifier
 # text, and once more for the milestone-isolation sentence RC1 adds to both (a new build carries it; stored
 # revisions keep their bytes), and once more for the dod sentence H3 changes in the planner text, and once more for H4 (no dev marker, the
-# milestone driver's true mechanics, the critic's authority sentence) and once more for H5 (the final check once per milestone).
+# milestone driver's true mechanics, the critic's authority sentence) and once more for H5 (the final check once per milestone) and D1 (the final check's repairs and re-checks).
 V1_GOLDEN = {
-    "graph": "8e2fe55c720c06a21a83e860f3263803fc64f9bc71e7d49d6342e9af98e1db2f",
+    "graph": "cdd3fd38e5d5cda2c4b1a733d7ea6793215ef20270fa514c84c181ea44f75467",
     "runtime": "fe363c5a5404df138de8289fd29ec38709a3c1b4513f8956ace867d7c4715014",
     "input": "6267b3988046fa059819ecc62a2f83339e6f832b0eb4b66fdd12c26d49d1a1e3",
 }
@@ -103,7 +103,8 @@ class GraphTests(unittest.TestCase):
             self.assertIn(claim, engine.DRIVER_MECHANICS)
         reviews, final = engine.DRIVER_MECHANICS.split("a final milestone check")
         self.assertIn("for every task", reviews)
-        self.assertIn("once per milestone", final)
+        self.assertTrue(final.endswith(" with bounded repairs and re-checks."))
+        self.assertNotIn("once per milestone", final)
         self.assertNotIn("for every task", final)
         for text in (next(n for n in nodes(planner_graph_v2(2)["root"]) if n["name"] == "critic")["instructions"],
                      next(n for n in nodes(planner_graph()["root"]) if n["name"] == "plan_verifier")["instructions"]):
@@ -455,6 +456,19 @@ class AdapterTests(GateBase):
 
 
 # G-B2 / G-B6 -----------------------------------------------------------------------------------------------------
+    def test_a8_the_planner_addresses_the_prior_review_and_an_edit_is_judged_under_the_bar(self):
+        """A8 F2/F5: the planner text of a revision says to address task.prior_review (an edit revision returns its
+        draft unchanged instead); the critic of an edit revision is judged under PLAN_CRITIC_BAR and no longer told
+        to "report any problem as a finding". Interpretation: the prior_review sentence is not added to an edit
+        revision's planner, which must return the draft byte for byte."""
+        def text(graph, name):
+            return next(n for n in nodes(graph["root"]) if n["name"] == name)["instructions"]
+        self.assertIn("task.prior_review", text(planner_graph_v2(2), "planner"))
+        self.assertNotIn("task.prior_review", text(planner_graph_v2(2, edit=True), "planner"))
+        critic = text(planner_graph_v2(2, edit=True), "critic")
+        self.assertIn(engine.PLAN_CRITIC_BAR, critic)
+        self.assertNotIn("report any problem", critic)
+
 
 class FreezeTests(tpr.ProfileTest):
     """One freeze point; the documents and the evidence come from the snapshot, never from the live files."""
@@ -495,6 +509,27 @@ class FreezeTests(tpr.ProfileTest):
         self.assertEqual(loop["maxIterations"], 2)
         self.assertEqual(authority.current["frozen"], frozen)
         self.assertEqual(authority.current["evidence"]["resolved_config_digest"], frozen["config_digest"])
+
+    def test_a8_f2_the_next_revision_gets_the_prior_review_frozen_and_starts_unreviewed(self):
+        """A8 F2: r2 rejected "T3 has no example", the owner revises -> r3's task has prior_review {2, rejected,
+        findings} next to the prior proposal of the same revision; planFindings is "Not reviewed" and the discussion
+        has no round; the review is not part of r3's evidence. Interpretation: no prior_review key when no earlier
+        revision has evidence."""
+        engine, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"},
+                                     self.terminal(verdict="rejected", findings="T3 has no example"), {"valid": True}])
+        authority = self.native_session()
+        authority.begin("Requested feature", ROLES, "native")
+        engine.proposal(authority, lambda _: None)
+        before = copy.deepcopy(authority.current["proposal"])
+        authority.begin("Requested feature", ROLES, "native", feedback="add examples")
+        engine.prepare(authority)
+        document = json.loads((authority.directory / "revision-2" / "input.json").read_text())
+        task = json.loads(document["task"])
+        self.assertEqual(task["prior_review"], {"revision": 1, "verdict": "rejected", "findings": "T3 has no example"})
+        self.assertEqual(task["prior_proposal"], before)
+        self.assertEqual((document["planFindings"], json.loads(document["discussion"])["rounds"]),
+                         ("Not reviewed", []))
+        self.assertNotIn("prior_review", authority.current["evidence"] or {})
 
     def test_roles_and_rounds_changed_after_the_freeze_do_not_reach_the_documents_or_the_evidence(self):
         self.save_roles({"planner": {"model": "planner-frozen", "effort": "high"},

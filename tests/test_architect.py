@@ -244,6 +244,29 @@ class ArchitectTests(unittest.TestCase):
         self.assertIn("autonomy level", text)
         self.assertIn("merge.critic_pending", text)  # the retry instruction is stated
 
+    def test_c2_the_rules_forbid_asking_for_a_yes_in_the_chat_under_a_project_method_and_on_updates(self):
+        """C2 K2: the rule that an action the level leaves to the owner is never asked for in the chat is in
+        TOOL_RULES, so the first prompt under a project `zplan.architect.md` and the resumed-turn update carry it."""
+        (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
+        for text in (build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
+            self.assertIn("never ask for a yes in the chat", text)
+
+    def test_a8_f4_the_rules_send_a_rejected_check_to_revise_and_keep_edit_for_the_owners_text(self):
+        """A8 F4: the tool rules say to read the findings in zplan_status after a rejected check and call
+        zplan_revise_plan naming them, and to use zplan_edit_plan only for an edit whose exact text the owner gave."""
+        text = " ".join(" ".join(architect.TOOL_RULES).split())
+        self.assertIn("After a rejected check, read the findings in zplan_status (plan.findings) and call it naming "
+                      "them", text)
+        self.assertIn("Use it only for an edit whose exact text the owner gave", text)
+
+    def test_a10_b5_the_rules_forbid_an_approval_of_a_rejected_plan_and_point_to_the_card(self):
+        """A10 B5: on review_exhausted the architect never calls zplan_approve_plan; it says the check rejected the
+        plan and points to the card on the main screen; a revision it made that is rejected again is the owner's."""
+        text = " ".join(" ".join(architect.TOOL_RULES).split())
+        self.assertIn("When the plan status is review_exhausted never call it: say the check rejected the plan and "
+                      "point to the card on the main screen", text)
+        self.assertIn("A revision you made that the check rejects again is the owner's to decide", text)
+
     def mcp_calls(self):
         path = self.bin / "mcp_calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []

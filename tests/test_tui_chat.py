@@ -1338,9 +1338,10 @@ class TempdirTests(unittest.TestCase):
 
 if HAVE_TEXTUAL:
     from rich.cells import cell_len
-    from textual.widgets import Input, Static
+    from textual.widgets import Static
 
     from terminal_planner.tui import app as app_module
+    from terminal_planner.tui.chat_input import ChatInput
     from test_layout import text_oracle
 
 
@@ -1367,7 +1368,7 @@ class ChatShell(MilestoneShell):
         await pilot.press("enter")
 
     def query(self, selector):
-        return self.app.query_one(selector, Input)
+        return self.app.query_one(selector, ChatInput)
 
     async def chat_done(self, pilot, timeout=10.0):
         await self.until(pilot, lambda: self.app.chat is not None and not self.app.chat.busy, timeout)

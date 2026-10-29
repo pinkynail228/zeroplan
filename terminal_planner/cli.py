@@ -19,7 +19,7 @@ from .delivery import (ATTENTION, CHECK, DELIVERY, DIFF_LIMIT, EMPTY_ANSWER, NEW
                        PLAN_STATUS, RUN_FAMILY, RUN_STATUS, STATE_TEXT, Changed, Delivery, plain, plan_lines,
                        refusal, short)
 from .engine import FixtureEngine, NativeEngine
-from . import __version__, catalog, commands, planning as planning_module, process, update
+from . import __version__, catalog, commands, planning as planning_module, process, setup, update
 from .process import Profile, ProfileChanged
 from .planning import (HEARTBEAT, OBSERVING, PLANNER_FAMILY, PLANNER_SLICE, Planning, elapsed, one_line, plural,  # noqa: F401
                        summary)
@@ -825,9 +825,9 @@ class App:
 
 
 def login_unfinished(code, retry, home=None):
-    """The hint after a login that returned `code`, "" when the login already said why: Ctrl-C ("Login interrupted") or a
-    home that is not zplan's (the "This is your Codex" line)."""
-    if code == INTERRUPTED or not owned_home(home or agent_home(os.environ)):
+    """The hint after a login that returned `code`, "" when the login already said why: Ctrl-C ("Login interrupted"), a
+    home that is not zplan's (the "This is your Codex" line) or no terminal (the "needs your terminal" line)."""
+    if code == INTERRUPTED or not owned_home(home or agent_home(os.environ)) or not setup.on_terminal():
         return ""
     return "Login not finished; retry %s. " % retry + catalog.LOGIN_DEVICE_CODE_OFF + catalog.tag("setup.login_failed")
 

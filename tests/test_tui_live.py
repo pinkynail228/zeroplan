@@ -445,7 +445,7 @@ class PendingTests(LiveShell):
             await self.command(pilot, "/stop")
             await self.shows(pilot, "Stop the run M1")
             await self.press_button(pilot, "yes")
-            await self.shows(pilot, "stopping M1…")
+            await self.plan_shows(pilot, "stopping M1…")
             await self.command(pilot, "/stop")  # repeated stop: refused while the first is pending
             await self.shows(pilot, "Already in progress: stopping M1…")
             self.assertEqual(self.driver.stopped, [])
@@ -931,7 +931,8 @@ class ParallelWatchTests(LiveShell):
             await self.command(pilot, "/attempt")  # [w] switches the shown attempt to the rebriefed M2
             await self.until(pilot, lambda: self.app.run_watch == "M2")
             await pilot.pause(0.3)
-            self.assertEqual(list(self.app.run_lines), [])  # the new attempt's own lines: not the finished one's
+            # the new attempt's own lines: not the finished one's, only the start line F9 gives an architect's start
+            self.assertEqual(list(self.app.run_lines), ["M2 started · plan r1 · attempt 2"])
             self.assertNotEqual(list(self.app.run_lines), old)
 
     async def test_c4_a_failure_card_retry_is_observed_beside_the_shown_attempt(self):

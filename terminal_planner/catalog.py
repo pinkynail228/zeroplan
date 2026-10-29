@@ -320,7 +320,7 @@ ERRORS = _entries(
      "A check exited non-zero or timed out, or the candidate could not be checked out.",
      "Read the evidence ([i]), fix the result, then [m]; the destination is unchanged."),
     ("merge.critic_pending", "The merge critic did not finish in the observation slice.", "The critic run is still working.",
-     "[m] again: it keeps observing the same run and lands the candidate on the critic's `go`."),
+     "zplan keeps observing the same run and lands the candidate on the critic's `go`; after leaving zplan meanwhile, [m] again observes the same run."),
     ("merge.critic_failed", "The merge critic ended without a verdict.", "The critic run failed, or its output was invalid.",
      "[m] again to start a new critic; [i] shows the diagnostic."),
     # The cause of a failed attempt, read from its own run logs: the latest observed execution failure, never a
@@ -697,8 +697,8 @@ _a("tui_confirm", "press", "enter", "press", "press the focused button; focus st
 _a("tui_confirm_run", "start", "enter", "start", "“yes” is already focused: Enter starts at once", "“yes” is already focused: Enter starts at once.")
 _a("tui_confirm", "no", "esc", "no", "cancel; nothing changes", "Cancel; nothing changes.")
 _a("tui_bootstrap", "accept", "enter", "accept", "the “accept” button (focused at once): write zplan.process.json and accept the profile", "The “accept” button, focused at once: accept the proposed profile (writes the file).")
-_a("tui_bootstrap", "later", "tab", "later", "move to the “later” button (Tab, ←/→): work from the proposal without writing to the project", "Move to the “later” button: postpone; the snapshot is used and the header says so.")
 _a("tui_bootstrap", "configure", "right", "configure", "move to the “configure” button (→): set your own values before the file is written", "Move to the “configure” button: set your own values before the file is written.")
+_a("tui_bootstrap", "later", "tab", "later", "move on to the “later” button (Tab or →, after “configure”): work from the proposal without writing to the project", "Move to the “later” button: postpone; the snapshot is used and the header says so.")
 _a("tui_bootstrap", "quit", "ctrl+q", "quit", "quit without deciding", "Quit without deciding.")
 _a("tui_profile", "move", "←→/tab", "move", "move to another button or field (←/→ switch buttons within a row, Tab goes to the next field)", "Move between buttons and fields (Left/Right switch buttons within a row; Tab goes to the next field).")
 _a("tui_profile", "pick", "enter/space", "pick", "pick the focused button: it gets the mark “● ”", "Pick the focused button; the picked one is marked «● ».")

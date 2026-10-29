@@ -59,7 +59,7 @@ TOOLS = [
      "inputSchema": _schema({"text": {"type": "string"}}, ["text"])},
     {"name": "zplan_status",
      "description": "Report this session's architect requests (queued, running, done with a result), the current "
-                    "plan revision with its status and gate verdict, and the approved plan's milestones with their "
+                    "plan revision with its status, gate verdict and the critic's findings, and the approved plan's milestones with their "
                     "state, attempt, run id and token. Answers at once.",
      "inputSchema": _schema({})},
     {"name": "zplan_start",
@@ -93,6 +93,13 @@ TOOLS = [
                     "new revision goes to the planner; its approval is a separate, gated action (zplan_approve_plan).",
      "inputSchema": _schema({"revision": {"type": "integer", "minimum": 1}, "plan": {"type": "object"}},
                             ["revision", "plan"])},
+    {"name": "zplan_revise_plan",
+     "description": "Ask the live Controller for a new plan revision from written `feedback` (name the findings of "
+                    "a rejected check from zplan_status `plan.findings`). The Controller refuses when `revision` is "
+                    "not current or `feedback` is empty; otherwise the planner revises the plan from it, and the "
+                    "new revision's approval is a separate, gated action (zplan_approve_plan).",
+     "inputSchema": _schema({"revision": {"type": "integer", "minimum": 1}, "feedback": {"type": "string"}},
+                            ["revision", "feedback"])},
     {"name": "zplan_merge",
      "description": "Ask the live Controller to merge the attempt named by its status row's token into the "
                     "milestone's destination. The Controller re-checks freshness and the autonomy policy: it may "
@@ -112,7 +119,7 @@ TOOLS = [
 # The tools that act through the live Controller: their whole call travels over the socket, and every result, error
 # and timeout names the bridge request id so the architect can follow it in `zplan_status`.
 ACTION_TOOLS = ("zplan_status", "zplan_start", "zplan_stop", "zplan_approve_plan", "zplan_resume",
-                "zplan_rebrief", "zplan_edit_plan", "zplan_merge", "zplan_propose_commit")
+                "zplan_rebrief", "zplan_edit_plan", "zplan_revise_plan", "zplan_merge", "zplan_propose_commit")
 CLIENT_TIMEOUT = bridge.CLIENT_TIMEOUT  # the socket client waits past the server's own action bound
 
 

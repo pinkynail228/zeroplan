@@ -72,6 +72,7 @@ LANGUAGES = ("en", "ru", "zh")
 OFFERED = ("en",)
 DEFAULT = "en"
 DISPLAY_NAMES = {"en": "English", "ru": "Русский", "zh": "中文"}
+THEMES = ("dark", "light", "auto")
 FILENAME = "ui.json"
 # LC_ALL wins over LC_MESSAGES, which wins over LANG; the first non-empty value decides the default language.
 LOCALE_VARS = ("LC_ALL", "LC_MESSAGES", "LANG")
@@ -184,9 +185,9 @@ CATALOG = {
     "chat.example_3": {"en": "Update the README: how to install and run",
                        "ru": "Обнови README: как установить и запустить",
                        "zh": "Обнови README: как установить и запустить"},
-    "chat.intro_hint": {"en": "↑↓ example into the input · enter send · / commands",
-                        "ru": "↑↓ пример в строку ввода · enter отправить · / команды",
-                        "zh": "↑↓ пример в строку ввода · enter отправить · / команды"},
+    "chat.intro_hint": {"en": "↑↓ example into the input · enter send · ctrl+j new line · / commands",
+                        "ru": "↑↓ пример в строку ввода · enter отправить · ctrl+j новая строка · / команды",
+                        "zh": "↑↓ пример в строку ввода · enter отправить · ctrl+j новая строка · / команды"},
     "chat.placeholder": {"en": "Write to the architect… or / for commands",
                          "ru": "Напиши архитектору… или / для команд",
                          "zh": "给架构师留言…或按 / 查看命令"},
@@ -425,6 +426,11 @@ CATALOG = {
                                  "zh": "根据目标草稿「{goal}」"},
     "canvas.scheme_approve": {"en": "Plan ready · waiting for your yes", "ru": "План готов · ждёт твоего да",
                               "zh": "计划已就绪 · 等待你的确认"},
+    "canvas.scheme_approve_auto": {"en": "Plan ready · the architect approves", "ru": "План готов · архитектор утверждает",
+                                   "zh": "计划已就绪 · 架构师会批准"},
+    "canvas.plan_next_auto": {"en": "Next: the architect approves the plan itself — tell it in the chat what to change",
+                              "ru": "Дальше: архитектор утвердит план сам — что изменить, скажи ему в чате",
+                              "zh": "下一步：架构师会自行批准计划——要改什么，请在聊天里告诉它"},
     "canvas.scheme_draft": {"en": "Goal draft · not sent yet", "ru": "Черновик цели · ещё не отправлен",
                             "zh": "目标草稿 · 尚未发送"},
     "canvas.scheme_idle": {"en": "notes · nothing runs", "ru": "notes · работы нет", "zh": "notes · 没有任务"},
@@ -531,6 +537,8 @@ CATALOG = {
     "cmd.stop": {"en": "stop the current work", "ru": "остановить текущую работу", "zh": "停止当前工作"},
     "cmd.language": {"en": "UI language", "ru": "язык интерфейса: English · Русский · 中文",
                      "zh": "界面语言：English · Русский · 中文"},
+    "cmd.theme": {"en": "colours: auto, dark or light", "ru": "цвета: auto, dark или light",
+                  "zh": "配色：auto、dark 或 light"},
     "cmd.new": {"en": "a fresh architect session (the plan and STATE carry over)",
                 "ru": "новая сессия архитектора (план и STATE переносятся)",
                 "zh": "新的架构师会话（计划和 STATE 会保留）"},
@@ -541,6 +549,17 @@ CATALOG = {
 
     # ---- Notes (the warning lines) ---------------------------------------------------------------
     "note.language": {"en": "Language: {name}", "ru": "Язык: {name}", "zh": "语言：{name}"},
+    "note.merge_waiting": {
+        "en": "the merge check is reviewing {stage}; zplan merges when it says go",
+        "ru": "проверка слияния смотрит {stage}; zplan сольёт, когда она скажет «можно»",
+        "zh": "合并检查正在审查 {stage}；它放行后 zplan 会合并"},
+    "note.merge_already": {
+        "en": "Already waiting: the merge check is reviewing {stage}; zplan merges when it says go",
+        "ru": "Уже жду: проверка слияния смотрит {stage}; zplan сольёт, когда она скажет «можно»",
+        "zh": "已在等待：合并检查正在审查 {stage}；它放行后 zplan 会合并"},
+    "note.theme": {"en": "Theme: {name}", "ru": "Тема: {name}", "zh": "主题：{name}"},
+    "note.bad_theme": {"en": "unknown theme: auto, dark or light", "ru": "неизвестная тема: auto, dark или light",
+                       "zh": "未知主题：auto、dark 或 light"},
     "note.turn_cancelled": {"en": "The architect's reply was cancelled.", "ru": "Ответ архитектора отменён.",
                             "zh": "架构师的回复已取消。"},
     "note.only_russian": {"en": "Only Russian is available for now", "ru": "Пока доступен только русский язык",
@@ -599,16 +618,25 @@ def default_language(environ=None) -> str:
     return DEFAULT
 
 
-def _stored():
-    """The saved code, or None when nothing usable is stored (missing, unreadable or unknown)."""
+def _data():
+    """What `ui.json` holds, or {} when nothing usable is stored (missing, unreadable or not an object)."""
     try:
         data = decode(store_path().read_text(encoding="utf-8"))
     except (Blocked, OSError, ValueError, UnicodeDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    code = data.get("language")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _stored():
+    """The saved code, or None when nothing usable is stored (missing, unreadable or unknown)."""
+    code = _data().get("language")
     return code if code in LANGUAGES else None
+
+
+def stored_theme():
+    """The saved theme (dark, light or auto), or None when nothing usable is stored."""
+    code = _data().get("theme")
+    return code if code in THEMES else None
 
 
 def language() -> str:
@@ -622,12 +650,24 @@ def set_language(code: str) -> None:
     """Switch the language at once and store it. An unknown code is a programming error."""
     if code not in LANGUAGES:
         raise ValueError("unknown UI language: %r" % (code,))
+    _store(language=code)
+
+
+def set_theme(code: str) -> None:
+    """Store the theme (dark, light or auto), keeping the rest of `ui.json`. An unknown code is a programming error."""
+    if code not in THEMES:
+        raise ValueError("unknown UI theme: %r" % (code,))
+    _store(theme=code)
+
+
+def _store(**changes) -> None:
+    """Write `ui.json` with `changes` over what it holds, atomically."""
     root = setup.config_root()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with tempfile.NamedTemporaryFile(mode="w", dir=root, delete=False) as stream:
         temporary = Path(stream.name)
         try:
-            stream.write(canonical({"language": code}) + "\n")
+            stream.write(canonical({**_data(), **changes}) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
             os.replace(temporary, root / FILENAME)

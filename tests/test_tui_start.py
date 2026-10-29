@@ -313,6 +313,122 @@ class StartTests(unittest.TestCase):
         self.assertEqual(git(bare, "remote", "get-url", "origin"), "https://github.com/local/bare.git")
         self.assertEqual(start.suggested_repository(self.root / "project with spaces"), "local/project-with-spaces")
 
+    # S4 --------------------------------------------------------------------------------------------------------------
+
+    def test_s4_the_home_folder_and_a_disk_root_are_never_offered_as_a_project_but_a_subfolder_is(self):
+        """S4 H1 regression, worker interpretations: «the home folder» is `Path.home()` resolved (the isolated HOME
+        here); a symlink to it counts as the home folder. The refusal removes only the create row: an existing
+        repo whose root is the home folder still opens (non-goal). A disk root is checked on the path alone."""
+        home = self.root / "home"
+        home.mkdir()
+        sub = home / "proj"
+        sub.mkdir()
+        link = self.root / "link-to-home"
+        link.symlink_to(home)
+        self.assertTrue(start.cannot_be_project(home))
+        self.assertTrue(start.cannot_be_project(link))
+        self.assertTrue(start.cannot_be_project(Path(home.anchor)))
+        self.assertFalse(start.cannot_be_project(sub))
+        seen = {}
+
+        async def look(app, pilot):
+            seen["home"] = screen_text(app)
+            seen["rows"] = [label for label, _ in app.rows()]
+            await pilot.press("enter")  # the first row is «Another folder», not a create step
+            seen["step"] = app.step
+        _, result = self.run_app(home, look)
+        self.assertEqual(seen["rows"], ["Another folder", "Quit"])
+        self.assertIn("cannot be a project", seen["home"])
+        self.assertIn("mkdir ~/my-project", seen["home"])
+        self.assertNotIn("Create a project here", seen["home"])
+        self.assertEqual(seen["step"], ("other",))
+        self.assertFalse((home / ".git").exists())
+        self.assertEqual(start.StartApp(sub).rows()[0][1], "create")
+        self.assertEqual(start.StartApp(link).rows()[0][1], "other")
+
+    # S5 --------------------------------------------------------------------------------------------------------------
+
+    def test_s5_a_mount_point_is_never_offered_as_a_project_but_an_existing_repo_there_still_opens(self):
+        """S5 regression, worker interpretations: a mount point is `os.path.ismount` on the resolved path (patched
+        here to the scratch «disk»); an OSError there counts as false. `create()` reached without the row refuses
+        in `create_project`, so nothing is written. A repo whose root is a mount point still opens (s4 non-goal)."""
+        self.identify()
+        disk = self.folder("disk")
+        sub = disk / "proj"
+        sub.mkdir()
+        with patch.object(start.os.path, "ismount", lambda path: Path(path) == disk):
+            self.assertTrue(start.cannot_be_project(disk))
+            self.assertFalse(start.cannot_be_project(sub))
+            seen = {}
+
+            async def look(app, pilot):
+                seen["rows"] = [label for label, _ in app.rows()]
+                seen["text"] = screen_text(app)
+                app.create()
+                seen["error"] = app.error
+            self.run_app(disk, look)
+            self.assertEqual(seen["rows"], ["Another folder", "Quit"])
+            self.assertIn("The home folder or the top of a disk cannot be a project.", seen["text"])
+            self.assertTrue(seen["error"])
+            self.assertFalse((disk / ".git").exists())
+            with self.assertRaises(start.StartError):
+                start.create_project(disk)
+            self.assertFalse((disk / ".git").exists())
+        with patch.object(start.os.path, "ismount", side_effect=OSError):
+            self.assertFalse(start.cannot_be_project(sub))
+        repo = self.root / "home"
+        repo.mkdir(exist_ok=True)
+        git(repo, "init", "-q", "-b", "main")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "first")
+        before = (repo / ".git" / "HEAD").read_text()
+        self.assertTrue(start.inspect(repo).ready)
+        self.assertEqual(start.StartApp(repo).rows()[0][1], "open")
+        self.assertEqual((repo / ".git" / "HEAD").read_text(), before)
+
+    def test_s4_the_count_of_files_not_in_the_commit_runs_once_per_entry_is_shallow_and_bounded_and_never_blocks_the_card(self):
+        """S4 H2/H3 regression, worker interpretations: «a ready card» is the card shown after a project is created,
+        the one that carries the count; the count is taken on entering it, so the keys on the card call it no more."""
+        self.identify()
+        folder = self.folder("big")
+        git(folder, "init", "-q", "-b", "main")
+        (folder / "new").mkdir()
+        for n in range(200):
+            (folder / "new" / ("file%d.txt" % n)).write_text("x\n")
+        start.create_project(folder)
+        self.assertEqual(start.unstaged_files(folder), 1, "an untracked folder is one entry, not its 200 files")
+        with patch.object(start.subprocess, "run", wraps=start.subprocess.run) as run:
+            start.unstaged_files(folder)
+        self.assertIn("--untracked-files=normal", run.call_args.args[0])
+        self.assertLessEqual(run.call_args.kwargs["timeout"], 2)
+
+        seen = {}
+
+        async def cursor(app, pilot):
+            await pilot.press("enter")  # «Create a project here»: the created card
+            seen["created"] = screen_text(app)
+            with patch.object(start, "unstaged_files", side_effect=AssertionError("git on a key")) as count:
+                await pilot.press("down", "up", "down", "up", "down", "up")
+            seen["calls"] = count.call_count
+        with patch.object(start, "unstaged_files", wraps=start.unstaged_files) as count:
+            fresh = self.folder("fresh", ["a.txt"])
+            self.run_app(fresh, cursor)
+        self.assertEqual(count.call_count, 1)
+        self.assertEqual(seen["calls"], 0)
+        self.assertIn("1 file not in the commit", seen["created"])
+
+        timed_out = self.folder("timed-out", ["a.txt"])
+
+        async def slow(app, pilot):
+            await pilot.press("enter")
+            seen["slow"] = screen_text(app)
+        with patch.object(start, "unstaged_files", side_effect=subprocess.TimeoutExpired("git", 2)):
+            self.run_app(timed_out, slow)
+        self.assertIn("main · Initial commit", seen["slow"])
+        self.assertNotIn("not in the commit", seen["slow"])
+        with patch.object(start.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 2)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                start.unstaged_files(folder)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,7 @@ restore the store copy the installer made before the 0.6.0 launcher swap.
 0.5.x cannot read plans whose tasks carry a `brief` (0.6.0 planners write one on every task); roll back only without them.
 0.8.0 changes no store or record format; it makes the interface English only. A language stored in `ui.json` as `"ru"` (or `"zh"`) is not an error: it falls back to English, and the file is left as it is. History written by earlier versions stays as it was written: Russian chat turns, event rows and cards in an existing store are still read and shown in Russian, only new text is English.
 0.8.1 changes no store or record format; a new project's proposed profile is the preset `zplan.default/3` (the worker on `gpt-6.1-terra` at effort max). Profiles that name `zplan.default/1` or `/2` resolve as before.
+0.8.2 adds one store field: the event feed records which plan revisions the architect made (`architect`), and 0.8.1 refuses a store holding it as invalid. Roll back across 0.8.1 -> 0.8.2 only to the `v3.backup-0.8.1-<UTC timestamp>` copy the installer made before the launcher swap. A `/theme` choice is kept in `ui.json`; 0.8.1 ignores it.
 
 ## For the maintainer: qualify and ship a new toolchain
 

@@ -319,6 +319,29 @@ class FeedPlanTests(RunsTest):
             a.save()
             self.assertEqual(a.state["feed"]["seq"], seq)
 
+    def test_a10_b1_b2_a_revision_an_architect_tool_made_is_marked_and_its_rejection_wakes_no_turn(self):
+        """A10 B1/B2: a revision created while `architect_acting` is recorded in the feed (`architect`) and the mark
+        survives a restart; the `review_exhausted` event of that revision wakes no turn, the owner's own revisions'
+        do (at auto), and a revision the owner makes after it is not marked. Interpretation: the owner's r1 and r3
+        are revisions created with the flag off."""
+        reject = lambda a: planner.FixtureEngine("exhausted").proposal(a, lambda _: None)
+        with patch("terminal_planner.autonomy.level", return_value="auto"), self.fixture_authority() as a:
+            feed.bootstrap(a)
+            a.begin("Goal", ROLES, "fixture", execution=2)
+            reject(a)  # the owner's r1 is rejected: wakes the architect once
+            a.architect_acting = True
+            a.begin("Goal", ROLES, "fixture", execution=2, feedback="the findings")  # the architect's revise: r2
+            a.architect_acting = False
+            reject(a)
+            a.begin("Goal", ROLES, "fixture", execution=2, feedback="the owner")  # the owner's revise: r3
+            reject(a)
+            exhausted = [(e["plan_revision"], e["wake"]) for e in self.plan_events(a) if e["status"] == "review_exhausted"]
+            self.assertEqual(exhausted, [(1, True), (2, False), (3, True)])
+            self.assertEqual(a.state["feed"]["architect"], [2])
+            feed.validate_feed(a.state["feed"])
+        with self.fixture_authority() as a:  # a restart
+            self.assertEqual([feed.architect_made(a, v) for v in (1, 2, 3)], [False, True, False])
+
     def test_c1_the_plan_event_wakes_by_the_autonomy_level(self):
         """C1: the same transitions wake by level: auto wakes on proposed (approve) and approved (start), supervised
         only on approved (approve is the owner's), manual (no profile) on none; the event itself is always there."""

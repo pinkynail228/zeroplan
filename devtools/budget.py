@@ -2,7 +2,7 @@
 """Test budget: net test lines a change adds stay within RATIO x the product lines it adds, plus SLACK.
 
 Usage: python3 devtools/budget.py [BASE [HEAD]]   (BASE defaults to the merge base with main; without HEAD
-compares BASE with the working tree). Exit 0 = within budget, 1 = over budget. Tests = tests/ and devtools/test_*.py;
+compares BASE with the working tree, untracked files included: workers never commit). Exit 0 = within budget, 1 = over budget. Tests = tests/ and devtools/test_*.py;
 product = terminal_planner/ without resources/. A change with no product lines (a test-only prune) is never
 over budget when it removes more test lines than it adds.
 """
@@ -18,6 +18,15 @@ def numstat(*revs):
         added, deleted, path = line.split("\t", 2)
         if added != "-":
             yield int(added), int(deleted), path
+    if len(revs) == 1:
+        untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
+                                   capture_output=True, text=True, check=True).stdout.split("\0")
+        for path in filter(None, untracked):
+            try:
+                with open(path, "rb") as f:
+                    yield f.read().count(b"\n"), 0, path
+            except OSError:
+                pass
 
 
 def main(argv):

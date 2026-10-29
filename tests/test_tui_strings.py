@@ -94,6 +94,19 @@ class StringsTests(unittest.TestCase):
         self.assertEqual(json.loads((setup.config_root() / "ui.json").read_text(encoding="utf-8")),
                          {"language": "zh"})
 
+    def test_s3a_r4_the_theme_and_the_language_are_stored_side_by_side(self):
+        """S3a/R4: `set_theme` keeps the stored language and `set_language` keeps the stored theme; an unknown theme
+        is refused."""
+        path = setup.config_root() / "ui.json"
+        strings.set_language("zh")
+        strings.set_theme("light")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"language": "zh", "theme": "light"})
+        strings.set_language("en")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"language": "en", "theme": "light"})
+        self.assertEqual((strings.language(), strings.stored_theme()), ("en", "light"))
+        with self.assertRaises(ValueError):
+            strings.set_theme("blue")
+
     def test_l1_only_english_is_offered_and_the_language_in_effect_is_always_offered(self):
         """L1/C1 (0.8, T2): the real `OFFERED` is `("en",)`, so a locale or a stored language outside it (a 0.7.x
         install stored `ru`) reads as English, while the catalog keeps ru and zh. Interpretation: no stored code is

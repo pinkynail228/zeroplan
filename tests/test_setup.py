@@ -240,7 +240,7 @@ class SetupTests(unittest.TestCase):
     def test_login_only_passes_official_device_command_without_capturing_output(self):
         home = setup.private_codex_home()  # D6a: login acts in the home zplan owns (test_login_home covers the rest)
         env = {"CODEX_HOME": str(home), "PATH": "test"}
-        with patch.object(setup, "native_environment", return_value=env), \
+        with patch.object(setup, "native_environment", return_value=env), patch.object(setup, "on_terminal", return_value=True), \
                 patch.object(setup.subprocess, "call", return_value=7) as call:
             self.assertEqual(setup.login(lambda line: None), 7)
         status, login = call.call_args_list
@@ -258,7 +258,7 @@ class SetupTests(unittest.TestCase):
         the guidance also lives in the catalog (catalog.LOGIN_DEVICE_CODE_OFF), not inline here."""
         output = io.StringIO()
         terminal = Terminal(io.StringIO(), output)
-        with patch("terminal_planner.cli.Terminal", return_value=terminal), \
+        with patch("terminal_planner.cli.Terminal", return_value=terminal), patch.object(setup, "on_terminal", return_value=True), \
                 patch("terminal_planner.cli.login", return_value=7):
             self.assertEqual(main(["login"]), 7)
         shown = output.getvalue()

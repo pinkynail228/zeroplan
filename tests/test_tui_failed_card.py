@@ -57,6 +57,9 @@ from terminal_planner.tui import strings
 # The declared count of this module must not depend on Textual or Rich (tests.test_toolchain): the imports below
 # are guarded, and a stand-in keeps every class declared where they are missing.
 from test_tui_draft_card import MISSING_REASON, _main_method
+import test_process as tpr
+import test_tui_plan_gate as gate
+import test_tui_planning as planning_shell
 from test_tui_milestones import Gated, MilestoneShell
 
 try:
@@ -435,6 +438,47 @@ class FailureCardUnitTests(unittest.TestCase):
         screen.render_card_sources()  # a closed card is never offered again
         self.assertIsNotNone(screen.card_specs[key].done)
 
+    def test_a10_b3_a_rejected_plan_shows_its_card_with_three_buttons_at_every_level_and_the_screen_is_not_idle(self):
+        """A10 B3: the current revision `review_exhausted` (r2, the autonomy level unread: the snapshot has no
+        profile, i.e. manual) shows «The plan check rejected revision 2» with the findings and «revise» / «approve
+        anyway» / «details»; «revise» is the plan screen's revision note, «approve anyway» its override form and the
+        typed reason goes to `override_note`, «details» the plan screen; the screen state is `error`, not `idle`; a
+        version 1 plan (no `override` action) has no «approve anyway»; the card leaves with the status.
+        Interpretation: the buttons are the plan screen's actions, offered as it offers them."""
+        view = planning.PlanView("proposal", 2, "review_exhausted", ("", "Plan r2 · checked"),
+                                 ("revise", "restart", "override", "requirements"), findings="Too broad: split M2.")
+        screen = _Screen(stage_snapshot(plan=view, status="review_exhausted", version=2))
+        pushed, noted = [], []
+        screen.app.push_screen = lambda note, callback: pushed.append((note, callback))
+        screen.app.revision_note = lambda text: noted.append(("revise", text))
+        screen.app.override_note = lambda version, text: noted.append(("override", version, text))
+        with patch.dict(ui.CARD_SOURCES, {"rejected": ui.rejected_card_source}, clear=True):
+            screen.render_card_sources()
+            key = "rejected:plan:2"
+            spec = screen.card_specs[key]
+            self.assertEqual(spec.title, "The plan check rejected revision 2")
+            self.assertIn("Too broad: split M2.", spec.text)
+            self.assertEqual(spec.buttons, ((strings.text("card.revise_only"), "/decline"),
+                                            ("approve anyway", "/approve"),
+                                            (strings.text("card.error_details"), "/details")))
+            self.assertEqual(ui.slash_state(screen.app.snapshot), "error")
+            self.assertTrue(ui.MainScreen.run_command(screen, "/details", "", key))
+            self.assertEqual(screen.app.plans, [True])
+            ui.MainScreen.run_command(screen, "/decline", "", key)
+            ui.MainScreen.run_command(screen, "/approve", "", key)
+            self.assertEqual([callback for _, callback in pushed][0], screen.app.revision_note)
+            pushed[1][1]("The owner accepts the risk.")
+            self.assertEqual(noted, [("override", 2, "The owner accepts the risk.")])
+            screen.app.snapshot = stage_snapshot(plan=view, status="approved", version=2)
+            screen.render_card_sources()
+            self.assertNotIn(key, screen.card_specs)
+            old = planning.PlanView("proposal", 1, "review_exhausted", (), ("revise", "restart", "requirements"),
+                                    findings="x")
+            screen.app.snapshot = stage_snapshot(plan=old, status="review_exhausted", version=1)
+            screen.render_card_sources()
+            self.assertEqual([label for label, _ in screen.card_specs["rejected:plan:1"].buttons],
+                             [strings.text("card.revise_only"), strings.text("card.error_details")])
+
     def test_rs2_a_typed_retry_does_what_the_cards_button_does_and_the_palette_lists_it(self):
         """RS2 C2: `/retry` typed in the chat (no card key) acts on the newest open card that routes it, exactly like
         the card's «try again» button, and is a command in every screen state the palette offers.
@@ -545,6 +589,36 @@ class FailureCardUnitTests(unittest.TestCase):
         self.assertIsNone(screen.card_specs["failed:r1:M1:1"].done)  # nothing started: the card stays
         self.assertIn("Инструменты zplan не установлены", screen.app.chat_note)
         self.assertEqual(screen.app.run_watch, None)
+
+
+@unittest.skipUnless(HAVE, MISSING_REASON)
+class RejectedCardRefusalTests(tpr.ProfileTest, planning_shell.PlanningShell):
+    async def test_a10b_a_refusal_from_the_rejected_card_shows_on_the_main_screen(self):
+        """A10b C1/C3 on the real app: «approve anyway» on the rejected-plan card with a reason the rule refuses says
+        so on the main screen (with the run lines) and the card stays, nothing is written; a valid reason approves,
+        the card leaves and the outcome line shows there. C2 (the plan screen keeps its line under the plan view) is
+        `test_tui_plan_gate`'s override walk. Interpretation: «shows» is the screen text with the pane's wraps
+        removed (`flat`); the refusal's tail is not pinned, only the lead of the task's example."""
+        gate.PlanGateShell.argued(self, "exhausted")
+        path = self.sidecar().parent / "planning.json"
+        before = path.read_bytes()
+        async with self.shell(size=(140, 50)) as pilot:
+            await self.loaded(pilot)
+            await self.until(pilot, lambda: "rejected:plan:1" in self.app.screen.card_specs)
+            await pilot.pause(0.3)
+            for reason in ("too short", "the owner accepts the broad scope"):
+                self.app.screen.run_command("/approve", "", "rejected:plan:1")
+                await self.shows(pilot, "Approve plan r1 despite the check?")
+                await self.type(pilot, reason)
+                await self.press_button(pilot, "send")
+                await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
+                if reason == "too short":
+                    await self.until(pilot, lambda: "Not done: A reason is required" in self.flat())
+                    self.assertIn("rejected:plan:1", self.app.screen.card_specs)
+                    self.assertEqual(path.read_bytes(), before)
+            await self.until(pilot, lambda: "Plan r1 approved despite the check." in self.flat())
+            await self.until(pilot, lambda: "rejected:plan:1" not in self.app.screen.card_specs)
+        self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ FAKE = """#!/bin/sh
 echo "$@" >> "$FAKE_CODEX_LOG"
 case "$*" in
   *"login status"*) exit 1 ;;
+  *logout*) echo "env NO_COLOR=${NO_COLOR-unset} TERM=${TERM-unset}" >> "$FAKE_CODEX_LOG" ;;
   *device-auth*)
     echo "env NO_COLOR=${NO_COLOR-unset} TERM=${TERM-unset}" >> "$FAKE_CODEX_LOG"
     case "$FAKE_CODEX_MODE" in
@@ -88,13 +89,13 @@ class LoginInterruptTests(unittest.TestCase):
         before = signal.signal(signal.SIGINT, signal.default_int_handler)  # a runner may have left SIGINT ignored
         self.addCleanup(signal.signal, signal.SIGINT, before)
 
-    def run_login(self, mode="", tty=False):
+    def run_login(self, mode="", tty=True, command="login"):
         os.environ["FAKE_CODEX_MODE"] = mode
         out = io.StringIO()
-        stdout = SimpleNamespace(isatty=lambda: tty)
+        terminal = SimpleNamespace(isatty=lambda: tty)
         with patch.object(cli, "Terminal", lambda: Terminal(io.StringIO(), out)), \
-                patch.object(setup, "sys", SimpleNamespace(stdout=stdout)):
-            code = cli.main(["login"])
+                patch.object(setup, "sys", SimpleNamespace(stdin=terminal, stdout=terminal)):
+            code = cli.main([command])
         return code, out.getvalue()
 
     def test_g1_ctrl_c_during_login_says_so_and_exits_130(self):
@@ -118,11 +119,24 @@ class LoginInterruptTests(unittest.TestCase):
         self.assertIn("This is your Codex (%s)" % mine, shown)
         self.assertNotIn("Login not finished", shown)
 
+    def test_l2b_the_login_refused_outside_a_terminal_gets_no_retry_hint(self):
+        """L2b: the "needs your terminal" line already says why, so the CLI adds no "Login not finished" hint after it
+        (the TUI's sign_in shares `login_unfinished`). Interpretation: a pipe on stdout stands for any TTY-less login."""
+        code, shown = self.run_login("fail", tty=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(shown.strip(), "zplan login needs your terminal: run `zplan login` there yourself.")
+        self.assertNotIn("setup.login_failed", shown)
+        self.assertEqual(cli.login_unfinished(130, "zplan login"), "")  # Ctrl-C: unchanged
+        with patch.object(setup, "on_terminal", return_value=True):
+            self.assertIn("setup.login_failed", cli.login_unfinished(7, "zplan login"))  # in a terminal the hint stays
+
     def test_g1_a_codex_child_off_a_terminal_gets_no_colour(self):
-        for tty, expected in ((False, "env NO_COLOR=1 TERM=dumb"), (True, "env NO_COLOR=unset TERM=xterm")):
-            with self.subTest(tty=tty):
+        """L2: a login runs only on a terminal, so the colourless child is the logout's (the login's `plain_output` went)."""
+        for command, tty, expected in (("logout", False, "env NO_COLOR=1 TERM=dumb"),
+                                       ("login", True, "env NO_COLOR=unset TERM=xterm")):
+            with self.subTest(command=command):
                 self.log.unlink(missing_ok=True)
-                self.assertEqual(self.run_login(tty=tty)[0], 0)
+                self.assertEqual(self.run_login(tty=tty, command=command)[0], 0)
                 self.assertIn(expected, self.log.read_text().splitlines())
 
 

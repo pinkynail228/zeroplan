@@ -143,6 +143,7 @@ class Card(Vertical):
         margin: 0 0 1 2;
         height: auto;
     }
+    Card:light { border-title-color: ansi_black; }
     Card.alarm { border: round ansi_red; }
     Card.done { border: none; padding: 0; margin: 0; }
     Card.done .card-text { height: 1; text-wrap: nowrap; text-overflow: ellipsis; text-style: dim; }

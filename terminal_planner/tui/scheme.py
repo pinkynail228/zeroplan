@@ -601,7 +601,8 @@ def observation_from_flow(flow):
 
     The worker's state, the two reviewers (a verdict maps accepted -> succeeded, rejected -> failed), a running
     final step as `final_verify`, a task-picking step as `select`, the review round as `review_loop.count`, the
-    final check's attempt as `count` on the retry loop the check sits in, and the echo of the running command as the
+    final check's attempt as `count` on the retry loop the check sits in, a picked task (`task`, no pick running) as
+    preflight, select_init and select_verify succeeded, and the echo of the running command as the
     worker's detail."""
     if not flow:
         return {}
@@ -620,6 +621,9 @@ def observation_from_flow(flow):
         obs.setdefault(final["check"] + "_loop", {})["count"] = final["attempt"]
     if flow.get("select"):
         obs["select"] = {"state": "running"}
+    elif flow.get("task"):  # a task is picked: the steps before the worker are behind it
+        for name in ("preflight", "select_init", "select_verify"):
+            obs[name] = {"state": "succeeded"}
     if flow.get("round") is not None:
         obs.setdefault("review_loop", {})["count"] = flow["round"]
     if flow.get("command"):

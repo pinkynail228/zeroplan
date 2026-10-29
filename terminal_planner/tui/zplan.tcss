@@ -22,6 +22,12 @@ MainScreen {
     border: round ansi_yellow;
 }
 
+/* S3b: the light theme's rules (`:light`) for what assumes a dark terminal; the dark rules stay as they are. */
+#chat-pane:light,
+#right:light {
+    border-title-color: ansi_black;
+}
+
 /* I1c/A1: the right column is a Vertical of the canvas (`TabbedContent#right`, the two tabs «Scheme»/«Plan») and
    the always-visible «What's happening» pane (`Activity#activity`) under it. The canvas keeps the rest of the column;
    each tab fills what the tab strip leaves. The canvas frame itself is the TabbedContent (its rules below). */
@@ -135,6 +141,10 @@ MainScreen {
     color: ansi_bright_white;
 }
 
+#chat .msg.owner > .body:light {
+    color: ansi_default;
+}
+
 #chat .msg.architect > .body,
 #chat .msg.error > .body {
     margin: 1 0 0 0;
@@ -238,7 +248,7 @@ MainScreen.narrow #chat .card-hint {
    (the chevron carries its own one column), so it spans the chat pane's content width like the entries and the
    whole placeholder fits the 41 columns the pane has at 120x40. */
 #prompt-box {
-    height: 3;
+    height: auto;
     border: round ansi_bright_black;
     padding: 0;
 }
@@ -258,7 +268,9 @@ MainScreen.narrow #chat .card-hint {
     border: none;
     background: transparent;
     padding: 0;
-    height: 1;
+    height: auto;
+    max-height: 8;
+    overflow: hidden hidden;
 }
 
 /* i9/A4: the bottom bar, the lab's one-row `#bar` (no background of its own). */

@@ -27,4 +27,5 @@
 - docs/history/
 - upstream/
 - docs/P0_AUDIT.md
+- docs/spikes/B1_B3_B4_RULES_AND_FACTS.md
 - devtools/zeroshot/tasks/one-command.md

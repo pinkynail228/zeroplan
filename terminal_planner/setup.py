@@ -486,6 +486,14 @@ def plain_output(env):
     return env
 
 
+def on_terminal():
+    """True when stdin and stdout are both a terminal: a device login needs a person there (the test of `tui_wanted`)."""
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
 def ask_confirm(question):
     return input(question + " [y/N]: ").strip().lower() in YES_ANSWERS
 
@@ -494,15 +502,19 @@ def login(show=print, *, home=None, refresh=False, confirm=ask_confirm):
     """Codex device login, only into the home zplan owns (D6a). `home` names the home a recorded run used (the
     auth-failure action); None is `agent_home(os.environ)`.
 
-    A home that is not owned runs no Codex (`foreign`). In the owned home an existing login is kept ("Login already present",
+    A home that is not owned runs no Codex (`foreign`). Without a terminal on stdin and stdout nothing runs or is
+    written (L2): the owner is told to run `zplan login` there. In the owned home an existing login is kept ("Login already present",
     nothing else runs); `refresh` (the auth-failure action) asks to confirm, signs out of that home and logs in
     again. A copied `auth.json` is refused first. The single `native_environment()` call also writes the profile
     (R-3c); the `mkdir` stays for the owned home, which may not exist yet."""
     home = Path(home) if home else agent_home(os.environ)
     if not owned_home(home):
         return foreign(home, "login", show)
+    if not on_terminal():
+        show("zplan login needs your terminal: run `zplan login` there yourself.")
+        return 2
     refuse_copied_auth(home)
-    env = plain_output(native_environment())
+    env = native_environment()
     env["CODEX_HOME"] = str(home)
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:

@@ -163,6 +163,7 @@ class Activity(Static):
         text-wrap: nowrap;
         text-overflow: ellipsis;
     }
+    Activity:light { border-title-color: ansi_black; }
     """
 
     def __init__(self, *args, **kwargs):

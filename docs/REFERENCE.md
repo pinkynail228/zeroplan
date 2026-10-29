@@ -427,8 +427,8 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_confirm_run` | `enter` | `tui_confirm_run.start` | start | “yes” is already focused: Enter starts at once | “yes” is already focused: Enter starts at once. |
 | `tui_confirm` | `esc` | `tui_confirm.no` | no | cancel; nothing changes | Cancel; nothing changes. |
 | `tui_bootstrap` | `enter` | `tui_bootstrap.accept` | accept | the “accept” button (focused at once): write zplan.process.json and accept the profile | The “accept” button, focused at once: accept the proposed profile (writes the file). |
-| `tui_bootstrap` | `tab` | `tui_bootstrap.later` | later | move to the “later” button (Tab, ←/→): work from the proposal without writing to the project | Move to the “later” button: postpone; the snapshot is used and the header says so. |
 | `tui_bootstrap` | `right` | `tui_bootstrap.configure` | configure | move to the “configure” button (→): set your own values before the file is written | Move to the “configure” button: set your own values before the file is written. |
+| `tui_bootstrap` | `tab` | `tui_bootstrap.later` | later | move on to the “later” button (Tab or →, after “configure”): work from the proposal without writing to the project | Move to the “later” button: postpone; the snapshot is used and the header says so. |
 | `tui_bootstrap` | `ctrl+q` | `tui_bootstrap.quit` | quit | quit without deciding | Quit without deciding. |
 | `tui_profile` | `←→/tab` | `tui_profile.move` | move | move to another button or field (←/→ switch buttons within a row, Tab goes to the next field) | Move between buttons and fields (Left/Right switch buttons within a row; Tab goes to the next field). |
 | `tui_profile` | `enter/space` | `tui_profile.pick` | pick | pick the focused button: it gets the mark “● ” | Pick the focused button; the picked one is marked «● ». |
@@ -592,7 +592,7 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `milestone.critic_blocked` | The merge critic blocked the candidate. | A high risk tier or a finding the critic judged a block. | Read the findings ([i], [d]); change the result or start a new attempt, then [m]. |
 | `merge.no_checks` | The merge gate is required but the profile lists no checks. | gates.merge is `required` and `checks` is empty. | List the checks in zplan.process.json, or set gates.merge to `off`. |
 | `merge.checks_failed` | The checks on the merge candidate did not pass, or could not run. | A check exited non-zero or timed out, or the candidate could not be checked out. | Read the evidence ([i]), fix the result, then [m]; the destination is unchanged. |
-| `merge.critic_pending` | The merge critic did not finish in the observation slice. | The critic run is still working. | [m] again: it keeps observing the same run and lands the candidate on the critic's `go`. |
+| `merge.critic_pending` | The merge critic did not finish in the observation slice. | The critic run is still working. | zplan keeps observing the same run and lands the candidate on the critic's `go`; after leaving zplan meanwhile, [m] again observes the same run. |
 | `merge.critic_failed` | The merge critic ended without a verdict. | The critic run failed, or its output was invalid. | [m] again to start a new critic; [i] shows the diagnostic. |
 | `run.limit` | One of the attempt's executions hit a provider session or usage limit. | The provider or account limit is exhausted; the log says when it resets when the provider tells it. | Wait for the reset (shown when it is known) or check the account limits, then retry. |
 | `run.quota` | One of the attempt's executions was refused because the account is out of quota. | No credits are left on the account. | Top up the account, then retry. |

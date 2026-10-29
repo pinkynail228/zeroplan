@@ -332,6 +332,19 @@ class Merge:
     line: str
     stay: bool
     paths: tuple = ()  # overlap: the files of the owner's tree in the way of the landing
+    family: str = ""  # the catalog family of the refusal this verdict came from ("" for none)
+
+
+REVISE_NEXT = "Next: [r] revise — the project changed after planning"  # C5: home's line for a stale proposal
+
+
+def fresh(authority):
+    """`authority.fresh()`; a refusal (another worktree of the project, a changed git directory) is not fresh: home
+    still renders and names revision."""
+    try:
+        return authority.fresh()
+    except Blocked:
+        return False
 
 
 def plan_lines(authority, plan, runs):
@@ -539,11 +552,14 @@ class Delivery:
         lines = [goal_line(plan["goal"], 100, "home.details")]
         if plan["status"] != "approved":
             lines.append("Plan r%s · %s" % (plan["version"], PLAN_STATUS[plan["status"]]))
-            lines.append("Next: [p] plan — %s" % ("approve or revise" if plan["status"] == "proposed" else "open"))
+            if plan["status"] == "proposed" and not fresh(self.authority):  # C5: a stale proposal cannot be approved
+                lines.append(REVISE_NEXT)
+            else:
+                lines.append("Next: [p] plan — %s" % ("approve or revise" if plan["status"] == "proposed" else "open"))
             ids = ["home.plan", "home.revise", "home.settings", "home.details", "home.quit"]
             if plan["run_id"] and plan["status"] in ("observing", "detached", "observation_blocked", "run_failed"):
                 ids.insert(1, "home.tail")
-            return Home("pending", tuple(lines), tuple(ids), panel=self.planner_panel())
+            return Home("pending", tuple(lines), tuple(ids), panel=self.planner_panel(), journal=self.journal(None))
         items = self.runs.overview()
         lines += self.overview_lines(plan, items)
         found = self.focus_item(items)
@@ -566,7 +582,9 @@ class Delivery:
         active = next((i for i in items if i["state"] in ACTIVE and i["record"] is not None), None)
         busy = self.busy(items, slots)
         g_item = self.g_item(items)
-        observed = active["record"] if active else (found["record"] if found else None)
+        # Every stage merged (`found` None): the journal of the last stage in plan order that has an attempt.
+        last = next((i for i in reversed(items) if i["record"] is not None), None)
+        observed = active["record"] if active else (found["record"] if found else (last["record"] if last else None))
         journal = self.journal(observed) if observed is not None else ()
         panel, flow = self.panel_flow(active["record"]) if active else ((), None)
         return Home("approved", tuple(lines), tuple(ids), tuple(self.row(i) for i in items),
@@ -1141,10 +1159,10 @@ class Delivery:
             self.runs.merge(r, resolved,
                             critic=lambda rr, gate, paths: self.critic_authorize(rr, gate, paths, resolved, slice))
         except Overlap as error:
-            return Merge("overlap", refusal(error), True, error.paths)
+            return Merge("overlap", refusal(error), True, error.paths, error.family or "")
         except Blocked as error:
             return Merge("conflict" if extended(r)["delivery"] == "conflict" else "refused",
-                         "Not done: " + refusal(error), extended(r)["delivery"] == "conflict")
+                         "Not done: " + refusal(error), extended(r)["delivery"] == "conflict", family=error.family or "")
         if extended(r)["delivery"] == "integrated":
             left = self.cleanup(r)
             tail = "; left in place: %s." % ", ".join(left) if left else "."

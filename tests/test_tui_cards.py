@@ -282,7 +282,8 @@ class ProducerConsumerHintTests(unittest.TestCase):
     def home_lines(plan):
         from types import SimpleNamespace
         from terminal_planner.delivery import Delivery
-        stand_in = SimpleNamespace(plan=lambda: plan, planner_panel=lambda: None)
+        stand_in = SimpleNamespace(plan=lambda: plan, planner_panel=lambda: None, journal=lambda r=None: (),
+                                   authority=SimpleNamespace(fresh=lambda: True))
         return Delivery.home(stand_in).lines
 
     def test_u2_the_home_plan_hints_delivery_writes_become_the_tui_step(self):

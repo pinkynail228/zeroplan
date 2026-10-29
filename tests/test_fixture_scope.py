@@ -254,7 +254,7 @@ class FixtureChatIsolationTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
         """Startup, the send key, reset and retry all show the R-2 line; no `ArchitectChat`/`ArchitectStore`, no
         provider, no tool probe and no production transcript access happen (spies). Named failure on the base: the
         `chats` spy is not empty, because the fixture app is built with a real `ArchitectChat`."""
-        from textual.widgets import Input
+        from terminal_planner.tui.chat_input import ChatInput
         for fixture_id in ("demo", "demo-2_x"):
             with self.subTest(fixture_id=fixture_id):
                 app, sinks = self.fixture_app(fixture_id)
@@ -268,7 +268,7 @@ class FixtureChatIsolationTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(app.controller.install)  # tools/login are "available": nothing to install,
                     self.assertIsNone(app.controller.login)    # nothing to log into for the demo
                     self.assertIn(FIXTURE_LINE, screen_text(app))
-                    field = app.query_one("#input", Input)
+                    field = app.query_one("#input", ChatInput)
                     field.focus()
                     field.value = "привет"
                     await pilot.press("enter")  # the send key: refused, the text stays, nothing is queued
@@ -517,7 +517,7 @@ class ProductionSessionTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
         """One production turn through the production prepare (the tool probe runs) with the scripted codex; the
         production `Profile.of` accept writes `zplan.process.json` (no regression)."""
         from test_tui_chat import Fixture, chat_band
-        from textual.widgets import Input
+        from terminal_planner.tui.chat_input import ChatInput
         fixture = Fixture(self.root, self.project)
         prepares = []
         real_prepare = chat_module.default_prepare
@@ -537,7 +537,7 @@ class ProductionSessionTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
                 while not (app.chat is not None and app.chat.state.phase != "preparing"):
                     self.assertLess(time.monotonic(), end, screen_text(app))
                     await pilot.pause(0.05)
-                field = app.query_one("#input", Input)
+                field = app.query_one("#input", ChatInput)
                 field.focus()
                 field.value = "привет"
                 await pilot.press("enter")

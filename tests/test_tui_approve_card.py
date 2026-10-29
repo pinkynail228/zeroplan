@@ -27,9 +27,8 @@ Interpretations this run had to make (the worker's summary never reaches the rev
   its verdict comes back later through the callback it hands the controller (`done(outcome, error)`), never as a
   synchronous return — so a refusal is the callback's `error` (`refusal(Blocked)`'s text, «план устарел…»), not a
   raised exception the button could catch. The route closes the card on that callback's success only and, on its
-  error, keeps the open card and writes the reason on the main screen's own status line (`status_note`, "Не
-  выполнено: " + the error) — the same place the i3a card refusals are said, because the plan screen's `plan_lines`
-  are not drawn by the main screen.
+  error, keeps the open card and adds no line (A10c): `decide` itself says the reason on the main screen
+  (`say_note`), so a line from the card would show it twice.
 - A4's "through PlanScreen" is the acceptance shell test: the card leaves on the next render because the source
   stops returning it once the status leaves `proposed` — no card-side code runs for the PlanScreen path at all.
 """
@@ -320,8 +319,8 @@ class PlanCardCommandTests(unittest.TestCase):
         """A5 through the real decision contract: the refusal arrives later, as the `error` of the callback
         `ZplanApp.decide` hands the controller («план устарел…», exactly the text `refusal(Blocked)` produces) — not
         as an exception the button could catch. The open card stays (no receipt, no modal) and the reason is written
-        on the main screen's own status line (`status_note`), where the main screen shows its lines; the decision was
-        still attempted exactly once, and a receipt is written only after a success comes back (the positive half of
+        by `decide` itself (A10c: the card adds no line of its own, `chat_note` stays empty); the decision was still
+        attempted exactly once, and a receipt is written only after a success comes back (the positive half of
         this contract is A2's own test)."""
         screen = _Screen(proposal())
         screen.render_card_sources()
@@ -329,8 +328,7 @@ class PlanCardCommandTests(unittest.TestCase):
         ui.COMMAND_ACTIONS["/approve"](screen, "", "plan:1")
         self.assertEqual(screen.app.decisions, [("approve", 1)])
         self.assertIsNone(screen.card_specs["plan:1"].done)
-        self.assertIn("план устарел", screen.app.chat_note)
-        self.assertIn("Not done:", screen.app.chat_note)
+        self.assertEqual(screen.app.chat_note, "")
         self.assertEqual(screen.app.pushed, [])
 
 
@@ -418,6 +416,34 @@ class ApproveCardTests(ApproveCardShell):
                 self.assertEqual(calls, [("approve", 1)])
                 self.assertEqual(type(self.app.screen).__name__, "MainScreen")  # no confirmation modal
                 self.assertRegex(self.card().spec.done, "^%s$" % receipt_pattern())
+        self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
+
+
+@unittest.skipUnless(HAVE, MISSING_REASON)
+class RefusedApproveCardTests(ApproveCardShell):
+    def drawn(self):
+        return " ".join(screen_text(self.app).replace("│", " ").split())
+
+    async def test_a10c_a_refused_approve_says_why_once_and_a_success_shows_its_line_once(self):
+        """A10c P1/P2 on the real app: `/approve` from the plan card for a version that is no longer the current
+        proposal (r9 against the stored r1) shows «Not done: …» once on the main screen and the card stays, the
+        card adding no line of its own; the approval of r1 closes the card and «Plan r1 approved.» shows once.
+        Interpretation: the stale card is the plan route run with a key the store no longer proposes; «once» is
+        counted on the screen text with the pane's wraps removed (`drawn`; `flat` would add the status widget's text again)."""
+        self.propose_joint()
+        async with self.shell(size=(140, 50)) as pilot:
+            await self.loaded(pilot)
+            await self.card_shown(pilot)
+            self.main().run_command("/approve", "", "plan:9")
+            await self.until(pilot, lambda: "Not done: " in self.flat())
+            await pilot.pause(0.5)
+            self.assertEqual(self.drawn().count("Not done: "), 1)
+            self.assertIn("plan:1", self.main().card_widgets)
+            self.assertIsNone(self.card().spec.done)
+            self.main().run_command("/approve", "", "plan:1")
+            await self.until(pilot, lambda: self.card() is not None and self.card().spec.done)
+            await pilot.pause(0.5)
+            self.assertEqual(self.drawn().count("Plan r1 approved."), 1)
         self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
 
 

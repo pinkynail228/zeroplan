@@ -102,6 +102,7 @@ COMMAND_ACTIONS = {
     "/open": lambda screen, argument, key: screen.open_file_tab(argument),
     "/diff": lambda screen, argument, key: screen.open_diff_tab(),
     "/language": lambda screen, argument, key: screen.choose_language(argument or None),
+    "/theme": lambda screen, argument, key: screen.choose_theme(argument or None),
 }
 
 
@@ -671,15 +672,13 @@ def approve_plan_card(screen, argument, key):
     """`/approve` from the plan card (or a typed `/approve`): `decide("approve", version)` with no modal. `decide`
     only queues the approval — its verdict comes back later through the app's callback — so the card is closed only
     on a confirmed success, never right after the call. A refusal (`error` on that callback: the plan is no longer
-    the current proposed one) keeps the open card and says why on the main screen's own status line, where the
-    main screen shows its own notes (the plan screen's `plan_lines`, which `decide` writes otherwise, are not drawn
-    here)."""
+    the current proposed one) keeps the open card and adds no line of its own: `decide` already reports it on the
+    main screen (`say_note`), so a second line here would show it twice."""
     version = int(key.split(":", 1)[1])
 
     def settled(outcome, error):
         if error:
-            screen.status_note("Not done: " + error)  # the open card stays: the decision was not made
-            return
+            return  # the open card stays: the decision was not made, and `decide` has said why
         screen.close_card(key, strings.text("card.plan_done", time=card_clock()))
 
     screen.app.decide("approve", version, after=settled)

@@ -18,7 +18,7 @@ from .. import autonomy, bridge, catalog, engine, feed, planning as planning_mod
 from ..architect import NO_PLAN
 from ..authority import Authority, Blocked
 from ..cli import App, fixture_driver, refusal, safe, summary
-from ..delivery import ACTIVE, Changed, END_ACTIONS, Row, Token
+from ..delivery import ACTIVE, CRITIC_SLICE, Changed, END_ACTIONS, Row, Token
 from ..planning import PlanView
 from ..process import Profile, ProfileChanged
 from ..runs import MilestoneRuns, extended, git_call, run_state
@@ -33,6 +33,7 @@ OBSERVATIONS = frozenset((OBSERVE, OBSERVE_RUN))  # a watch slice: quitting may 
 # the silent bootstrap. Every other job outside CUTTABLE (an approval, a start, an edit, ...) may have saved one.
 NO_WAKE = frozenset((FEED_HANDLE, "feed_bootstrap"))
 TUI_SLICE = 5  # seconds per planner or milestone watch slice: input and quit stay responsive between slices
+MERGE_PACE = 0.05  # seconds one pacing job of a waiting merge sleeps before it requeues itself behind the queued jobs
 STOP_WAIT = TUI_SLICE + 3  # quitting waits at most this long for the slice in flight; a watching child is cut at once
 # Jobs that change nothing, or only observe: quitting may cut these. Every other job (prepare, submission, start,
 # merge, setup, ...) changes state or starts model work and is always allowed to finish. Two pieces of work inside
@@ -52,13 +53,14 @@ TOOL_ARGUMENTS = {"zplan_start": frozenset(("milestone", "revision")),
                   "zplan_resume": frozenset(("milestone", "token")),
                   "zplan_rebrief": frozenset(("milestone", "token", "note")),
                   "zplan_edit_plan": frozenset(("revision", "plan")),
+                  "zplan_revise_plan": frozenset(("revision", "feedback")),
                   "zplan_merge": frozenset(("milestone", "token")),
                   "zplan_propose_commit": frozenset(("paths", "message"))}
 
 # The action tools whose admission is one `_plan_job` (`Planning.edit` is the plan service's own rule): they are
 # posted through the Controller's plan-job path from the socket thread itself, exactly as the owner's own submit and
 # revise are, never as the generic bridge job and never as a job nested inside another.
-PLAN_TOOLS = frozenset(("zplan_edit_plan",))
+PLAN_TOOLS = frozenset(("zplan_edit_plan", "zplan_revise_plan"))
 
 
 class Release:
@@ -242,15 +244,21 @@ def token_fields(token):
     return None if token is None else {name: getattr(token, name) for name, _ in TOKEN_FIELDS}
 
 
+PLAN_FINDINGS = 4000  # the characters of the evidence's findings a status plan carries
+
+
 def plan_fields(plan):
-    """The current plan revision as the status payload names it: its version, status and gate verdict, or None
-    without a revision. The verdict is the evidence's own `verdict` (accepted / rejected), the same word the plan
+    """The current plan revision as the status payload names it: its version, status, gate verdict and the
+    evidence's findings (at most `PLAN_FINDINGS`, "" without evidence), or None without a revision. The verdict is the evidence's own `verdict` (accepted / rejected), the same word the plan
     screen prints; None while the plan has no verdict yet."""
     if not isinstance(plan, dict):
         return None
     evidence = plan.get("evidence")
+    findings = evidence.get("findings") if isinstance(evidence, dict) else None
+    findings = findings if isinstance(findings, str) else ""
     return {"version": plan.get("version"), "status": plan.get("status") or "",
             "verdict": evidence.get("verdict") if isinstance(evidence, dict) else None,
+            "findings": findings if len(findings) <= PLAN_FINDINGS else findings[:PLAN_FINDINGS - 1] + "…",
             "proposal": plan.get("proposal")}
 
 
@@ -397,6 +405,7 @@ class Controller:
         # sends). `_feed` is the requested port: its presence makes the worker bootstrap the feed once the session opens.
         self.on_observed = None
         self.snapshot_source = None
+        self.on_merge_wait = None  # the screen's hook: the milestone whose merge waits for the critic, None at its end
         self._feed = None
         self._opened = False  # the session open (and the feed bootstrap, when requested) is over; guarded
 
@@ -807,6 +816,11 @@ class Controller:
             if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
                 raise Blocked("Invalid argument revision.", family="architect.request_invalid")
             return self._edit_tool(app, planning, revision, self._argument(args, "plan", dict))
+        if tool == "zplan_revise_plan":
+            revision = self._argument(args, "revision", int)
+            if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
+                raise Blocked("Invalid argument revision.", family="architect.request_invalid")
+            return self._revise_tool(app, planning, revision, self._argument(args, "feedback", str))
         if tool == "zplan_merge":
             milestone = self._argument(args, "milestone", str)
             with self._project_op:
@@ -846,8 +860,8 @@ class Controller:
             raise ProfileChanged("The process profile changed after the preview: check the new values and "
                                  "confirm the start again.")
         if autonomy.decide(autonomy.level_of(status), "start") == "ask":
-            raise Blocked("Starting %s is done by the owner in the zplan interface (autonomy policy)."
-                          % milestone, family="autonomy.ask")
+            raise Blocked("Starting %s is done by the owner in the zplan interface (autonomy policy): /run, or its "
+                          "card. A chat reply does not start it." % milestone, family="autonomy.ask")
         r = delivery.start(preview, app.roles)
         return {"milestone": r["milestone"], "plan_revision": r["plan_revision"], "attempt": r["attempt"],
                 "run_id": r["run_id"], "status": r["status"]}
@@ -879,8 +893,9 @@ class Controller:
             raise ProfileChanged("The process profile changed after the plan check: check the configuration and "
                                  "approve again.")
         if autonomy.decide(autonomy.level_of(status), "approve") == "ask":
-            raise Blocked("Approving plan r%s is done by the owner in the zplan interface "
-                          "(autonomy policy)." % revision, family="autonomy.ask")
+            raise Blocked("Approving plan r%s is done by the owner in the zplan interface (autonomy policy): "
+                          "/approve, or the plan card. A chat reply does not approve it." % revision,
+                          family="autonomy.ask")
         app.planning.approve(revision)
         return {"revision": revision, "status": "approved"}
 
@@ -897,8 +912,8 @@ class Controller:
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         if autonomy.decide(autonomy.level_of(status), "resume") == "ask":
-            raise Blocked("Continuing %s is done by the owner in the zplan interface (autonomy policy)."
-                          % milestone, family="autonomy.ask")
+            raise Blocked("Continuing %s is done by the owner in the zplan interface (autonomy policy): /run, or its "
+                          "card. A chat reply does not continue it." % milestone, family="autonomy.ask")
         Controller._action_status(app, "milestone", status)  # the guard the owner's own resume applies, before it
         res = delivery.resume(r)
         return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
@@ -919,8 +934,9 @@ class Controller:
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         if autonomy.decide(autonomy.level_of(status), "rebrief") == "ask":
-            raise Blocked("A new attempt of %s is made by the owner in the zplan interface (autonomy policy)."
-                          % milestone, family="autonomy.ask")
+            raise Blocked("A new attempt of %s is made by the owner in the zplan interface (autonomy policy): "
+                          "/attempt, or its card. A chat reply does not make it." % milestone,
+                          family="autonomy.ask")
         enforced = Controller._action_status(app, "milestone", status)  # the profile the attempt itself runs under
         roles = enforced.resolved.roles() if enforced is not None else None
         delivery.admission()  # C3: the same cap guard the owner's own paths take, before the attempt is created
@@ -929,6 +945,16 @@ class Controller:
         return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
                 "run_id": res["run_id"], "status": res["status"]}
 
+    @staticmethod
+    def _brake(app):
+        """A10: the architect gets one automatic revision after a rejection. A current revision the plan check
+        rejected (`review_exhausted`) that an architect tool made is the owner's to decide: both plan tools refuse,
+        nothing written. The mark lives in the feed of the planning store, so it holds after a restart."""
+        current = app.authority.current
+        if current["status"] == "review_exhausted" and feed.architect_made(app.authority, current["version"]):
+            raise Blocked("The plan check rejected revision %s; the owner decides now." % current["version"],
+                          family="action.refused")
+
     def _edit_tool(self, app, planning, revision, plan):
         """Save an edited proposal as a new revision, inside the one `_plan_job` the bridge admitted it as (the same
         plan job the owner's own submit and revise use). `Planning.edit` is the whole rule (not current, invalid or
@@ -936,7 +962,21 @@ class Controller:
         is shown exactly as the owner's own submission. A "ready" verdict reaches the UI through
         `on_plan_submission`, so the app's planner watch dispatches the new revision (`zplan_edit_plan` only
         proposes: the approval that lets it run stays the owner's, and `Planning.edit` itself runs the plan gate)."""
+        self._brake(app)
         result = planning.edit(revision, plan)
+        outcome = verdict(result)
+        if outcome.kind == "ready" and self.on_plan_submission is not None:
+            self.on_plan_submission(outcome)
+        return {"revision": app.authority.current["version"], "status": outcome.kind}
+
+    def _revise_tool(self, app, planning, revision, feedback):
+        """Ask the planner for a new revision from written feedback, inside the one `_plan_job` the bridge admitted
+        it as, exactly as `_edit_tool` does. Refused, with nothing written, unless `revision` is the current one;
+        `Planning.revise` is the rest of the rule (a milestone writer being active refuses)."""
+        if app.authority.current["version"] != revision:
+            raise Blocked("Only the current revision can be revised.", family="action.refused")
+        self._brake(app)
+        result = planning.revise(feedback)
         outcome = verdict(result)
         if outcome.kind == "ready" and self.on_plan_submission is not None:
             self.on_plan_submission(outcome)
@@ -1008,9 +1048,12 @@ class Controller:
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
         status = autonomy.status_of(app.profile)  # the policy's own read, once
-        if autonomy.decide(autonomy.level_of(status), "merge", autonomy.merge_gate(status)) == "ask":
-            raise Blocked("Merging %s is done by the owner in the zplan interface (autonomy policy)."
-                          % milestone, family="autonomy.ask")
+        gate = autonomy.merge_gate(status)
+        if autonomy.decide(autonomy.level_of(status), "merge", gate) == "ask":
+            why = "" if gate == "required" else " The profile has no merge check, so the merge is the owner's."
+            raise Blocked("Merging %s is done by the owner in the zplan interface (autonomy policy): the merge card, "
+                          "or /merge.%s A chat reply does not merge it." % (milestone, why),
+                          family="autonomy.ask")
         merged = delivery.merge(r, expected=status.digest if status is not None else None)
         return {"milestone": r["milestone"], "kind": merged.kind, "line": merged.line}
 
@@ -1420,13 +1463,58 @@ class Controller:
         return self._job("diff", self._acting(token, work, exact=False), done)
 
     def merge(self, token, done):
-        """The confirmed merge of the exact attempt the owner looked at."""
+        """The confirmed merge of the exact attempt the owner looked at. A merge critic that did not finish in its
+        slice is not a verdict: the same merge is posted again, slice after slice, until it lands or is refused for
+        another reason, and only that last answer reaches `done`. The critic's pending refusal is recognised by its
+        family, never by its text. Two calls of one wait start at least one `CRITIC_SLICE` apart: a pending refusal
+        that returns at once is paced by short jobs that requeue themselves, so the project lock is free and the
+        jobs queued meanwhile run before the next call. `on_merge_wait(milestone)` tells the screen while it waits
+        and `(None)` when it ended."""
+        began = [None]
+
         def work(app, delivery, r):
-            with self._project_op:
-                merged = delivery.merge(r)
+            repeat = began[0] is not None
+            began[0] = time.monotonic()
+            # A repeat is a new mutation: the permit is taken here, after the token resolved, so a quit that began
+            # meanwhile refuses it (admitted before the seal, quitting waits for it). The first call is the owner's.
+            with self._mutation() if repeat else contextlib.nullcontext(True) as admitted:
+                if not admitted:
+                    return Outcome("closing")
+                with self._project_op:
+                    merged = delivery.merge(r)
+            if merged.kind == "refused" and merged.family == "merge.critic_pending":
+                return Outcome("waiting")
             return Outcome(merged.kind, lines=((merged.line,) if merged.line else ()) + tuple(merged.paths),
                            data=self._end(delivery, token.milestone))
-        return self._job("merge", self._acting(token, work), done)
+        acting = self._acting(token, work)
+
+        def run(app, delivery):
+            remaining = CRITIC_SLICE - (time.monotonic() - began[0]) if began[0] is not None else 0
+            if remaining > 0:
+                time.sleep(min(remaining, MERGE_PACE))
+                return Outcome("pacing")
+            if began[0] is not None and self.quit_begun():  # a repeat queued before the quit: it merges for nobody
+                return Outcome("closing")
+            return acting(app, delivery)
+
+        def settle(outcome, error):
+            if error is None and outcome.kind in ("waiting", "pacing", "closing"):
+                if outcome.kind == "waiting":
+                    self._merge_wait(token.milestone)
+                if outcome.kind != "closing" and self._job("merge", run, settle):
+                    return
+                outcome, error = None, "zplan is closing; the merge was not repeated."
+            self._merge_wait(None)
+            if done is not None:
+                done(outcome, error)
+        return self._job("merge", run, settle)
+
+    def _merge_wait(self, milestone):
+        if self.on_merge_wait is not None:
+            try:
+                self.on_merge_wait(milestone)
+            except Exception:  # the UI went away
+                pass
 
     def _creating(self, token, make, done, label, action="start"):
         """Owner actions that create an attempt or a revision: readiness first, then `make(delivery, r)`."""

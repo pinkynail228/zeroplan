@@ -118,6 +118,7 @@ class PlanScreen(ButtonScreen):
 
     def render_state(self):
         from .app import command_hints, plan_tab_line  # function-level: app imports this module
+        from .card_kinds import plan_auto_approves
         if not self.ready:
             return
         app, view = self.app, self.view()
@@ -131,7 +132,8 @@ class PlanScreen(ButtonScreen):
             lines += [""] + list(app.snapshot.panel)
         notes = list(app.plan_lines) + app.block_lines()
         lines += [""] + notes if notes else []
-        lines = [line for line in map(plan_tab_line, lines) if line is not None]  # K1d: no letter key on this screen
+        auto = plan_auto_approves(app.snapshot)  # C3 H3: at `auto` this screen never asks for /approve either
+        lines = [line for line in (plan_tab_line(line, auto) for line in lines) if line is not None]  # K1d: no letter key
         width = max(self.query_one("#plan-scroll").scrollable_content_region.width, 20)
         self.query_one("#plan-body", Static).update(Text("\n".join(wrapped(lines, width))))
         progress = self.query_one("#plan-progress", Static)

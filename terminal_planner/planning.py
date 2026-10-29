@@ -144,6 +144,7 @@ class PlanView:
     cause: Optional[str] = None  # failure cause: auth / quota / network, None when the logs do not say
     family: Optional[str] = None
     home: Optional[str] = None  # the Codex home the failed run recorded (auth failures): what [l] refreshes
+    findings: str = ""  # the plan check's findings of a rejected (`review_exhausted`) proposal, one line
 
 
 class Watch:
@@ -662,7 +663,8 @@ class Planning:
                    "approved": ("revise", "requirements")}[status]
         if status == "review_exhausted" and "execution" in current:  # a version 1 plan has no gate to override
             actions = ("revise", "restart", "override", "requirements")
-        return PlanView("proposal", version, status, tuple(lines), actions, family=family)
+        findings = one_line(current["evidence"]["findings"], 300) if status == "review_exhausted" else ""
+        return PlanView("proposal", version, status, tuple(lines), actions, family=family, findings=findings)
 
     @staticmethod
     def requirements_lines(current):
@@ -698,7 +700,7 @@ class Planning:
         if override:
             lines.append('  Approved despite the check: "%s"' % override["reason"])
         elif evidence["critic_verdict"] != "accepted" and evidence["rounds_used"] >= evidence["rounds_limit"]:
-            lines.append("  Rounds exhausted without agreement: this plan cannot be approved, [r] revise.")
+            lines.append("  Rounds exhausted without agreement: [r] revise or approve anyway with a reason.")
         for item in evidence["discussion"]["rounds"]:
             lines.append("  Round %s · %s: %s" % (item["round"], verdict.get(item["verdict"], item["verdict"]),
                                                   item["findings"]))

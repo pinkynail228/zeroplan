@@ -44,7 +44,7 @@ flowchart TD
     A([You describe a goal]) --> B[Architect chat]
     B --> C[Planner: milestones and tasks]
     C <-->|up to 3 rounds| D[Critic: does the plan cover the goal?]
-    C --> E{You approve the plan}
+    C --> E{The plan is approved: by zplan at autonomy auto, else by you}
   end
   subgraph Z [Zeroshot: one run per milestone, in its own Git worktree]
     G[Worker implements a task] --> H[Acceptance review and code review, in parallel]
@@ -52,7 +52,7 @@ flowchart TD
     H -->|every task accepted| I[Final check of the milestone]
   end
   E -->|zplan submits the milestone| G
-  I --> J{zplan: you merge the branch}
+  I --> J{The branch is merged: by zplan at autonomy auto when the profile has a merge check, else by you}
 ```
 
 Each milestone's graph follows Zeroshot's own
@@ -77,6 +77,10 @@ export PATH="$HOME/.local/bin:$PATH"   # add this line to ~/.zshrc too
 zplan installs into its own folder with pinned, checksum-verified copies of Zeroshot and Codex; your global `codex`
 and `~/.codex` are left alone.
 
+**Installing through an AI agent?** It can run the two lines above. Run `zplan login` and `zplan` yourself, in your
+own terminal: the login waits while you enter a code in the browser, and zplan is a full-screen app, so neither
+works inside an agent's shell. An agent must not open another terminal for them.
+
 ## Try it free
 
 A scripted demo: no login, no model, no tokens. Its merge is real, so use a scratch repository.
@@ -98,8 +102,8 @@ asks "Merge into main?", `/merge`. The demo plan's M2 can wait. The architect ch
 > - **Agents have full access.** They run as your user without approval prompts and can read or change any file
 >   your user can. Use a machine where that is acceptable.
 > - **It acts on its own by default.** At autonomy `auto` zplan approves a checked plan, starts milestones and merges
->   those whose tests pass. On the first start choose `supervised` to approve plans and merges yourself, or
->   `manual` to approve every run too.
+>   those whose tests pass; a project with no test check waits for your `/merge`. On the first start choose
+>   `supervised` to approve plans and merges yourself, or `manual` to approve every run too.
 > - **`/stop` stops a run.** Quitting zplan only detaches.
 
 ```sh

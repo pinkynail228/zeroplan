@@ -448,6 +448,14 @@ class PlainTests(OverrideCase):
         stored = self.stored()["revisions"][-1]
         self.assertEqual((stored["status"], stored["override"]["reason"]), ("approved", REASON))
 
+    def test_a10_b4_the_exhausted_line_of_the_details_names_both_ways(self):
+        """A10 B4: [i] of a rejected plan says "[r] revise or approve anyway with a reason", not "cannot be approved"."""
+        self.exhausted()
+        with self.app() as app:
+            lines = "\n".join(app.planning.gate_lines(app.authority.current["evidence"]))
+        self.assertIn("[r] revise or approve anyway with a reason", lines)
+        self.assertNotIn("cannot be approved", lines)
+
     def test_o4_an_empty_reason_cancels_and_a_short_one_is_refused(self):
         self.exhausted()
         before = self.raw()

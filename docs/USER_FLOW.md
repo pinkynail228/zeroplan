@@ -45,12 +45,16 @@ chat shows (the same sources, in the same order), inside a frame whose border wr
 title names that state (`my-project · nothing runs` while nothing runs, `M2 <title> · running` while stage M2 runs);
 with nothing to report it says so and repeats the snapshot's own
 «Next:» step, so the command or button that starts the next step is named there too. Under the canvas the «What's happening»
-pane is always visible, whichever tab is shown: it keeps the observed attempt's own session log — its stored
+pane is always visible, whichever tab is shown (except under `/scheme`, which draws the Scheme tab on the whole
+window until it is toggled off): it keeps the observed attempt's own session log — its stored
 journal entries, one per line, oldest first, the newest lines that fit — with `last: … · m:ss ago` in its
 bottom border while a live run's quiet is measured, and the one line «nothing has happened yet» while nothing has
-been recorded. The tab shown at start is «Scheme» while a planner or a milestone attempt is active, else «Plan»,
-and the app never switches a tab by itself afterwards: `←`/`→` do, from anywhere on the main screen, and a click on
-a tab label switches it too; the bottom row names the arrows (`←→ tabs`). While the chat input holds text the
+been recorded. The tab shown at start is «Scheme» while a planner or a milestone attempt is active, else «Plan».
+Afterwards the app switches a tab by itself only twice: a newly approved plan revision shows «Plan» once, and a newly
+started run shows «Scheme» once, whoever approved or started it; whatever the first snapshot already held is not
+new, and once you have chosen a tab since your last message or command (`←`/`→`, `Tab`, a click on a tab label,
+`/scheme`, `/status`, an opened file) the app moves none. `←`/`→` switch from anywhere on the main screen, and a
+click on a tab label switches too; the bottom row names the arrows (`←→ tabs`). While the chat input holds text the
 arrows keep moving its cursor and switch no tab. `Tab` shows the «Plan» tab and moves the focus to the pane; `Tab` again returns to
 the input, leaving the shown tab where it was. A return to «Plan» after reading «Scheme» gives the pane its focus
 back when it had it, so the pane's `↑`/`↓` keep working across the trip. The planner and run lines above the chat stay
@@ -104,6 +108,7 @@ either.
 | main, plan pane | `↑` `↓` | Select a milestone: the row the `/run`, `/attempt`, `/answer`, `/log` and `/details` commands act on |
 | main, plan pane | `PgUp` / `PgDn` | Scroll the chat history up / down |
 | main, input line | `Enter` | Send the typed message to the architect as one turn, or run the typed `/` command. While the chat is preparing or a turn runs nothing is queued: the refusal stays on the chat line and the text is kept |
+| main, input line | `Ctrl+J` / `Alt+Enter` / `Shift+Enter` | Add a new line to the typed message: the input wraps and grows to 8 rows, `↑`/`↓` move inside it and pick (history, palette, card) on its first / last row, and a text that starts with `/` stays one line |
 | main, input line | `Esc` | Close the `/` palette and clear its input when it is open; otherwise cancel the running architect turn (SIGTERM, then SIGKILL after 2 s, its own process group); a milestone keeps running. The partial reply is shown marked `(interrupted)` |
 | plan screen, run-end screen, Settings, confirmations, notes | `Tab` / `←` `→` | Move to the next / previous button (in a note: from the text field to its send button) |
 | plan screen, run-end screen, Settings, confirmations, notes | `Enter` | Press the focused button. In a note's text field `Enter` is a new line and the note is sent by its button; the one exception is the owner-question card's answer note, where `Enter` in the text field sends the answer at once |
@@ -138,6 +143,7 @@ merge), `question` (a stage needs an owner answer) and `error` (a failure or a b
 | `/help` | any | The key and command help of the current screen |
 | `/quit` | any | Quit; the terminal is restored (the same as `Ctrl+Q`) |
 | `/language [CODE]` | any | Not offered in 0.8.0: the interface is English only (see «UI language»); the command is not listed and a typed `/language` is an unknown command |
+| `/theme [auto\|dark\|light]` | any | Store the colour choice and apply it at once; bare, it names the current choice (see «Light and dark terminals») |
 | `/retry` | card only | Never typed: the «try again» button of a failure card or of a readiness card |
 
 ### Screens and buttons
@@ -199,6 +205,10 @@ language chooser and `/language` is not listed. The setting is kept in `ui.json`
 (`$XDG_CONFIG_HOME/planning-kit/ui.json`, by default `~/.config/planning-kit/ui.json`); a stored `"ru"` or `"zh"`
 (written by an earlier version) is read as English. Conversation turns and events stored by 0.7.x stay as they were
 written, in Russian.
+
+### Light and dark terminals
+
+The theme is `ZPLAN_THEME` (`dark`, `light` or `auto`) at start, else the stored choice, else `auto`, which takes the terminal's own answer about its background, else `COLORFGBG`, else dark. `/theme auto|dark|light` stores the choice and applies it now (a bare `/theme` names the current one), and a late answer from the terminal changes nothing after `/theme dark` or `/theme light`.
 
 The plan pane is the same overview as `zplan status`, refreshed every few seconds without starting or
 polling anything; a slow check or setup never blocks the keys. Planning (goal, planner progress, proposal,

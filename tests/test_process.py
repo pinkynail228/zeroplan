@@ -5,6 +5,7 @@ tests need Textual (the interpreter's own or the wheels of ZPLAN_TEST_WHEELHOUSE
 
 import contextlib
 import copy
+import errno
 import io
 import json
 import os
@@ -588,7 +589,7 @@ class AutonomyPresetTests(ProfileTest):
         self.assertEqual(process.PRESETS[process.PRESET_V2]["gates"]["merge"], "off")
         unittest_argv = ["python3", "-m", "unittest", "discover", "-s", "tests"]
         (self.project / "tests").mkdir()
-        (self.project / "tests" / "test_slug.py").write_text("")
+        (self.project / "tests" / "test_slug.py").write_text("import unittest\n")
         self.assertEqual(process.detect_checks(self.project)[0]["argv"], unittest_argv)
         for name, text in (("pytest.ini", ""), ("pyproject.toml", "[tool.pytest.ini_options]\n"),
                            ("setup.cfg", "[tool:pytest]\n")):
@@ -842,6 +843,82 @@ class ProfileCommitTests(ProfileTest):
         text = "\n".join(lines)
         self.assertIn("zplan profile", text)
         self.assertNotIn("commit it", text)
+
+
+class CreateWithoutLinkTests(ProfileTest):
+    """P1: the profile file is published with a hard link, or, on a drive without links (exFAT, ENOTSUP), with
+    `renamex_np(RENAME_EXCL)` and then a rename after the name was seen absent; never over an existing file.
+
+    Worker interpretations (the reviewers never see the worker's summary):
+
+    - Other OS errors (ENOSPC, EACCES, a failed temp write) raise `Blocked` in the existing `store.write_failed` family,
+      the message naming the file and the error's strerror; the temp is removed.
+    - A fake link failure stands for exFAT; the real `renamex_np` runs where the platform has it, else it is unavailable.
+    """
+
+    def create(self, text="new\n"):
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            Profile(self.project, authority.directory, authority)._create(text)
+
+    def no_link(self, code=errno.ENOTSUP):
+        return patch("os.link", side_effect=OSError(code, os.strerror(code)))
+
+    def temps(self):
+        return list(self.project.glob(".zplan-process-*"))
+
+    def test_without_hard_links_the_file_is_published_by_exclusive_rename_or_plain_rename(self):
+        for unavailable in (None, False):  # the real call (macOS: works) / unavailable (renamed after the check)
+            for code in (errno.ENOTSUP, errno.EOPNOTSUPP):
+                with self.subTest(unavailable=unavailable, code=code):
+                    patched = patch.object(process, "_rename_excl", return_value=False) if unavailable is False \
+                        else contextlib.nullcontext()
+                    with self.no_link(code), patched:
+                        self.create()
+                    self.assertEqual(self.file.read_text(encoding="utf-8"), "new\n")
+                    self.assertEqual(self.temps(), [])
+                    self.file.unlink()
+
+    def test_an_existing_file_is_never_overwritten_on_any_path(self):
+        self.file.write_text("mine\n", encoding="utf-8")
+        paths = [(patch("os.link"), contextlib.nullcontext()),  # the link refuses (EEXIST)
+                 (self.no_link(), patch.object(process, "_rename_excl", side_effect=FileExistsError)),
+                 (self.no_link(), contextlib.nullcontext()),  # the real exclusive rename
+                 (self.no_link(), patch.object(process, "_rename_excl", return_value=False))]  # name seen present
+        for index, (first, second) in enumerate(paths):
+            with self.subTest(path=index), first as link, second, patch("os.rename") as rename:
+                if index == 0:
+                    link.side_effect = FileExistsError
+                with self.assertRaisesRegex(Blocked, "already exists; it is not overwritten") as raised:
+                    self.create()
+                rename.assert_not_called()
+                self.assertEqual(raised.exception.family, "action.refused")
+                self.assertEqual(self.file.read_text(encoding="utf-8"), "mine\n")
+                self.assertEqual(self.temps(), [])
+
+    def test_other_os_errors_are_plain_blocked_refusals_and_leave_no_temp(self):
+        for code in (errno.ENOSPC, errno.EACCES):
+            with self.subTest(code=code), self.no_link(code):
+                with self.assertRaises(Blocked) as raised:
+                    self.create()
+                self.assertIn(process.PROFILE_FILE, str(raised.exception))
+                self.assertIn(os.strerror(code), str(raised.exception))
+                self.assertEqual(raised.exception.family, "store.write_failed")
+                self.assertFalse(self.file.exists())
+                self.assertEqual(self.temps(), [])
+        with patch("os.fsync", side_effect=OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))):
+            with self.assertRaisesRegex(Blocked, "No space left"):
+                self.create()
+        self.assertEqual(self.temps(), [])
+
+    def test_where_links_work_the_file_is_published_by_one_link_and_no_rename(self):
+        with patch("os.link", wraps=os.link) as link, patch("os.rename") as rename, \
+                patch.object(process, "_rename_excl") as exclusive:
+            self.create()
+        link.assert_called_once()
+        rename.assert_not_called()
+        exclusive.assert_not_called()
+        self.assertEqual(self.file.read_text(encoding="utf-8"), "new\n")
+        self.assertEqual(self.temps(), [])
 
 
 class GlobMatchTests(unittest.TestCase):
@@ -1518,6 +1595,47 @@ class BootstrapPlainTests(ProfileTest):
         path = self.sidecar()
         if path.exists():
             path.unlink()
+
+    def test_unittest_files_at_the_project_root_give_a_check(self):
+        """C1 R1-R3. Root test_wc.py alone -> python3 -m unittest and merge required; tests/test_*.py, a Makefile
+        test target keep precedence; a root with only README.md and a test_data directory -> no check.
+        Interpretation: root matches are files only, not recursive."""
+        (self.project / "README.md").write_text("")
+        (self.project / "test_data").mkdir()
+        self.assertEqual(process.detect_checks(self.project), [])
+        (self.project / "test_wc.py").write_text("import unittest\n")
+        check = process.detect_checks(self.project)[0]
+        self.assertEqual((check["name"], check["argv"]), ("test", ["python3", "-m", "unittest"]))
+        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "required")
+        (self.project / "tests").mkdir()
+        (self.project / "tests" / "test_b.py").write_text("from unittest import TestCase\n")
+        self.assertEqual(process.detect_checks(self.project)[0]["argv"],
+                         ["python3", "-m", "unittest", "discover", "-s", "tests"])
+        (self.project / "Makefile").write_text("test:\n\ttrue\n")
+        self.assertEqual(process.detect_checks(self.project)[0]["argv"], ["make", "test"])
+
+    def test_a_unittest_check_needs_a_test_file_that_uses_unittest(self):
+        """C1b U1-U3. A root or tests/ `test_*.py` gives a unittest check only when it has `import unittest` or
+        `from unittest`; a pytest-style file gives none (merge stays off) and the next rule applies (pytest config);
+        an oversized, non-UTF-8 or unreadable file counts as not naming unittest. Interpretation: one naming file
+        among several is enough."""
+        argv = lambda: (process.detect_checks(self.project) or [{"argv": None}])[0]["argv"]
+        (self.project / "tests").mkdir()
+        (self.project / "test_x.py").write_text("def test_x():\n    assert 1\n")
+        (self.project / "tests" / "test_y.py").write_text("def test_y():\n    assert 1\n")
+        self.assertEqual(process.detect_checks(self.project), [])
+        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "off")
+        (self.project / "pytest.ini").write_text("")
+        self.assertEqual(argv(), ["python3", "-m", "pytest"])
+        (self.project / "pytest.ini").unlink()
+        (self.project / "test_big.py").write_text("import unittest\n" + "#" * process.MAX_FILE_BYTES)
+        (self.project / "test_bin.py").write_bytes(b"import unittest\n\xff\xfe")
+        (self.project / "test_dir.py").mkdir()
+        self.assertEqual(process.detect_checks(self.project), [])
+        (self.project / "test_ok.py").write_text("x = 1\nimport unittest\n")
+        self.assertEqual(argv(), ["python3", "-m", "unittest"])
+        (self.project / "tests" / "test_z.py").write_text("from unittest import TestCase\n")
+        self.assertEqual(argv(), ["python3", "-m", "unittest", "discover", "-s", "tests"])
 
     def test_detection_never_executes_anything(self):
         marker = self.root / "marker-created"

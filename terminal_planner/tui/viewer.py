@@ -95,24 +95,25 @@ def _head(data, max_bytes):
     return head
 
 
-def file_view(path, max_bytes=MAX_BYTES, words=words):
+def file_view(path, max_bytes=MAX_BYTES, words=words, code=THEME):
     """`path` as a syntax renderable: line numbers and word wrap, the lexer by suffix (A2). A file over `max_bytes`
     is cut to its first `max_bytes` and closes with the dim `canvas.view_cut` line; a file that is not UTF-8 text
-    raises `ViewError` id `note.view_binary`."""
+    raises `ViewError` id `note.view_binary`. `code` is the Pygments theme (`ansi_dark`, or `ansi_light` on a light
+    terminal)."""
     path = Path(path)
     data = path.read_bytes()
     text = _decode(data, path.name)  # the whole file must be text, not just the head shown (A2)
     lexer = LEXERS.get(path.suffix.lower(), "text")
     if len(data) > max_bytes:
-        return Group(Syntax(_head(data, max_bytes).decode("utf-8"), lexer, theme=THEME, line_numbers=True,
+        return Group(Syntax(_head(data, max_bytes).decode("utf-8"), lexer, theme=code, line_numbers=True,
                             word_wrap=True, background_color="default"),
                      Text(words("canvas.view_cut", shown=_kb(max_bytes), total=_kb(len(data))), style="dim"))
-    return Syntax(text, lexer, theme=THEME, line_numbers=True, word_wrap=True, background_color="default")
+    return Syntax(text, lexer, theme=code, line_numbers=True, word_wrap=True, background_color="default")
 
 
-def diff_view(text, words=words):
+def diff_view(text, words=words, code=THEME):
     """A unified diff coloured by the diff lexer, without line numbers (A3); empty text is the dim
     `canvas.diff_empty` line."""
     if not text:
         return Text(words("canvas.diff_empty"), style="dim")
-    return Syntax(text, "diff", theme=THEME, background_color="default")
+    return Syntax(text, "diff", theme=code, background_color="default")

@@ -16,6 +16,7 @@ lock (a single atomically replaced file). Nothing here runs a model, a check or 
 
 import copy
 from dataclasses import dataclass, field, replace
+import errno
 import hashlib
 import json
 import os
@@ -123,6 +124,24 @@ PRESETS = {
 # zplan.default/3 is /2 as it is (gates, limits, `autonomy`, `risk`); only the worker binding differs.
 PRESETS[PRESET_V3] = dict(copy.deepcopy(PRESETS[PRESET_V2]),
                           roles=dict(PRESETS[PRESET_V2]["roles"], worker=("gpt-6.1-terra", "max")))
+
+
+NO_LINK = (errno.ENOTSUP, errno.EOPNOTSUPP)  # a filesystem without hard links (exFAT)
+
+
+def _rename_excl(source, target):
+    """macOS `renamex_np(RENAME_EXCL)`: True when `source` became `target`, False when the call is unavailable or
+    the filesystem lacks it; FileExistsError when `target` exists, any other failure an OSError."""
+    import ctypes
+    renamex = getattr(ctypes.CDLL(None, use_errno=True), "renamex_np", None)
+    if renamex is None:
+        return False
+    if not renamex(os.fsencode(source), os.fsencode(target), 0x4):  # RENAME_EXCL
+        return True
+    code = ctypes.get_errno()
+    if code in NO_LINK:
+        return False
+    raise OSError(code, os.strerror(code), str(target))
 
 
 class ProfileChanged(Blocked):
@@ -619,7 +638,8 @@ def risk_of(config, paths):
 def detect_checks(root):
     """The one obvious test command, found by reading files only (nothing is executed): package.json scripts.test,
     else a Makefile `test:` target, else pytest when it is configured, else `test_*.py` files under tests/ (unittest
-    discovery); otherwise none."""
+    discovery), else `test_*.py` files directly in the root (unittest's own discovery), each only when one such file
+    imports unittest; otherwise none."""
     root = Path(root)
     manifest = root / "package.json"
     try:
@@ -640,12 +660,29 @@ def detect_checks(root):
     if _pytest_configured(root):
         return [{"name": "test", "argv": ["python3", "-m", "pytest"], "timeout_s": DEFAULT_TIMEOUT}]
     try:
-        if next((root / "tests").rglob("test_*.py"), None) is not None:
+        if any(_names_unittest(path) for path in (root / "tests").rglob("test_*.py")):
             return [{"name": "test", "argv": ["python3", "-m", "unittest", "discover", "-s", "tests"],
                      "timeout_s": DEFAULT_TIMEOUT}]
     except OSError:
         pass
+    try:
+        if any(_names_unittest(path) for path in root.glob("test_*.py")):
+            return [{"name": "test", "argv": ["python3", "-m", "unittest"], "timeout_s": DEFAULT_TIMEOUT}]
+    except OSError:
+        pass
     return []
+
+
+def _names_unittest(path):
+    """Whether a test file (read, never run) has an `import unittest` or `from unittest` line; a file that is
+    unreadable, over MAX_FILE_BYTES or not UTF-8 counts as not naming it."""
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+            return False
+        return re.search(r"^[ \t]*(?:import|from)[ \t]+unittest\b", path.read_text(encoding="utf-8"),
+                         re.MULTILINE) is not None
+    except (OSError, UnicodeError):
+        return False
 
 
 def _pytest_configured(root):
@@ -1105,9 +1142,13 @@ class Profile:
             raise
 
     def _create(self, text):
-        """Create the project file atomically and never over an existing one."""
-        fd, name = tempfile.mkstemp(dir=self.project, prefix=".zplan-process-")
+        """Create the project file atomically and never over an existing one. The fsynced temp is published with a
+        hard link; a filesystem without links (exFAT) gets `renamex_np(RENAME_EXCL)`, else a rename after the name
+        was seen absent (the caller holds the session lock). Any other OS error is a plain refusal."""
+        refused = Blocked("%s already exists; it is not overwritten." % PROFILE_FILE, family="action.refused")
+        name = None
         try:
+            fd, name = tempfile.mkstemp(dir=self.project, prefix=".zplan-process-")
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(text)
                 stream.flush()
@@ -1116,12 +1157,26 @@ class Profile:
             try:
                 os.link(name, self.file)
             except FileExistsError as error:
-                raise Blocked("%s already exists; it is not overwritten." % PROFILE_FILE, family="action.refused") from error
+                raise refused from error
+            except OSError as error:
+                if error.errno not in NO_LINK:
+                    raise
+                try:
+                    if not _rename_excl(name, self.file):
+                        if os.path.lexists(self.file):
+                            raise refused from error
+                        os.rename(name, self.file)
+                except FileExistsError as exists:
+                    raise refused from exists
+        except OSError as error:
+            raise Blocked("Cannot write %s: %s." % (PROFILE_FILE, error.strerror or error),
+                          family="store.write_failed") from error
         finally:
-            try:
-                os.unlink(name)
-            except OSError:
-                pass
+            if name is not None:
+                try:
+                    os.unlink(name)
+                except OSError:
+                    pass
 
     def defer(self):
         """"Later": the effective configuration is stored outside the project and used; the header says so."""

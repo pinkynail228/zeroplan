@@ -1,4 +1,4 @@
-# Installation: zplan 0.8.1
+# Installation: zplan 0.8.2
 
 Supported: macOS on Apple silicon (arm64). Not supported: Linux (for now: this release is qualified on macOS
 only), Windows and Intel macOS (no pinned toolchain for the last two; `zplan setup` stops). Runs execute natively as
@@ -54,6 +54,9 @@ curl -fsSL https://raw.githubusercontent.com/pinkynail228/zeroplan/main/install.
 zplan login                # Codex device login (zplan setup runs inside the installer; needs Node.js)
 ```
 
+An AI agent may run the install line; `zplan login` (it waits for the device code you enter in the browser) and
+`zplan` itself (a full-screen terminal app) are for you to run in your own terminal, not inside an agent's shell.
+
 `install.sh` itself fetches and installs with only `git` and `python3`: it picks the newest `vX.Y.Z` release tag,
 shallow-clones it into a temporary directory, runs that release's `install.py` with any arguments you pass to the
 script and then `zplan setup`. The install is complete only when that `zplan setup` succeeded; it installs the
@@ -62,7 +65,7 @@ pinned Codex through `npm ci`, so **Node.js ≥ 16 with npm** must be on PATH as
 name the prerequisite — it never reports a half-ready install you cannot log in to; install Node.js and re-run
 the same command (or `<launcher> setup`). A host with only `git` and `python3` cannot end up with a ready zplan.
 `ZEROSHOT_TOOLS` may start with `~` (it is expanded like `install.py` does).
-`ZPLAN_VERSION=0.8.1 sh install.sh` pins a release; `ZPLAN_REPOSITORY` points at another repository. A missing
+`ZPLAN_VERSION=0.8.2 sh install.sh` pins a release; `ZPLAN_REPOSITORY` points at another repository. A missing
 `git`/`python3` or a repository without a `vX.Y.Z` tag stops with one message and a non-zero exit. Once installed,
 `zplan update` moves to a newer release and runs the same `setup` step (docs/UPGRADE.md).
 
@@ -73,12 +76,12 @@ git clone https://github.com/pinkynail228/zeroplan.git
 cd zeroplan
 python3 install.py
 export PATH="${ZEROSHOT_TOOLS:-$HOME/.local}/bin:$PATH"
-zplan --version            # zplan 0.8.1
+zplan --version            # zplan 0.8.2
 zplan setup                # pinned Zeroshot 10.16.0 + Codex 0.162.1
 zplan login                # Codex device login
 ```
 
-`install.py` creates a private venv at `$XDG_DATA_HOME/planning-kit/app/0.8.1` (default `~/.local/share/...`),
+`install.py` creates a private venv at `$XDG_DATA_HOME/planning-kit/app/0.8.2` (default `~/.local/share/...`),
 installs the checkout and its one runtime dependency, Textual 8.2.8 (the full-screen shell), into it and then points the `zplan` launcher
 (`~/.local/bin/zplan`, or `$ZEROSHOT_TOOLS/bin/zplan`) at it. An existing `zplan` that this installer does not
 own is refused. The installed app never imports from the checkout; you can delete the clone afterwards.
@@ -89,7 +92,7 @@ with the wheels it depends on (rich, markdown-it-py, mdurl, pygments, platformdi
 
 **Upgrade from 0.6.x:** 0.8.0 was the first public release. An install of 0.6.x looks for releases in its earlier
 repository, so point it at this one: `ZPLAN_REPOSITORY=https://github.com/pinkynail228/zeroplan.git zplan update`
-(or run the one-line install). The launcher moves to `app/0.8.1`, the older `app/` directory stays on disk, and the
+(or run the one-line install). The launcher moves to `app/0.8.2`, the older `app/` directory stays on disk, and the
 installer copies the store to `v3.backup-<old version>-<UTC timestamp>` first.
 
 **Older releases (0.2.x to 0.5.x)** were never public. What each step changed in the store, and how to roll back

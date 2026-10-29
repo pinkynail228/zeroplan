@@ -183,6 +183,15 @@ class SchemeTests(unittest.TestCase):
                                              "command": None})
         self.assertEqual(idle, {"worker": {"state": "succeeded"}, "acceptance_review": {"state": "idle"}})
 
+    def test_observation_marks_the_steps_before_a_picked_task_succeeded(self):
+        """C4 J3: a flow with a picked task and no pick running has preflight, select_init and select_verify
+        behind it; a running pick, or a flow without a task, marks none of them."""
+        done = {"state": "succeeded"}
+        obs = scheme.observation_from_flow({"task": "T1", "worker": {"state": "running"}, "select": False})
+        self.assertEqual((obs["preflight"], obs["select_init"], obs["select_verify"]), (done, done, done))
+        self.assertNotIn("preflight", scheme.observation_from_flow({"task": "T1", "select": True}))
+        self.assertNotIn("preflight", scheme.observation_from_flow({"task": None, "worker": {"state": "running"}}))
+
     def test_preflight_word_and_conflict_reviewer_state(self):
         """C3: an active `preflight` node renders «preflight» in the milestone scheme, and a reviewer whose
         verdict is `conflict` is observed as failed (like a rejection)."""

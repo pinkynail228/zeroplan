@@ -35,6 +35,9 @@ SCHEMA_KEYS = frozenset({"seq", "handled", "last", "verdicts", "events"})
 # before the store has a revision). A feed written before RS5 has none; its first save records the current revision
 # without an event.
 PLAN_KEY = "plan"
+# A10: the other optional key: the plan revisions an architect tool (revise or edit) created, in order. The brake reads
+# it (`architect_made`): a rejected revision made that way is the owner's to decide, also after a restart.
+ARCHITECT_KEY = "architect"
 EVENT_KINDS = ("state", "verdict", "plan")
 STATE_KEYS = frozenset({"seq", "kind", "key", "milestone", "plan_revision", "attempt", "run_id", "state",
                         "previous", "wake", "at"})
@@ -174,10 +177,21 @@ def _capture_plan(authority, queue):
     if latest is None or latest == seen:
         return
     previous = seen["status"] if seen is not None and seen["revision"] == latest["revision"] else None
+    if _acting(authority) and previous is None and latest["revision"] not in queue.get(ARCHITECT_KEY, []):
+        queue.setdefault(ARCHITECT_KEY, []).append(latest["revision"])
     _append(queue, {"kind": "plan", "key": "plan/%d" % latest["revision"], "plan_revision": latest["revision"],
                     "status": latest["status"], "previous": previous,
-                    "wake": _plan_wakes(authority, latest["status"]) and not _acting(authority), "at": now()})
+                    "wake": (_plan_wakes(authority, latest["status"]) and not _acting(authority)
+                             and not (latest["status"] == "review_exhausted"
+                                      and latest["revision"] in queue.get(ARCHITECT_KEY, []))),
+                    "at": now()})
     queue[PLAN_KEY] = latest
+
+
+def architect_made(authority, version):
+    """A10: whether an architect tool (revise or edit) created plan revision `version`."""
+    queue = _feed(authority)
+    return queue is not None and version in queue.get(ARCHITECT_KEY, [])
 
 
 def restore(authority, snapshot):
@@ -312,7 +326,10 @@ def validate_feed(queue):
     """Refuse a malformed feed like any malformed store: a wrong key set, a negative or inverted counter, a bad
     state or verdict enum, or an event that does not fit its kind refuses the whole store (`store.invalid`)."""
     from .runs import MILESTONE_STATES
-    require(isinstance(queue, dict) and set(queue) in (SCHEMA_KEYS, SCHEMA_KEYS | {PLAN_KEY}), INVALID)
+    require(isinstance(queue, dict) and SCHEMA_KEYS <= set(queue) <= SCHEMA_KEYS | {PLAN_KEY, ARCHITECT_KEY}, INVALID)
+    made = queue.get(ARCHITECT_KEY, [])
+    require(isinstance(made, list) and all(type(v) is int and v >= 1 for v in made) and len(set(made)) == len(made),
+            INVALID)
     plan = queue.get(PLAN_KEY)
     require(plan is None or (isinstance(plan, dict) and set(plan) == {"revision", "status"}
                              and type(plan["revision"]) is int and plan["revision"] >= 1

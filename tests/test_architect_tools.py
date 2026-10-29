@@ -75,7 +75,7 @@ class ToolsTest(unittest.TestCase):
                          ["zplan_list_files", "zplan_read_file", "zplan_search", "zplan_state", "zplan_state_update",
                           "zplan_status", "zplan_start",
                           "zplan_stop", "zplan_approve_plan", "zplan_resume", "zplan_rebrief", "zplan_edit_plan",
-                          "zplan_merge", "zplan_propose_commit"])
+                          "zplan_revise_plan", "zplan_merge", "zplan_propose_commit"])
         for tool in tools:
             self.assertEqual(tool["inputSchema"]["type"], "object")
         result = self.call("zplan_read_file", {"path": "a.py"})["result"]
