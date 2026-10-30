@@ -282,10 +282,17 @@ class RecordTests(GateBase):
         with self.session(FixtureEngine("accept")) as app:
             self.assert_untouched(app, "action.refused", lambda a: a.delivery.run_task_gate("M1"))
 
-    def test_never_missing_or_malformed_profiles_refuse_with_their_family(self):
+    def test_never_works_as_proposed_while_missing_or_malformed_profiles_refuse_with_their_family(self):
+        """p3a A1/A2. A profile nobody decided (a valid, unaccepted file; approved plan) runs the gate and is recorded
+        as decided in zplan's own store; a deleted or broken one refuses with its family and writes nothing."""
         self.approved_plan()
-        with self.session(FixtureEngine("accept")) as app:  # never accepted
-            self.assert_untouched(app, "process.pending", lambda a: a.delivery.run_task_gate("M1"))
+        self.write(REQUIRED)
+        self.assertEqual(self.peek().status().state, "never")
+        record = self.in_session(FixtureEngine("accept"), lambda app: copy.deepcopy(app.delivery.run_task_gate("M1")))
+        self.assertEqual(record["milestone"], "M1")
+        self.assertEqual(self.peek().status().state, "accepted")  # "later", then the file adopted: no pending refusal
+        self.state_dir_reset()
+        self.approved_plan()
         self.state_dir_reset()
         self.prepare()
         self.remove_accepted_file()
@@ -299,12 +306,12 @@ class RecordTests(GateBase):
 
     def test_the_bound_profile_state_precedes_the_plan_conditions(self):
         """R-4 class: the bound profile's own refusal family is decided before the plan and milestone conditions, so
-        an unapproved (or absent) revision never masks a pending/missing/malformed profile. Oracles: the family and
+        an unapproved (or absent) revision never masks a missing/malformed profile (an undecided one works as proposed). Oracles: the family and
         the untouched store/sidecar asserted by `assert_untouched`; the control is the same project with an approved
         revision (`action.refused`, the earlier test). Domain: the three profile states with no approved revision."""
         self.write(REQUIRED)  # a proposal the owner never accepted, and no plan revision at all
-        with self.session(FixtureEngine("accept")) as app:
-            self.assert_untouched(app, "process.pending", lambda a: a.delivery.run_task_gate("M1"))
+        with self.session(FixtureEngine("accept")) as app:  # undecided works as proposed: the plan condition refuses
+            self.assert_untouched(app, "action.refused", lambda a: a.delivery.run_task_gate("M1"))
         self.state_dir_reset()
         self.accept_file(REQUIRED)
         self.remove_accepted_file()  # the accepted file is gone and the record keeps no snapshot

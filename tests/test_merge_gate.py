@@ -22,7 +22,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from terminal_planner import checks, delivery, engine, merge_critic, runs
+from terminal_planner import checks, delivery, engine, merge_critic, process, runs
 from terminal_planner.authority import Blocked, digest
 from terminal_planner.engine import FixtureEngine, ObservationDetached, SliceEnded, merge_critic_runtime
 import test_process as tpr
@@ -199,6 +199,27 @@ class MergeGateTests(tpr.ProfileTest):
             self.assertEqual(self.merge().kind, "refused")
         self.assertEqual((self.head(), self.stored()["runs"][0]["delivery"]), (head, "awaiting_merge"))
 
+    def test_an_ungated_merge_lands_only_under_the_profile_it_was_decided_on(self):
+        """The merge gate off: a profile edited after the merge was decided (here while the candidate is built) is
+        `process.changed` and lands nothing; with no edit the same merge lands as before. Interpretation: the refusal
+        comes from the pinned digest `Delivery.merge` passes down (the digest it was given, else the one it read)."""
+        self.awaiting_merge()
+        self.write({"gates": {"merge": "off"}})
+        head = self.head()
+        real = runs.commit_candidate
+
+        def commit_candidate(*args, **kwargs):
+            made = real(*args, **kwargs)
+            self.write({"gates": {"merge": "off"}, "checks": [{"name": "other", "argv": ["true"], "timeout_s": 60}]})
+            return made
+
+        with patch.object(runs, "commit_candidate", commit_candidate):
+            refused = self.merge()
+        self.assertEqual(refused.kind, "refused")
+        self.assertIn("process.changed", refused.line)
+        self.assertEqual((self.head(), self.stored()["runs"][0]["delivery"]), (head, "awaiting_merge"))
+        self.assertEqual(self.merge().kind, "integrated")
+
 
 class MergeCriticWiringTests(tpr.ProfileTest):
     """A7b2: a gated merge asks the merge critic and lands only on its `go`.
@@ -330,7 +351,7 @@ class MergeCriticWiringTests(tpr.ProfileTest):
         self.assertEqual(self.merge(engine).kind, "integrated")
         gate, record = self.stored()["runs"][0]["gate"], self.record()
         names, paths = merge_critic.reasons(gate["risk"], {}), self.changed_paths(gate)
-        self.assertTrue(names)                                # `facts={}` raises every path-less trigger
+        self.assertTrue(names)                                # the high tier raises the critic
         self.assertEqual(record["reasons"], names)
         self.assertEqual(record["identity"], {
             "milestone": "M1", "plan_revision": 1, "attempt": 1, "destination": "refs/heads/main",
@@ -342,15 +363,61 @@ class MergeCriticWiringTests(tpr.ProfileTest):
         critic = self.peek().status().resolved.roles()["plan_verifier"]
         self.assertEqual(record["documents"]["runtime"], digest(merge_critic_runtime({"critic": critic})))
 
-    def test_c2_no_raised_reason_lands_without_a_critic(self):
-        """C2: no raised reason -> the candidate lands as before, with no critic record and `gate["critic"]` None."""
-        self.gated()
+    def test_c2_a_low_risk_gated_merge_lands_without_a_critic(self):
+        """C2 / p2c A1: a gated merge of a low-risk change (a /2 profile whose risk rules put every path at `low`)
+        raises no reason, so it lands with no critic record, `gate["critic"]` None and no dispatch."""
+        self.gated(preset=process.PRESET_V2, risk={"rules": [{"paths": ["**"], "tier": "low"}]})
         self.owner_commit()
-        with patch.object(merge_critic, "reasons", return_value=[]):
-            self.assertEqual(self.merge(CriticEngine([{}])).kind, "integrated")
+        engine = CriticEngine([])
+        vetted = []
+        with self.critic_app(engine) as app:  # r4 A2: a vet that does not raise changes nothing for a low-risk merge
+            self.assertEqual(app.delivery.merge(app.delivery.latest("M1"), vet=vetted.append).kind, "integrated")
+        self.assertEqual(len(vetted), 1)
         stored = self.stored()
+        self.assertEqual(stored["runs"][0]["gate"]["risk"]["tier"], "low")
         self.assertEqual(stored["runs"][0]["gate"]["critic"], None)
         self.assertNotIn("critics", stored)
+        self.assertEqual(engine.dispatches, 0)
+
+    def test_r4_the_owners_vet_refuses_a_gated_candidate_before_the_critic_and_the_landing(self):
+        """r4 A1: with the merge gate required, `vet(paths)` sees the candidate's own changed paths once the checks
+        passed; a raise (the architect's `autonomy.ask`) starts no critic, lands nothing and keeps the gate record,
+        and the same candidate is reused (no second qualification) and lands once `vet` lets it through. The
+        retry covers the reused candidate. Interpretation: `vet` runs after the checks outcome is judged, so a
+        failed check still refuses with its own family."""
+        self.gated()
+        head = self.owner_commit()
+        engine = CriticEngine([{}])
+        real, calls, seen = checks.qualify, [], []
+
+        def qualify(*args):
+            calls.append(args)
+            return real(*args)
+
+        def vet(paths):
+            seen.append(paths)
+            if len(seen) == 1:
+                raise Blocked("The merge candidate changes files the profile rates high risk: the owner decides.",
+                              family="autonomy.ask")
+
+        with patch.object(checks, "qualify", qualify):
+            with self.critic_app(engine) as app:
+                first = app.delivery.merge(app.delivery.latest("M1"), vet=vet)
+            self.assertEqual((first.kind, first.family), ("refused", "autonomy.ask"))
+            self.assertEqual(self.head(), head)
+            stored = self.stored()
+            self.assertEqual(stored["runs"][0]["delivery"], "awaiting_merge")
+            gate = stored["runs"][0]["gate"]
+            self.assertEqual(gate["evidence"]["outcome"], "passed")   # the record stays
+            self.assertNotIn("critics", stored)
+            self.assertEqual(engine.dispatches, 0)                    # no critic run was started
+            self.assertEqual(seen, [self.changed_paths(gate)])
+            with self.critic_app(engine) as app:
+                second = app.delivery.merge(app.delivery.latest("M1"), vet=vet)
+        self.assertEqual(second.kind, "integrated")
+        self.assertEqual(len(calls), 1)                               # the reused candidate was not re-qualified
+        self.assertEqual(seen[1], seen[0])
+        self.assertEqual((self.head(), engine.dispatches), (gate["candidate"], 1))
 
     def test_c2_the_identity_binds_the_milestone_frozen_briefs(self):
         """C2: the input digest binds the milestone's frozen briefs, read from the approved revision's manifest."""

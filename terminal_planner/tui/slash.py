@@ -1,7 +1,7 @@
 """The `/` command registry of the chat input: the main screen's commands, their states and their arguments.
 
-Pure data and functions — no app, no I/O, no engine call, nothing imports this module yet (the integration run i2
-wires it to the app's actions). `COMMANDS` is the one ordered tuple of the twenty-one commands; each frozen `Command`
+Pure data and functions — no app, no I/O, no engine call, the palette and the app's actions
+(`tui/palette.py`, `tui/app.py`, `tui/card_host.py`) use it. `COMMANDS` is the one ordered tuple of the twenty-one commands; each frozen `Command`
 carries its English name, the id of its description in the string catalog (u2 owns the texts, this module keeps
 only the ids), the screen states it acts in, and its argument rule (`arg`). `parse(line)` turns one typed line into
 a `Parsed` — the resolved command or None for an unknown name, the raw name as typed, and the argument text — or

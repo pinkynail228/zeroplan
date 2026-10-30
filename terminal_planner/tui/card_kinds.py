@@ -352,13 +352,18 @@ def merge_card_source(screen):
     tasks line."""
     snapshot = getattr(screen.app, "snapshot", None)
     version = None if snapshot is None else snapshot.version
+    asked = getattr(getattr(screen.app, "controller", None), "asked", None) or {}
     shown = []
     for row in screen.app.rows():
         if row.state != "awaiting_merge" or row.token is None:
             continue
         key = merge_key(row, version)
         counts = screen.merge_counts(key, row.id) if row.token.delivery == "awaiting_merge" else None
-        shown.append(merge_spec(key, screen.merge_card_at(key), row.id, counts, screen.merge_overlap.get(key, ())))
+        overlap = screen.merge_overlap.get(key, ())
+        spec = merge_spec(key, screen.merge_card_at(key), row.id, counts, overlap)
+        if asked.get("merge") == row.id and not overlap:  # P6: the architect asked for this merge; the card is its answer
+            spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_asked", stage=row.id)]))
+        shown.append(spec)
     return shown
 
 
@@ -477,6 +482,50 @@ def commit_card_source(screen):
 CARD_SOURCES["commit"] = commit_card_source
 CARD_ROUTES[("/approve", "commit")] = lambda screen, argument, key: screen.confirm_commit(key)
 CARD_ROUTES[("/decline", "commit")] = lambda screen, argument, key: screen.decline_commit(key)
+
+
+# P6 — the architect's request card (kind `consent`): a start, a continue or a new attempt the autonomy level leaves to
+# the owner. It is drawn from the controller's stored request, one line and the two shared buttons, `/approve` («yes»,
+# runs the request) and `/decline` («no», runs nothing), routed by kind; it leaves when the request is no longer
+# awaiting. An approve or a merge the architect asked for has no card of this kind: its own card carries one line.
+CONSENT_NOTE = 200  # characters of a new attempt's note the card line shows
+
+
+def consent_key(request):
+    return "consent:%s" % request.id
+
+
+def consent_line(request):
+    """The one question of the request: «Start M1 (plan r3)?», «Continue M1 (attempt 2)?», «New attempt of M1: <note>?»."""
+    args = request.args
+    if request.action == "start":
+        return strings.text("card.consent_start", stage=request.milestone, revision=args.get("revision"))
+    if request.action == "resume":
+        return strings.text("card.consent_resume", stage=request.milestone,
+                            attempt=(args.get("token") or {}).get("attempt"))
+    note = " ".join(str(args.get("note", "")).split())
+    return strings.text("card.consent_rebrief", stage=request.milestone, note=elide_end(note, CONSENT_NOTE))
+
+
+def consent_spec(key, at, request):
+    return cards.CardSpec(key=key, title=strings.text("card.consent_title"), text=consent_line(request),
+                          buttons=((strings.text("card.consent_yes"), "/approve"),
+                                   (strings.text("card.consent_no"), "/decline")),
+                          hint=None, at=at, done=None, alarm=False)
+
+
+def consent_card_source(screen):
+    """`CARD_SOURCES["consent"]`: one card while the controller holds a request that awaits the owner."""
+    request = getattr(screen.app.controller, "consent_request", None)
+    if request is None or request.state != "awaiting":
+        return ()
+    key = consent_key(request)
+    return (consent_spec(key, screen.merge_card_at(key), request),)
+
+
+CARD_SOURCES["consent"] = consent_card_source
+CARD_ROUTES[("/approve", "consent")] = lambda screen, argument, key: screen.confirm_consent(key)
+CARD_ROUTES[("/decline", "consent")] = lambda screen, argument, key: screen.decline_consent(key)
 
 
 class _QuestionButtons(VerticalGroup):
@@ -632,12 +681,15 @@ def plan_auto_approves(snapshot):
             and not plan_stale(snapshot) and autonomy.decide(profile_level(snapshot), "approve") == "allow")
 
 
-def plan_card_spec(key, at, stages, tasks, stale=False, auto=False, narrow=False):
+def plan_card_spec(key, at, stages, tasks, stale=False, auto=False, narrow=False, milestones=(), asked=False):
     """One plan card through the frozen builder (`cards.plan_card`); without counts the title is the plan word
     itself (`pane.plan`: «Plan», the word the plan pane carries), so the card is the same decision either way.
     RS2: a stale proposal (the project changed after planning) cannot be approved, so its card offers only
     «revise» and says why. D1: where the architect approves the plan itself (`auto`) the card does not ask: it
-    says so and offers only «revise»; the pointer to the plan follows the layout (`narrow`: no right column)."""
+    says so and offers only «revise»; the pointer to the plan follows the layout (`narrow`: no right column). The
+    `milestones` lines (`plan_card_source` builds them) follow the text of a card that can be approved, so the owner
+    sees what the plan holds before it is (or is not) approved. P6: `asked` (the architect asked for this approval)
+    adds one line saying so to a card that can be approved."""
     spec = cards.plan_card(key, at, stages, tasks)
     if stale:
         spec = replace(spec, text=strings.text("card.plan_stale_text"),
@@ -647,6 +699,10 @@ def plan_card_spec(key, at, stages, tasks, stale=False, auto=False, narrow=False
                        buttons=((strings.text("card.revise_only"), "/decline"),))
     elif narrow:
         spec = replace(spec, text=strings.text("card.plan_text_narrow"))
+    if asked and not stale and not auto:
+        spec = replace(spec, text="\n".join([spec.text, strings.text("card.plan_asked")]))
+    if milestones and not stale:
+        spec = replace(spec, text="\n".join([spec.text, *milestones]))
     if stages and tasks:
         return spec
     return replace(spec, title=strings.text("pane.plan"))
@@ -665,9 +721,34 @@ def plan_card_source(screen):
         return
     if getattr(screen.app, "revising", None) == snapshot.version:
         return  # a revision of this proposal was asked for: its card offers nothing until the new snapshot
-    stages, tasks = plan_card_counts(snapshot.plan)
-    yield plan_card_spec("plan:%s" % snapshot.version, card_clock(), stages, tasks, stale=plan_stale(snapshot),
-                         auto=plan_auto_approves(snapshot), narrow=bool(getattr(screen, "narrow", False)))
+    stages, tasks_total = plan_card_counts(snapshot.plan)
+    asked = (getattr(getattr(screen.app, "controller", None), "asked", None) or {}).get("approve")
+    # The milestones (id, title, task count) come from the plan view's body: `Planning.proposal` writes
+    # `  M1 <title>  (after: …)` and one `    T1 <title> · N checks` line per task under it. At most five are listed,
+    # then «…and N more»; a title is cut with `…` so its line fits the laid-out card slot (a stand-in screen without
+    # one cuts nothing).
+    found = []
+    for line in tuple(getattr(snapshot.plan, "lines", None) or ()):
+        match = re.match(r"^  (\S+) (.*)  \(after: [^)]*\)$", line)
+        if match:
+            found.append([match.group(1), match.group(2), 0])
+        elif found and line.startswith("    ") and line.strip():
+            found[-1][2] += 1
+    room = getattr(screen, "question_text_room", None)
+    width = room()[1] if room is not None else 0
+    listed = []
+    for number, title, count in found[:5]:
+        tasks = strings.text("canvas.count_task_one" if count == 1 else "canvas.count_task_many", n=count)
+        line = strings.text("card.plan_milestone", number=number, title=title, tasks=tasks)
+        if 0 < width < display_width(line):
+            title = elide_end(title, display_width(title) - (display_width(line) - width))
+            line = strings.text("card.plan_milestone", number=number, title=title, tasks=tasks)
+        listed.append(line)
+    if len(found) > 5:
+        listed.append(strings.text("card.plan_more", n=len(found) - 5))
+    yield plan_card_spec("plan:%s" % snapshot.version, card_clock(), stages, tasks_total, stale=plan_stale(snapshot),
+                         auto=plan_auto_approves(snapshot), narrow=bool(getattr(screen, "narrow", False)),
+                         milestones=listed, asked=asked == snapshot.version)
 
 
 def approve_plan_card(screen, argument, key):

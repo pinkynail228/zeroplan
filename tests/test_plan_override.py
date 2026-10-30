@@ -137,16 +137,17 @@ class RefusalTests(OverrideCase):
     def test_o2_a_bad_reason_is_refused_and_writes_nothing(self):
         self.exhausted()
         for label, reason in (("empty", ""), ("blank", "   \t "), ("multiline", "first line\nsecond line"),
-                              ("carriage", "first line\rsecond line"), ("9", "x" * 9), ("501", "y" * 501),
-                              ("padded 9", "  " + "z" * 9 + "  "), ("control", "text with \x07 bell chars")):
+                              ("carriage", "first line\rsecond line"), ("501", "y" * 501),
+                              ("padded 501", "  " + "z" * 501 + "  "), ("control", "text with \x07 bell chars")):
             with self.subTest(label):
                 self.refused("action.refused", lambda a, r=reason: a.planning.override(1, r))
         with self.app() as app:
             self.assertEqual(app.authority.current["status"], "review_exhausted")
             self.assertNotIn("override", app.authority.current)
 
-    def test_o2_the_length_boundaries_are_ten_and_five_hundred_characters(self):
-        for reason in ("x" * 10, "y" * 500, "  " + "z" * 10 + "\n"):
+    def test_o2_a_reason_is_one_to_five_hundred_characters(self):
+        """p4c A1/A2: a short real reason approves, is stored as typed and reloads; no interpretation."""
+        for reason in ("ok", "x", "y" * 500, "  ok, tested\n"):
             with self.subTest(length=len(reason.strip())):
                 self.exhausted()
                 with self.app() as app:
@@ -329,6 +330,12 @@ class ValidationTests(OverrideCase):
         with self.app() as app:
             app.planning.override(1, REASON)
 
+    def test_o3_a_short_override_reason_loads(self):
+        self.overridden()
+        self.tamper(lambda r: (r["override"].update(reason="ok"), r.update(approval=auth.Authority.approval_identity(r))))
+        with self.app() as app:
+            self.assertEqual(app.authority.current["override"]["reason"], "ok")
+
     def test_o3_a_valid_override_loads(self):
         self.overridden()
         with self.app() as app:
@@ -391,7 +398,8 @@ class ValidationTests(OverrideCase):
         self.assert_invalid()
 
     def test_o3_a_malformed_reason_or_extra_field_is_invalid(self):
-        for label, mutate in (("short", lambda o: o.update(reason="too short")),
+        for label, mutate in (("empty", lambda o: o.update(reason="")),
+                              ("long", lambda o: o.update(reason="x" * 501)),
                               ("multiline", lambda o: o.update(reason="two\nlines of reason")),
                               ("padded", lambda o: o.update(reason=" " + REASON)),
                               ("extra", lambda o: o.update(extra="x")),
@@ -456,14 +464,14 @@ class PlainTests(OverrideCase):
         self.assertIn("[r] revise or approve anyway with a reason", lines)
         self.assertNotIn("cannot be approved", lines)
 
-    def test_o4_an_empty_reason_cancels_and_a_short_one_is_refused(self):
+    def test_o4_an_empty_reason_cancels_and_a_too_long_one_is_refused(self):
         self.exhausted()
         before = self.raw()
         text = self.session("p\no\n\nq\nq\n")
         self.assertIn("Empty text: the plan is unchanged.", text)
         self.assertEqual(self.raw(), before)
-        text = self.session("p\no\nshort\n\nq\nq\n")
-        self.assertIn("A reason is required: one line, 10 to 500 characters.", text)
+        text = self.session("p\no\n" + "x" * 501 + "\n\nq\nq\n")
+        self.assertIn("A reason is required: one line, at most 500 characters.", text)
         self.assertIn("[code: action.refused]", text)
         self.assertEqual(self.raw(), before)
         text = self.session("p\no\nfirst line of text\nsecond line of text\n\nq\nq\n")

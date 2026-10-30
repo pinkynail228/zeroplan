@@ -76,7 +76,7 @@ def require(ok, message="Incompatible planning state/envelope.", family="store.i
 
 
 # Every persisted plan revision status (the catalog documents each one).
-OVERRIDE_REASON = (10, 500)  # characters of the owner's typed reason for approving a rejected plan gate
+OVERRIDE_REASON = 500  # characters at most of the owner's typed reason for approving a rejected plan gate
 PLAN_STATUSES = ("planning", "submission_unknown", "observing", "observation_blocked", "detached", "run_failed",
                  "proposal_invalid", "review_exhausted", "proposed", "approved", "stopped")
 
@@ -938,11 +938,10 @@ class Authority:
 
 
 def override_reason(text):
-    """The reason of an owner override: stripped, one line, 10..500 characters; nothing else is accepted."""
+    """The reason of an owner override: stripped, one printable line, 1..500 characters; nothing else is accepted."""
     reason = text.strip() if isinstance(text, str) else ""
-    low, high = OVERRIDE_REASON
-    require(low <= len(reason) <= high and reason.isprintable(),
-            "A reason is required: one line, %d to %d characters." % (low, high), family="action.refused")
+    require(0 < len(reason) <= OVERRIDE_REASON and reason.isprintable(),
+            "A reason is required: one line, at most %d characters." % OVERRIDE_REASON, family="action.refused")
     return reason
 
 
@@ -953,7 +952,7 @@ def override_matches(evidence, override, verdict_field="verdict", subject="plan 
     require(isinstance(override, dict) and set(override) == {"reason", "verdict", "evidence_digest"})
     reason = override["reason"]
     require(isinstance(reason, str) and reason == reason.strip()
-            and OVERRIDE_REASON[0] <= len(reason) <= OVERRIDE_REASON[1] and reason.isprintable(),
+            and 0 < len(reason) <= OVERRIDE_REASON and reason.isprintable(),
             "The override reason is invalid.")
     require(override["verdict"] == evidence[verdict_field] and override["evidence_digest"] == digest(evidence),
             "The override does not match the %s." % subject)

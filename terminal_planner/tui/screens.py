@@ -202,15 +202,14 @@ class PlanScreen(ButtonScreen):
     def action_approve(self):
         if self.allowed("approve"):
             version = self.view().version
-            self.app.confirm("Approve plan r%s? The implementation is not started." % version,
-                             lambda: self.app.decide("approve", version))
+            self.app.decide("approve", version)
 
     def action_override(self):
         if self.allowed("override"):
             version = self.view().version
             self.app.push_screen(
                 NoteScreen("Approve plan r%s despite the check?" % version, answer=True,
-                           label="Reason (one line, 10–500 characters); the plan check stays on record."),
+                           label="Reason (one line, at most 500 characters); the plan check stays on record."),
                 lambda text: self.app.override_note(version, text))
 
     def action_reject(self):

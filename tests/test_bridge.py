@@ -136,12 +136,15 @@ class BridgeCase(tp.ProjectTest):
         self.git("add", process.PROFILE_FILE)
         self.git("commit", "-qm", "process profile")
 
-    def write_profile(self, level="auto", merge="off", checks=None):
-        """An accepted `zplan.default/2` profile at `level` with `gates.merge` and optional frozen checks, committed
-        so the merge sees a clean, current project (the A5t2b merge tests)."""
+    def write_profile(self, level="auto", merge="off", checks=None, tier=None):
+        """An accepted `zplan.default/2` profile at `level` with `gates.merge`, optional frozen checks and optionally
+        a risk rule that puts every path at `tier`, committed so the merge sees a clean, current project (the A5t2b
+        merge tests)."""
         profile = {"preset": process.PRESET_V2, "autonomy": {"level": level}, "gates": {"merge": merge}}
         if checks is not None:
             profile["checks"] = checks
+        if tier is not None:
+            profile["risk"] = {"rules": [{"paths": ["**"], "tier": tier}]}
         (self.project / process.PROFILE_FILE).write_text(json.dumps(profile))
         with tp.Authority(self.state, self.project) as authority:
             process.Profile.of(authority).accept()
@@ -223,7 +226,7 @@ class BridgeCase(tp.ProjectTest):
             time.sleep(0.05)
         raise AssertionError("the plan never matched")
 
-    def awaiting_merge(self, level="auto", merge="required", checks=None):
+    def awaiting_merge(self, level="auto", merge="required", checks=None, tier=None):
         """The approved fixture plan with M1 finished and exported (delivery awaiting_merge) under an accepted
         profile that `level`/`merge`/`checks` configure, ready for the architect's merge tool.
 
@@ -231,7 +234,7 @@ class BridgeCase(tp.ProjectTest):
         (a required gate with no checks is refused by the gate itself)."""
         if checks is None and merge == "required":
             checks = [{"name": "unit", "argv": ["true"], "timeout_s": 60}]
-        self.write_profile(level=level, merge=merge, checks=checks)
+        self.write_profile(level=level, merge=merge, checks=checks, tier=tier)
         self.driver = FixtureDriver(self.root / "fixture-runs", outcome="done")
         with tp.Authority(self.state, self.project) as authority:
             authority.profile = process.Profile.of(authority)
@@ -311,7 +314,7 @@ class BridgeCase(tp.ProjectTest):
             controller.stop()                      # quitting waits for the admitted job, as for any
             thread.join(10)
         self.assertTrue(reply.get("v"), "the admitted job's reply never arrived")
-        self.assertEqual(reply["v"]["error"], "autonomy.ask")  # the job ran to its policy decision
+        self.assertEqual(reply["v"]["ok"]["status"], "awaiting_owner")  # the job ran to its policy decision
         self.assertFalse(controller.mutating())
 
     def test_c1_the_wait_is_bounded_and_status_follows_queued_running_done(self):
@@ -342,7 +345,7 @@ class BridgeCase(tp.ProjectTest):
                 time.sleep(0.05)
         entry = self.entry("X")
         self.assertEqual(entry["state"], "done")
-        self.assertEqual(entry["error"]["family"], "autonomy.ask")  # done, with its result
+        self.assertEqual(entry["ok"]["status"], "awaiting_owner")  # done, with its result
 
     def test_c1_shutdown_never_joins_a_blocked_request_thread(self):
         entered, gate = threading.Event(), threading.Event()
@@ -511,7 +514,7 @@ class BridgeCase(tp.ProjectTest):
     def test_c3_a_real_profile_change_after_the_preview_is_refused_with_process_changed(self):
         """Regression (A5t1 C3/C4): the policy reads the profile the preview was built on, so a profile that moves
         between the preview and the decision is today's `ProfileChanged` refusal - not a policy answer read from the
-        new profile (auto -> manual would otherwise be `autonomy.ask`)."""
+        new profile (auto -> manual would otherwise ask the owner)."""
         self.write_auto_profile()
         self.plan(0)
         self.controller(profile=True)
@@ -538,8 +541,8 @@ class BridgeCase(tp.ProjectTest):
         self.plan(0)
         self.controller()
         reply = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="p")
-        self.assertEqual(reply["error"], "autonomy.ask")
-        self.assertIn("by the owner in the zplan interface", reply["message"])
+        self.assertEqual(reply["ok"]["status"], "awaiting_owner")
+        self.assertEqual(self.call("zplan_status")["ok"]["consent"]["state"], "awaiting")
 
     def test_c4_invalid_arguments_are_refused_before_the_revision_check(self):
         self.plan(0)
@@ -769,9 +772,9 @@ class BridgeCase(tp.ProjectTest):
         controller = self.controller()
         reply = self.call("zplan_approve_plan", {"revision": 1}, rid="ap")
         self.assertEqual(reply["id"], "ap")
-        self.assertEqual(reply["error"], "autonomy.ask")  # current revision, but the release gate asks the owner
+        self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "plan"})  # the level asks the owner
         entry = self.entry("ap")
-        self.assertEqual((entry["state"], entry["error"]["family"]), ("done", "autonomy.ask"))
+        self.assertEqual((entry["state"], entry["ok"]["card"]), ("done", "plan"))
         controller.begin_closing()  # a mutating job is refused once quitting began, never cut like a slice
         closed = self.call("zplan_approve_plan", {"revision": 1}, rid="ap2")
         self.assertEqual(closed["error"], "architect.closing")
@@ -847,7 +850,7 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual(row["state"], "failed_recoverable")
         with patch.object(autonomy, "AUTOMATIC", False):  # the release gate as A5t1 shipped it: ask
             asked = self.call("zplan_resume", {"milestone": "M1", "token": row["token"]}, rid="rs")
-            self.assertEqual(asked["error"], "autonomy.ask")
+            self.assertEqual(asked["ok"]["status"], "awaiting_owner")
         reply = self.call("zplan_resume", {"milestone": "M1", "token": row["token"]}, rid="rs2")
         self.assertIn("ok", reply)
         # resume keeps the attempt number: it continues the same attempt with a fresh run id
@@ -923,11 +926,12 @@ class BridgeCase(tp.ProjectTest):
         self.controller(profile=True)
         with patch.object(autonomy, "AUTOMATIC", False):
             asked = self.call("zplan_approve_plan", {"revision": 1}, rid="p1")
-            self.assertEqual(asked["error"], "autonomy.ask")
-            self.assertIn("by the owner in the zplan interface", asked["message"])
+            self.assertEqual(asked["ok"], {"status": "awaiting_owner", "card": "plan"})
+        self.assertEqual(self.call("zplan_status")["ok"]["asked"], {"approve": 1})  # the status lists the ask
         reply = self.call("zplan_approve_plan", {"revision": 1}, rid="p2")
         self.assertIn("ok", reply)
         self.assertEqual(reply["ok"], {"revision": 1, "status": "approved"})
+        self.assertNotIn("asked", self.call("zplan_status")["ok"])  # the approval answers it
         self.assertEqual({k: v for k, v in self.rows()["plan"].items() if k != "proposal"},
                          {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review."})
 
@@ -1170,39 +1174,48 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("Merged: M1", reply["ok"]["line"])
         self.assertEqual(self.entry("mg")["state"], "done")
 
-    def test_c2_a_merge_asks_without_the_required_gate(self):
-        """A5t2b C2/C3: with `gates.merge` off (the default profile) even auto asks the owner: the attempt stays
-        awaiting_merge and nothing is merged."""
+    def test_c2_a_merge_at_auto_with_the_gate_off_lands_and_says_what_did_not_run(self):
+        """p2a A2: at auto with `gates.merge: off` the architect's merge lands without checks or critic, and the
+        tool's line ends by saying so; the merge gate decides what runs, not who merges. Interpretation: the sentence
+        is appended to `Delivery.merge`'s line only when the merge integrated and the gate is not required."""
         self.awaiting_merge(merge="off")
         self.controller(profile=True)
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
-        reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="ask")
-        self.assertEqual(reply["error"], "autonomy.ask", reply)
-        self.assertIn("by the owner in the zplan interface", reply["message"])
-        self.assertEqual(next(item for item in self.rows()["rows"] if item["id"] == "M1")["state"], "awaiting_merge")
+        self.assertEqual(row["merge"]["decision"], "allow")
+        reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="off")
+        self.assertIn("ok", reply, reply)
+        self.assertEqual(reply["ok"]["kind"], "integrated")
+        self.assertTrue(reply["ok"]["line"].endswith("No merge check or critic ran: the profile's merge gate is off."),
+                        reply)
 
-    def test_c2_autonomy_ask_refusals_name_the_owners_step_and_that_a_chat_reply_does_not_do_it(self):
-        """C2 K1 (walk W1): each `autonomy.ask` refusal names the owner's command or card and says a chat reply does
-        not do the action; a merge under a profile without the merge check says that is why it is the owner's.
-        Interpretation: with the merge check required and the level not auto, the "no merge check" sentence is left out."""
-        self.awaiting_merge(merge="off")
+    def test_c2_what_the_level_leaves_to_the_owner_becomes_a_card_or_a_request(self):
+        """p6a: a supervised merge of a high-risk change and an approve are the owner's own cards: the architect
+        gets `awaiting_owner` and the card's name and the status lists the ask. A resume is a stored request with an
+        id; another action while it awaits is refused naming it (`autonomy.ask`, the owner's answer is still owed;
+        nothing is stored for it) and nothing ran. Interpretation: the asks are kept by action (`asked`), the request
+        apart."""
+        self.awaiting_merge(level="supervised", merge="off", tier="high")
         self.controller(profile=True)
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
         reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="m")
-        self.assertEqual(reply["error"], "autonomy.ask", reply)
-        for part in ("merge card", "/merge", "no merge check", "A chat reply does not"):
-            self.assertIn(part, reply["message"])
+        self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"}, reply)
         with patch.object(autonomy, "AUTOMATIC", False):
-            for tool, args, expect in (("zplan_approve_plan", {"revision": 1}, ("/approve", "plan card")),
-                                       ("zplan_resume", {"milestone": "M1", "token": row["token"]}, ("/run",)),
-                                       ("zplan_rebrief", {"milestone": "M1", "token": row["token"], "note": "x"},
-                                        ("/attempt",)),
-                                       ("zplan_start", {"milestone": "M1", "revision": 1}, ("/run",))):
+            reply = self.call("zplan_approve_plan", {"revision": 1}, rid="a")
+            self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "plan"}, reply)
+            resumed = self.call("zplan_resume", {"milestone": "M1", "token": row["token"]}, rid="r")
+            self.assertEqual(resumed["ok"]["status"], "awaiting_owner", resumed)
+            for tool, args in (("zplan_rebrief", {"milestone": "M1", "token": row["token"], "note": "x"}),
+                               ("zplan_start", {"milestone": "M1", "revision": 1})):
                 with self.subTest(tool=tool):
-                    reply = self.call(tool, args, rid="a-" + tool)
+                    reply = self.call(tool, args, rid="b-" + tool)
                     self.assertEqual(reply["error"], "autonomy.ask", reply)
-                    for part in expect + ("A chat reply does not",):
-                        self.assertIn(part, reply["message"])
+                    self.assertIn(resumed["ok"]["request"], reply["message"])
+        status = self.call("zplan_status")["ok"]
+        self.assertEqual(status["asked"], {"merge": "M1", "approve": 1})
+        self.assertEqual(status["consent"]["id"], resumed["ok"]["request"])
+        self.assertEqual((status["consent"]["action"], status["consent"]["milestone"], status["consent"]["state"]),
+                         ("resume", "M1", "awaiting"))
+        self.assertEqual(next(item for item in status["rows"] if item["id"] == "M1")["state"], "awaiting_merge")
 
     def test_c2_the_merge_is_bound_to_the_profile_the_policy_read(self):
         """A5t2b C2 (regression, main 4d4fa55): a profile that moves between the policy read and the merge's own read
@@ -1219,20 +1232,68 @@ class BridgeCase(tp.ProjectTest):
 
     # A5t2b C3 -------------------------------------------------------------------
 
-    def test_c3_a_supervised_start_is_allowed_and_its_gated_merge_asks(self):
-        """A5t2b C3: with the release gate on, supervised lets the architect start without asking, but even with
-        `gates.merge: required` a supervised merge asks the owner (only auto may merge by itself)."""
+    def test_c3_a_supervised_start_is_allowed_and_its_merge_asks_on_high_risk_only(self):
+        """A5t2b C3 / p2a A3, A4: with the release gate on, supervised lets the architect start without asking; its
+        merge asks only when the candidate is high risk (the status row's `decision` and the refusal agree), and a
+        low-risk change merges. A manual merge asks whatever the risk."""
         self.plan(0)
         self.write_profile(level="supervised", merge="required",
-                           checks=[{"name": "unit", "argv": ["true"], "timeout_s": 60}])
+                           checks=[{"name": "unit", "argv": ["true"], "timeout_s": 60}], tier="high")
         self.controller(profile=True)
         started = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="sup-start")
         self.assertIn("ok", started, started)
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
         self.assertEqual(row["state"], "running")
-        # the row's own token resolves, but a supervised merge asks the owner even with gates.merge required
+        # the row's own token resolves; a running attempt has no result to judge, so the merge asks (fail closed)
         asked = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="sup-merge")
-        self.assertEqual(asked["error"], "autonomy.ask", asked)
+        self.assertEqual(asked["ok"], {"status": "awaiting_owner", "card": "merge"}, asked)
+
+    def test_p2a_supervised_asks_for_a_high_risk_merge_and_merges_a_low_risk_one(self):
+        """p2a A3/A4: a supervised exported attempt whose changed paths the profile's risk rules mark high is
+        `decision` ask and answered `awaiting_owner` (nothing merged); the same attempt under a low rule is
+        `decision` allow and merges. A manual profile asks even for low risk. Interpretation: every path is put at
+        one tier by a `**` rule, so the tier is the profile's, not the fixture's."""
+        for level, tier, decision in (("supervised", "high", "ask"), ("manual", "low", "ask"),
+                                      ("supervised", "low", "allow")):
+            with self.subTest(level=level, tier=tier):
+                self.setUp()
+                self.awaiting_merge(level=level, tier=tier)
+                self.controller(profile=True)
+                row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+                self.assertEqual(row["merge"]["decision"], decision)
+                reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="p2a")
+                if decision == "ask":
+                    self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"}, reply)
+                    self.assertEqual(next(item for item in self.rows()["rows"]
+                                          if item["id"] == "M1")["state"], "awaiting_merge")
+                else:
+                    self.assertEqual(reply["ok"]["kind"], "integrated", reply)
+
+    def test_a_supervised_merge_asks_when_the_integrated_candidate_is_high_risk_though_the_estimate_allows(self):
+        """The architect's supervised merge is decided on the candidate that lands: the attempt edits ZPLAN_FIXTURE.md
+        (medium), main renames it into `.github/` (high) before the merge, and `merge-tree` carries the edit there.
+        The status row's pre-merge estimate still says allow, the merge is answered `awaiting_owner` (the merge card)
+        and nothing lands. Interpretation: the owner's own merge of the same state is not vetted (it asks for no tier)."""
+        (self.project / "ZPLAN_FIXTURE.md").write_text("seed\n" * 8)
+        self.git("add", "ZPLAN_FIXTURE.md")
+        self.git("commit", "-qm", "seed")
+        self.awaiting_merge(level="supervised", merge="off", tier="medium")
+        rules = [{"paths": ["**"], "tier": "medium"}, {"paths": [".github/**"], "tier": "high"}]
+        (self.project / process.PROFILE_FILE).write_text(json.dumps(
+            {"preset": process.PRESET_V2, "autonomy": {"level": "supervised"}, "gates": {"merge": "off"},
+             "risk": {"rules": rules}}))
+        (self.project / ".github" / "workflows").mkdir(parents=True)
+        self.git("mv", "ZPLAN_FIXTURE.md", ".github/workflows/ZPLAN_FIXTURE.md")
+        self.git("add", process.PROFILE_FILE)
+        self.git("commit", "-qm", "main renames the file into the workflows")
+        head = self.git("rev-parse", "HEAD").decode().strip()
+        self.controller(profile=True)
+        row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        self.assertEqual(row["merge"]["decision"], "allow")
+        reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="renamed")
+        self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"}, reply)
+        self.assertEqual(self.git("rev-parse", "HEAD").decode().strip(), head)
+        self.assertEqual(next(item for item in self.rows()["rows"] if item["id"] == "M1")["state"], "awaiting_merge")
 
     def test_c3_a_manual_start_asks(self):
         """A5t2b C3: a manual profile asks the owner for the start just as it does for every other action, with the
@@ -1241,8 +1302,8 @@ class BridgeCase(tp.ProjectTest):
         self.write_profile(level="manual")
         self.controller(profile=True)
         reply = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="manual")
-        self.assertEqual(reply["error"], "autonomy.ask", reply)
-        self.assertIn("by the owner in the zplan interface", reply["message"])
+        self.assertEqual(reply["ok"]["status"], "awaiting_owner", reply)
+        self.assertEqual(reply["ok"]["request"], self.call("zplan_status")["ok"]["consent"]["id"])
 
 
 if __name__ == "__main__":

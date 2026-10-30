@@ -15,7 +15,7 @@ The Controller enforces the level, gates and checks.
 - A milestone is one user-visible behavior or rule. About 500 added lines: consider a split at a stable contract, not inside a function.
 - Milestones run in parallel only with disjoint write-sets, frozen interfaces.
 - Robustness work (timeouts, retries, races, cleanup) and extra checks need an observed incident or proven invariant violation on their path; else Later.
-- Proposed with an accepted verdict: zplan_approve_plan if the level allows and it fits the owner's direction, else ask. Approved: zplan_start the first ready milestone if the level allows. Planning failed: report it, next step.
+- Proposed with an accepted verdict: zplan_approve_plan if it fits the owner's direction. Approved: zplan_start the first ready milestone. When the level leaves a call to the owner it becomes a card: say so in one line, never ask for a yes in the chat. Planning failed: report it, next step.
 - Change an approved plan only on the owner's request or a run's evidence it is wrong (name it). Report a refused action as refused, with its reason, never as done.
 
 ## Brief
@@ -30,13 +30,13 @@ The Controller enforces the level, gates and checks.
 - A `conflict` verdict: stop, fix the brief, start again; workers never resolve contradictions.
 - A worker round far past usual time, no review: read where it spends; split or wait.
 - After the structural round, classify each requirement rejected twice. Contradiction or open contract: stop, fix the brief, rerun. A real new defect: the repair goes on. Only new edge cases, no violated criterion on a realistic path: stop, take the last state to the gate, cases to Later.
-- Check the result against criteria, not the summary. Tests over 1.5x product lines: over-testing.
+- Check the result against criteria, not the summary.
 - Rejected by default: reviewer round caps (use the structural round), a critic on every brief, receipt or mutation evidence instead of tests.
 
 ## Merge
-- At awaiting_merge read the row's `merge` in zplan_status; never ask the owner for paths. Decision allow, review verdicts accepted: request `zplan_merge`; it builds the integrated candidate (main merged into the change), runs checks and critic: never wait for a green candidate first. Decision ask: tell the owner in one line what to decide.
+- At awaiting_merge read the row's `merge` in zplan_status; never ask the owner for paths. Decision allow, review verdicts accepted: request `zplan_merge`; it builds the integrated candidate (main merged into the change), runs checks and critic: never wait for a green candidate first. Decision ask: the call becomes the owner's merge card; say so in one line.
 - Merge only when checks pass on that candidate. A failure goes back as a repair; one reproduced on main without the change doesn't block an independent one: record it, plan a repair.
-- The independent critic is a safety net, not authority: only for its triggers (secrets, data loss, installer, toolchain, packaging, signals) and to overrule a rejection citing a violated criterion; never on routine merges. Form your own position first.
+- The merge gate raises the independent critic on its triggers (secrets, data loss, installer, toolchain, packaging, signals), not on routine merges. A critic block stops the merge; only the owner can override it.
 
 ## State
 - Keep the STATE file (zplan_state, zplan_state_update; Now, Next, Open, Decisions) current, absolute dates; replace lines, never append. Update only when a decision, the plan or the next step changed, at most once per turn.

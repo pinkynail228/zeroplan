@@ -1051,10 +1051,33 @@ class StateTests(ProfileTest):
             self.peek().guard("milestone")
         self.assertEqual(raised.exception.family, "process.invalid")
 
-    def test_undecided_profile_refuses_new_work_with_the_pending_family(self):
+    def test_undecided_profile_starts_new_work_as_proposed_and_a_damaged_one_still_refuses(self):
+        """p3a A1/A2. A fresh project (state never): `guard` returns the proposal's status and records "later" with the
+        proposal's digest in zplan's own store; the project is not written (git status unchanged). A file that turns malformed or
+        disappears after an accept still refuses with process.invalid / process.missing. Interpretation: a present
+        valid file with no record is settled the same way (recorded, then adopted as accepted by the next read)."""
+        before = self.git("status", "--porcelain")
+        self.assertEqual(self.peek().status().state, "never")
+        proposal = process.resolve(process.propose(self.project, {}), {}, self.project, "proposal")
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            status = Profile.of(authority).guard("plan")
+            self.assertEqual((status.state, status.digest), ("later", proposal.digest))
+            record = process.read_record(authority.directory)
+        self.assertEqual((record["state"], record["digest"]), ("later", proposal.digest))
+        self.assertEqual(self.peek().status().state, "later")
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.git("status", "--porcelain"), before)
+        self.peek().guard("milestone")  # decided now: a pure read
+        self.sidecar().unlink()
+        self.accept_file()
+        self.file.write_text("{broken")
         with self.assertRaises(Blocked) as raised:
-            self.peek().guard("plan")
-        self.assertEqual(raised.exception.family, "process.pending")
+            self.peek().guard("milestone")
+        self.assertEqual(raised.exception.family, "process.invalid")
+        self.remove_accepted_file()
+        with self.assertRaises(Blocked) as raised:
+            self.peek().guard("milestone")
+        self.assertEqual(raised.exception.family, "process.missing")
 
     def test_second_process_reading_does_not_change_the_state(self):
         for args in (("profile",), ("status",)):
@@ -1615,24 +1638,42 @@ class BootstrapPlainTests(ProfileTest):
         self.assertEqual(process.detect_checks(self.project)[0]["argv"], ["make", "test"])
 
     def test_a_unittest_check_needs_a_test_file_that_uses_unittest(self):
-        """C1b U1-U3. A root or tests/ `test_*.py` gives a unittest check only when it has `import unittest` or
-        `from unittest`; a pytest-style file gives none (merge stays off) and the next rule applies (pytest config);
-        an oversized, non-UTF-8 or unreadable file counts as not naming unittest. Interpretation: one naming file
-        among several is enough."""
+        """C1b U1-U3 + p3c A1/A2. A root or tests/ `test_*.py` gives a unittest check only when it has `import unittest`
+        or `from unittest`; a pytest-style file (`import pytest`, `from pytest`, or a top-level `def test_`, no unittest
+        import) gives `python3 -m pytest` after the unittest rules, with or without a pytest config; a test_data.py with
+        neither gives none (merge stays off); an oversized, non-UTF-8 or unreadable file is neither unittest nor
+        pytest-style. Interpretation: one naming file among several is enough; the pytest-style rule reads the same
+        locations as the unittest rules (tests/ recursively, root files only)."""
         argv = lambda: (process.detect_checks(self.project) or [{"argv": None}])[0]["argv"]
+        pytest_argv = ["python3", "-m", "pytest"]
+        (self.project / "test_data.py").write_text("DATA = [1, 2]\n")
+        self.assertEqual(process.detect_checks(self.project), [])
+        (self.project / "test_data.py").write_text("def helper_test_x():\n    pass\n    def test_nested(): pass\n")
+        self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "tests").mkdir()
         (self.project / "test_x.py").write_text("def test_x():\n    assert 1\n")
+        self.assertEqual(process.detect_checks(self.project), [
+            {"name": "test", "argv": pytest_argv, "timeout_s": process.DEFAULT_TIMEOUT}])
+        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "required")
+        (self.project / "test_x.py").unlink()
+        (self.project / "tests" / "test_y.py").write_text("import pytest\n")
+        self.assertEqual(argv(), pytest_argv)
+        (self.project / "tests" / "test_y.py").write_text("from pytest import raises\n")
+        self.assertEqual(argv(), pytest_argv)
         (self.project / "tests" / "test_y.py").write_text("def test_y():\n    assert 1\n")
-        self.assertEqual(process.detect_checks(self.project), [])
-        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "off")
+        self.assertEqual(argv(), pytest_argv)
         (self.project / "pytest.ini").write_text("")
-        self.assertEqual(argv(), ["python3", "-m", "pytest"])
+        self.assertEqual(argv(), pytest_argv)
         (self.project / "pytest.ini").unlink()
         (self.project / "test_big.py").write_text("import unittest\n" + "#" * process.MAX_FILE_BYTES)
         (self.project / "test_bin.py").write_bytes(b"import unittest\n\xff\xfe")
         (self.project / "test_dir.py").mkdir()
+        self.assertEqual(argv(), pytest_argv)
+        (self.project / "tests" / "test_y.py").unlink()
         self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "test_ok.py").write_text("x = 1\nimport unittest\n")
+        self.assertEqual(argv(), ["python3", "-m", "unittest"])
+        (self.project / "test_wc.py").write_text("def test_counts():\n    assert 1\n")
         self.assertEqual(argv(), ["python3", "-m", "unittest"])
         (self.project / "tests" / "test_z.py").write_text("from unittest import TestCase\n")
         self.assertEqual(argv(), ["python3", "-m", "unittest", "discover", "-s", "tests"])
@@ -1678,8 +1719,7 @@ class BootstrapPlainTests(ProfileTest):
         self.assertFalse(self.file.exists())
         self.assertFalse(self.sidecar().exists())
         self.assertEqual(self.peek().status().state, "never")
-        out = self.run_session("q\np\nq\n")
-        self.assertIn("The project's process profile is not accepted yet", out)  # new work is refused until decided
+        self.assertFalse(self.file.exists())
 
     def test_existing_valid_file_is_shown_and_offers_no_later(self):
         self.write({"roles": {"worker": WORKER}})

@@ -1,5 +1,5 @@
 """The Codex home a record acts in: the pure core shared by the engine wiring (s2a2) and the architect continuation
-(s2a3). This slice adds the resolver only; no caller uses it yet (R-4).
+(s2a3). `architect`, `setup` and `engine` call it.
 
 A binding recorded from 0.5 on carries `codex_home` (R-2); a pre-0.5 record carries the four identity fields alone,
 and then the home is the one the owner started zplan with — `setup.legacy_codex_home()`, read from `os.environ` at

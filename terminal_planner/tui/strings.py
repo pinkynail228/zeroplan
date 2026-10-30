@@ -1,6 +1,6 @@
 """Every string of the new main screen, by a stable id, in Russian, English and Chinese.
 
-Nothing renders from this module yet: integration runs i1-i6 switch the main screen to it. Text comes from
+The main screen and its widgets (`tui/app.py`, `chat`, `cards`, `activity`, `modals`, `slash`, `palette`) render every text from it. Text comes from
 `docs/ui-redesign/GLOSSARY.md` (its RU/EN/ZH tables) and from the approved lab `devtools/ui-lab/work.py` (the
 greeting, card copy, canvas titles and empty states, the bar and the `/` command descriptions).
 
@@ -254,6 +254,9 @@ CATALOG = {
                             "ru": "План проверен и покрывает цель. Архитектор утвердит его сам; чтобы остановить — "
                                   "«доработать».",
                             "zh": "计划已核查并覆盖目标。架构师会自行批准；要停止，请选择「修改」。"},
+    "card.plan_milestone": {"en": "{number} {title} · {tasks}", "ru": "{number} {title} · {tasks}",
+                            "zh": "{number} {title} · {tasks}"},
+    "card.plan_more": {"en": "…and {n} more", "ru": "…и ещё {n}", "zh": "…另有 {n} 个"},
     "card.plan_stale_text": {"en": "The project changed after planning, so the plan cannot be approved. Revising "
                                    "rebuilds it.",
                              "ru": "Проект изменился после планирования: утвердить нельзя. Доработка пересоберёт план.",
@@ -305,6 +308,41 @@ CATALOG = {
     "card.commit_declined": {"en": "↻ commit declined, files untouched {time}",
                              "ru": "↻ коммит отклонён, файлы не тронуты {time}",
                              "zh": "↻ коммит отклонён, файлы не тронуты {time}"},
+    # P6: the architect's request (a start, a continue or a new attempt the level leaves to the owner) and the
+    # ask lines of the plan and merge cards (the ru and zh cells are copies of the English text, not translated yet).
+    "card.consent_title": {"en": "The architect asks",
+                          "ru": "The architect asks",
+                          "zh": "The architect asks"},
+    "card.consent_start": {"en": "Start {stage} (plan r{revision})?",
+                          "ru": "Start {stage} (plan r{revision})?",
+                          "zh": "Start {stage} (plan r{revision})?"},
+    "card.consent_resume": {"en": "Continue {stage} (attempt {attempt})?",
+                           "ru": "Continue {stage} (attempt {attempt})?",
+                           "zh": "Continue {stage} (attempt {attempt})?"},
+    "card.consent_rebrief": {"en": "New attempt of {stage}: {note}?",
+                            "ru": "New attempt of {stage}: {note}?",
+                            "zh": "New attempt of {stage}: {note}?"},
+    "card.consent_yes": {"en": "yes",
+                        "ru": "yes",
+                        "zh": "yes"},
+    "card.consent_no": {"en": "no",
+                       "ru": "no",
+                       "zh": "no"},
+    "card.consent_done": {"en": "✓ {lines} {time}",
+                         "ru": "✓ {lines} {time}",
+                         "zh": "✓ {lines} {time}"},
+    "card.consent_failed": {"en": "✗ not done {time}\n{reason}",
+                           "ru": "✗ not done {time}\n{reason}",
+                           "zh": "✗ not done {time}\n{reason}"},
+    "card.consent_declined": {"en": "↻ declined, nothing was done {time}",
+                             "ru": "↻ declined, nothing was done {time}",
+                             "zh": "↻ declined, nothing was done {time}"},
+    "card.plan_asked": {"en": "The architect asks you to approve this plan.",
+                       "ru": "The architect asks you to approve this plan.",
+                       "zh": "The architect asks you to approve this plan."},
+    "card.merge_asked": {"en": "The architect asks you to merge {stage}.",
+                        "ru": "The architect asks you to merge {stage}.",
+                        "zh": "The architect asks you to merge {stage}."},
     "note.commit_no_suspend": {"en": "This terminal cannot be suspended: the commit was not made, run git commit yourself.",
                                "ru": "Этот терминал не поддерживает приостановку: коммит не выполнен, выполните git commit сами.",
                                "zh": "Этот терминал не поддерживает приостановку: коммит не выполнен, выполните git commit сами."},

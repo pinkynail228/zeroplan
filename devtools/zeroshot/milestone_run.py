@@ -1,9 +1,11 @@
 #!/usr/bin/env python3.13
 """Dev runs through zplan's own milestone graph (task D1): `run.sh` with ZS_GRAPH=zplan.
 
-    milestone_run.py documents TASK_FILE OUT_DIR --runtime RUNTIME_JSON [--worktree DIR] [--preamble FILE]
+    milestone_run.py documents TASK_FILE [TASK_FILE...] OUT_DIR --runtime RUNTIME_JSON [--title TITLE] [--worktree DIR]
+        [--preamble FILE]
 
-Turns a devtools/zeroshot task file into a one-milestone, one-task proposal and writes graph.json, runtime.json,
+Turns devtools/zeroshot task files into a one-milestone proposal, one slice and task per file in the given order (the
+product's driver runs them in turn and its final check once; H1, docs/PLAN_0.9.md), and writes graph.json, runtime.json,
 input.json and baseline.json from `runs.build_documents` (the product's own builder, with the preflight node first).
 The task file: the first line is the title; the text up to the first header is the goal; headers at a line start are
 `Why:`, `Reuse:`, `Write-set:`, `Acceptance criteria...:` (items `- Cn text ... Example: ...`), `Non-goals...:`,
@@ -102,10 +104,13 @@ def brief_task(text):
     return title, {"id": "T1", "title": title, "checks": checks, "brief": brief}
 
 
-def proposal(title, task):
-    return {"requirements": [{"id": "R1", "text": title}],
+def proposal(title, tasks):
+    """One milestone `title`; task n (titled) becomes slice Sn owning requirement Rn, in the given order."""
+    named = [(task_title, dict(task, id="T%d" % n)) for n, (task_title, task) in enumerate(tasks, 1)]
+    return {"requirements": [{"id": "R%d" % n, "text": task_title} for n, (task_title, _) in enumerate(named, 1)],
             "milestones": [{"id": "M1", "title": title, "depends_on": [], "slices": [
-                {"id": "S1", "title": title, "requirements": ["R1"], "tasks": [task]}]}]}
+                {"id": "S%d" % n, "title": task_title, "requirements": ["R%d" % n], "tasks": [task]}
+                for n, (task_title, task) in enumerate(named, 1)]}]}
 
 
 def roles(runtime):
@@ -126,10 +131,22 @@ def roles(runtime):
 def documents(args):
     try:
         runtime = json.loads(Path(args.runtime).read_text())
-        title, task = brief_task(Path(args.task_file).read_text())
+        *files, args.out_dir = args.paths
+        if not files:
+            raise Refused("no task file")
+        tasks = []
+        for name in files:
+            try:
+                tasks.append(brief_task(Path(name).read_text()))
+            except Refused as error:
+                raise Refused("%s: %s" % (name, error))
+        if len(tasks) > 1 and not args.title:
+            raise Refused("several task files need --title (the milestone's title)")
         if args.preamble:
-            task["brief"]["reuse"] = (task["brief"]["reuse"] + "\n\n" + Path(args.preamble).read_text().strip()).strip()
-        built = build_documents(proposal(title, task), "M1", 1, roles(runtime), checker(args.worktree))
+            for _, task in tasks:
+                task["brief"]["reuse"] = (task["brief"]["reuse"] + "\n\n" + Path(args.preamble).read_text().strip()).strip()
+        title = args.title or tasks[0][0]
+        built = build_documents(proposal(title, tasks), "M1", 1, roles(runtime), checker(args.worktree))
         built["runtime"].update({k: runtime[k] for k in ("harness", "provider", "size") if k in runtime})
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -173,8 +190,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="milestone_run.py")
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("documents")
-    command.add_argument("task_file")
-    command.add_argument("out_dir")
+    command.add_argument("paths", nargs="+", metavar="TASK_FILE... OUT_DIR")
+    command.add_argument("--title")
     command.add_argument("--runtime", required=True)
     command.add_argument("--worktree")
     command.add_argument("--preamble")
@@ -182,7 +199,7 @@ def main(argv=None):
     try:
         documents(args)
     except Refused as error:
-        print("milestone_run: %s: %s" % (args.task_file, error), file=sys.stderr)
+        print("milestone_run: %s" % error, file=sys.stderr)
         return 2
     return 0
 

@@ -480,6 +480,15 @@ class NextStepTests(LiveShell):
             self.assertNotRegex(lines[0], r"\[[a-z]\]")
             self.assertIn("[%s]" % key, plain[-1])  # the line UI still names it, from the same table
             self.assertIn(command, [c.name for c in slash.COMMANDS])
+            if outcome == "failed_recoverable":  # p4a: the resume acts at once, no screen opens for it
+                resumed = []
+                original = FixtureDriver.resume
+                with patch.object(FixtureDriver, "resume",
+                                  lambda driver, r, run_id: (resumed.append(run_id), original(driver, r, run_id))[1]):
+                    await self.command(pilot, command)
+                    await self.until(pilot, lambda: len(resumed) == 1)
+                self.assertNotIn(type(self.app.screen).__name__, ("ConfirmScreen", "EnterConfirmScreen"))
+                return
             await self.command(pilot, command)  # the command it names works from home
             await pilot.pause(0.5)
             self.assertNotEqual(type(self.app.screen).__name__, "MainScreen", self.flat())
@@ -513,7 +522,7 @@ class KeyBarTests(LiveShell):
             self.assertTrue(known_item(key, label), (where, key, label, line))  # no word cut mid-way
 
     async def test_la5_no_bar_cuts_a_word_and_the_modal_actions_are_labelled(self):
-        """i2: the bars still built by `catalog.bar` — the plan screen, the start confirmation, a details/text
+        """i2: the bars still built by `catalog.bar` — the plan screen, a details/text
         modal and the help — cut no word and keep every label. Interpretation: the home and running legs this test
         used to pin (`[g] запустить` on the panel bar, `[x] остановить` while a stage runs) named the old *main*
         key bar, which i2 replaced with `activity.Bar`; the new main row is checked in `tests/test_tui_commands.py`
@@ -538,11 +547,7 @@ class KeyBarTests(LiveShell):
                     await pilot.press("escape")
                     await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
                     await self.panel(pilot)  # R-A: the input has the focus after the plan screen
-                    await self.command(pilot, "/run")  # [g] starts the focused milestone
-                    await self.shows(pilot, "Start M1")
-                    await self.until(pilot, lambda: type(self.app.screen).__name__ == "EnterConfirmScreen")
-                    self.assert_intact(screen_lines(self.app)[-1], "confirm")
-                    await self.press_button(pilot, "yes")
+                    await self.command(pilot, "/run")  # [g] starts the focused milestone; p4a: no confirmation
                     await self.until(pilot, lambda: self.app.run_watch is not None)
                     await self.command(pilot, "/details")
                     await self.until(pilot, lambda: type(self.app.screen).__name__ == "TextScreen")
@@ -773,9 +778,7 @@ class PlanScreenTests(PlanningShell):
             await self.shows(pilot, "The planner finished")
             await self.command(pilot, "/view")
             await self.shows(pilot, "r1 · 2")
-            await self.press_button(pilot, "approve")
-            await self.shows(pilot, "Approve plan r1?")
-            await self.press_button(pilot, "yes")
+            await self.press_button(pilot, "approve")  # p4a: the button is the consent, nothing asks again
             await self.until(pilot, lambda: self.app.finish_note == "")
             await pilot.press("escape")
             await pilot.pause(0.3)
@@ -789,8 +792,8 @@ class PlanScreenTests(PlanningShell):
                 await self.panel(pilot)  # D4: the input has the start focus; [p]/[a] are pane keys
                 await self.command(pilot, "/view")
                 await self.shows(pilot, "r1 · 2")
-                await self.press_button(pilot, "approve")
-                await self.shows(pilot, "Approve plan r1?")
+                await self.press_button(pilot, "reject")  # p4a: approve acts at once; reject still asks
+                await self.shows(pilot, "Reject proposal r1?")
                 text = screen_text(self.app)
                 for line in ("r1 · 2", planning.goal_line("", 100, "home.details") + "Add a README paragraph", "M1 First usable increment",
                              "T1 Implement the agreed behavior", "M2 Independent verification",
@@ -1016,9 +1019,11 @@ class MergeEvidenceTests(ProjectTest):
     destination base to the result commit (the diff the end screen shows); `decision` is `autonomy.decide` on the
     profile read of the same rows job; `more` is the count of changed files beyond the 20 named."""
 
-    def attempt(self, level="auto", export=True):
+    def attempt(self, level="auto", export=True, tier=None):
         profile = {"preset": process.PRESET_V2, "autonomy": {"level": level},
                    "gates": {"merge": "required"}, "checks": [{"name": "unit", "argv": ["true"], "timeout_s": 60}]}
+        if tier is not None:
+            profile["risk"] = {"rules": [{"paths": ["**"], "tier": tier}]}
         (self.project / process.PROFILE_FILE).write_text(json.dumps(profile))
         with Authority(self.state, self.project) as authority:
             process.Profile.of(authority).accept()
@@ -1065,9 +1070,15 @@ class MergeEvidenceTests(ProjectTest):
         self.assertEqual((merge["more"], merge["gate"], merge["checks"], merge["decision"]),
                          (0, "required", ["unit"], "allow"))
 
-    def test_c1_the_decision_is_the_policy_for_the_level(self):
-        self.attempt(level="supervised")
-        self.assertEqual(self.row()["merge"]["decision"], "ask")
+    def test_c1_the_decision_is_the_policy_for_the_level_and_the_risk(self):
+        """p2a A4: the row's `decision` follows the merge matrix: supervised asks on a high-risk change and allows a
+        low-risk one, manual asks whatever the risk (every path is put at one tier by a `**` rule)."""
+        for level, tier, decision in (("supervised", "high", "ask"), ("supervised", "low", "allow"),
+                                      ("manual", "low", "ask")):
+            with self.subTest(level=level, tier=tier):
+                self.setUp()
+                self.attempt(level=level, tier=tier)
+                self.assertEqual(self.row()["merge"]["decision"], decision)
 
     def test_c1_files_are_cut_at_twenty_and_the_rest_counted(self):
         from terminal_planner.tui import controller as controller_module

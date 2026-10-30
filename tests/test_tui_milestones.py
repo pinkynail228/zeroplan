@@ -20,6 +20,7 @@ from terminal_planner.authority import Authority, Blocked, atomic_state, decode
 from terminal_planner.cli import session
 from terminal_planner.delivery import Delivery
 from terminal_planner.engine import FixtureEngine
+from terminal_planner.process import ProfileChanged
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
 from terminal_planner.tui import strings
 from test_terminal_planner import ROLES, ScriptedTerminal
@@ -159,11 +160,10 @@ class MilestoneShell(ShellTest):
         return output.getvalue()
 
     async def begin_run(self, pilot):
-        """Panel focus, [g] on the focused milestone, the confirmation."""
-        await self.panel(pilot)  # D4: the chat input holds the start focus; [g] is a pane key
+        """The typed `/run` from the chat input: p4a, the command is the consent, so the start needs no confirmation.
+        The input keeps the focus, as it did after the old confirmation closed (`command` hands a pane focus back
+        with a Tab only when no modal opened, and that Tab would show «План»)."""
         await self.command(pilot, "/run")
-        await self.shows(pilot, "Start M1")
-        await self.press_button(pilot, "yes")
 
     def end_card(self):
         """The card mounted inline in the main screen's conversation, or None (i3e2, i3-chat-inline): a failed stage
@@ -219,6 +219,7 @@ class MilestoneShell(ShellTest):
 
 class JourneyTests(MilestoneShell):
     async def test_b2_start_progress_done_diff_merge_and_cancelled_confirmations_change_nothing(self):
+        """p4a A1/A3: `/run` starts M1 with no confirmation; `/stop` still asks and «no» leaves the run going."""
         self.approve(running=False)
         head = self.head()
         self.driver.gate.clear()
@@ -226,20 +227,10 @@ class JourneyTests(MilestoneShell):
             await self.loaded(pilot)
             await self.panel(pilot)  # D4: the input has the start focus; [g] is the pane's start key
             self.assertIn("M1 First usable increment ready", self.flat())
+            # p4a: the typed `/run` is the consent. No confirm screen opens and the start goes out at once.
             await self.command(pilot, "/run")
-            await self.shows(pilot, "Start M1 · First usable increment?")
-            self.assertIn("Plan r1 · attempt 1", self.flat())
-            await self.press_button(pilot, "no")  # cancelled start: nothing created, nothing sent
-            await pilot.pause(0.3)
-            self.assertEqual((self.driver.sent, self.driver.slices), ([], 0))
-            # i9/A4: no run is under way, so the canvas frame keeps its idle title (the old chat pane title
-            # `Прогон M1` is gone with the header look; the run state now lives in the frame's title and the bar).
-            self.assertEqual(self.app.query_one("#right").border_title,
-                            "%s · %s" % (self.app.snapshot.project, strings.text("bar.idle")))
-            await self.command(pilot, "/run")
-            await self.shows(pilot, "Start M1")
-            await self.press_button(pilot, "yes")
             await self.until(pilot, self.driver.entered.is_set)
+            self.assertNotIn(type(self.app.screen).__name__, ("ConfirmScreen", "EnterConfirmScreen"))
             # Live state before completion: the row carries the phase and the task progress; the left pane the run.
             await self.plan_shows(pilot, "running · task 1/1 (T1)")
             running = next(row for row in self.app.rows() if row.state == "running")
@@ -323,6 +314,34 @@ class JourneyTests(MilestoneShell):
         self.assertEqual([(r["attempt"], r["outcome"]) for r in runs], [(1, "needs_owner"), (2, "done")])
         self.assertEqual((runs[1]["context"]["kind"], runs[1]["context"]["text"]), ("answer", "Keep the scope."))
         self.assertEqual(len(self.driver.sent), 2)
+
+    async def test_p4a_a4_a_changed_profile_stops_the_start_and_the_next_run_starts(self):
+        """p4a A4/A1: when the profile moved after the preview, `/run` starts nothing: it writes «Not started: …»
+        with the fresh preview line and opens no confirm screen; the owner starts again with `/run`, which then
+        starts at once. Interpretation: the profile change is simulated by the first `Delivery.start` raising
+        `ProfileChanged` (the service's own refusal, `delivery.py:882`); the fresh preview is the real one."""
+        self.approve(running=False)
+        original = Delivery.start
+        refused = []
+
+        def start(delivery, preview, roles):
+            if not refused:
+                refused.append(preview.milestone)
+                raise ProfileChanged("The process profile changed after the preview: check the new values.")
+            return original(delivery, preview, roles)
+        async with self.shell(size=(120, 40), follow=True) as pilot:
+            await self.loaded(pilot)
+            await self.panel(pilot)
+            with patch.object(Delivery, "start", start):
+                await self.command(pilot, "/run")
+                await self.shows(pilot, "Not started: ")
+                self.assertIn("The process profile changed", self.flat())
+                self.assertIn("Start M1", self.flat())  # the fresh preview line
+                self.assertNotIn(type(self.app.screen).__name__, ("ConfirmScreen", "EnterConfirmScreen"))
+                self.assertEqual((self.driver.sent, self.driver.slices), ([], 0))
+                await self.command(pilot, "/run")
+                await self.until(pilot, lambda: len(self.driver.sent) == 1)
+        self.assertEqual(refused, ["M1"])
 
     async def test_b3_blocked_offers_answer_and_plan_only_and_a_scope_change_goes_to_plan_revision(self):
         self.driver.outcomes = ("blocked",)
@@ -1227,8 +1246,6 @@ class UxNoteTests(MilestoneShell):
             await self.shows(pilot, "Not started")
             readiness.fix("branch")  # fixed outside; nothing asked the app to look yet
             await self.command(pilot, "/run")
-            await self.shows(pilot, "Start M1")
-            await self.press_button(pilot, "yes")
             await self.until(pilot, lambda: len(self.driver.sent) == 1)
             await self.until(pilot, lambda: self.app.checks is not None
                              and all(c.ok for c in self.app.checks))
@@ -1816,7 +1833,6 @@ class PaneTabTests(MilestoneShell):
                     self.assertEqual(self.tab(), self.ui.TAB_PLAN)  # nothing active at the first snapshot
                     await self.begin_run(pilot)  # [g] [y]: the attempt starts and the app watches it
                     await self.until(pilot, lambda: self.app.run_watch is not None)
-                    await pilot.pause(0.2)
                     self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # F9: a start shows «Сейчас» once, the owner chose none
                     self.driver.gate.set()
                     await self.until(pilot, lambda: self.app.run_watch is None)

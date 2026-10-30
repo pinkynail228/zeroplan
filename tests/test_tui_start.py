@@ -373,6 +373,10 @@ class StartTests(unittest.TestCase):
             self.assertNotIn("~/my-project", seen["text"])
             self.assertTrue(seen["error"])
             self.assertFalse((disk / ".git").exists())
+            with patch.object(start.os, "access", return_value=False):  # u4n3: a read-only top of a disk, like `/`
+                self.run_app(disk, look)
+            self.assertIn("mkdir ~/my-project", seen["text"])
+            self.assertNotIn("%s/my-project" % disk.resolve(), seen["text"])
             with self.assertRaises(start.StartError):
                 start.create_project(disk)
             self.assertFalse((disk / ".git").exists())

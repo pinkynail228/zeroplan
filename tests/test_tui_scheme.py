@@ -175,22 +175,47 @@ class SchemeTests(unittest.TestCase):
                           "acceptance_review": {"state": "succeeded"},
                           "code_review": {"state": "failed"},
                           "final_verify": {"state": "running"},
-                          "select": {"state": "running"},
+                          "select": {"state": "running"}, "select_init": {"state": "succeeded"},
+                          "preflight": {"state": "succeeded"},
                           "review_loop": {"count": 2}})
         idle = scheme.observation_from_flow({"worker": {"state": "done"},
                                              "reviewers": [{"role": "acceptance_review", "state": "waiting"}],
                                              "final": {"state": "waiting"}, "select": False, "round": None,
                                              "command": None})
-        self.assertEqual(idle, {"worker": {"state": "succeeded"}, "acceptance_review": {"state": "idle"}})
+        self.assertEqual(idle, {"worker": {"state": "succeeded"}, "acceptance_review": {"state": "idle"},
+                                "preflight": {"state": "succeeded"}})
 
-    def test_observation_marks_the_steps_before_a_picked_task_succeeded(self):
-        """C4 J3: a flow with a picked task and no pick running has preflight, select_init and select_verify
-        behind it; a running pick, or a flow without a task, marks none of them."""
+    def test_observation_marks_the_steps_behind_the_run_succeeded(self):
+        """C4 J3, u6 A1/A2: the steps behind the run are succeeded. A picked task with no pick running has
+        preflight, select_init and select_verify behind it; a pick that runs after a round or a task has preflight and
+        select_init behind it, the first pick only preflight; a worker, reviewer or final step past waiting
+        has preflight behind it; a waiting worker carries no command, a running one the program name.
+        Interpretation: "present" state means a state other than waiting."""
         done = {"state": "succeeded"}
         obs = scheme.observation_from_flow({"task": "T1", "worker": {"state": "running"}, "select": False})
         self.assertEqual((obs["preflight"], obs["select_init"], obs["select_verify"]), (done, done, done))
-        self.assertNotIn("preflight", scheme.observation_from_flow({"task": "T1", "select": True}))
-        self.assertNotIn("preflight", scheme.observation_from_flow({"task": None, "worker": {"state": "running"}}))
+        obs = scheme.observation_from_flow({"select": True, "round": 1, "worker": {"state": "waiting"}})
+        self.assertEqual((obs["preflight"], obs["select_init"], obs["select"]), (done, done, {"state": "running"}))
+        self.assertNotIn("select_verify", obs)
+        obs = scheme.observation_from_flow({"task": "T1", "select": True})
+        self.assertEqual((obs["preflight"], obs["select_init"]), (done, done))
+        obs = scheme.observation_from_flow({"select": True})  # the first pick
+        self.assertEqual(obs, {"preflight": done, "select": {"state": "running"}})
+        for flow in ({"worker": {"state": "running"}}, {"final": {"state": "running"}},
+                     {"reviewers": [{"role": "code_review", "state": "rejected"}]}):
+            obs = scheme.observation_from_flow(flow)
+            self.assertEqual(obs["preflight"], done)
+            self.assertNotIn("select_init", obs)
+        before = scheme.observation_from_flow({"task": None, "worker": {"state": "waiting"},
+                                               "reviewers": [{"role": "code_review", "state": "waiting"}],
+                                               "final": {"state": "waiting"}, "select": False})
+        self.assertNotIn("preflight", before)
+        command = "/bin/zsh -lc 'pytest -q'"
+        waiting = scheme.observation_from_flow({"select": True, "worker": {"state": "waiting"}, "command": command})
+        self.assertEqual(waiting["worker"], {"state": "idle"})
+        running = scheme.observation_from_flow({"select": True, "worker": {"state": "running"}, "command": command})
+        self.assertEqual(running["worker"], {"state": "running", "detail": "pytest"})
+        self.assertNotIn("worker", scheme.observation_from_flow({"command": command}))
 
     def test_preflight_word_and_conflict_reviewer_state(self):
         """C3: an active `preflight` node renders «preflight» in the milestone scheme, and a reviewer whose
@@ -200,7 +225,8 @@ class SchemeTests(unittest.TestCase):
         flow = {"reviewers": [{"role": "acceptance_review", "state": "conflict"},
                               {"role": "code_review", "state": "accepted"}]}
         self.assertEqual(scheme.observation_from_flow(flow),
-                         {"acceptance_review": {"state": "failed"}, "code_review": {"state": "succeeded"}})
+                         {"acceptance_review": {"state": "failed"}, "code_review": {"state": "succeeded"},
+                          "preflight": {"state": "succeeded"}})
 
     def test_a5_failed_and_error_styles_differ(self):
         """A5: the one style check — a rejected reviewer's ✗ and a broken worker's ! must not look the same."""

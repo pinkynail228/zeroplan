@@ -3,8 +3,8 @@
 R3 (the Plan tab names `/run`) is pure and pinned in tests/test_tui_look.py. Here:
 
 - R1 + R4 (the one whole-app walk): a proposed fixture plan, the chat input focused all the way, no Tab and no
-  letter key (the start confirmation is answered with Enter). The keys `/`, esc, ←/→ and enter work; `/approve` + Enter approves r1; `/run` + Enter opens the start
-  confirmation [g] opens ("Start M1"); Enter answers «yes» (`EnterConfirmScreen`: Enter and the Russian-layout `y`) and gives the driver exactly one submission, for M1; ctrl+q ends the app.
+  letter key. The keys `/`, esc, ←/→ and enter work; `/approve` + Enter approves r1; `/run` + Enter starts M1 at once
+  (p4a: the typed command is the consent, no start confirmation) and gives the driver exactly one submission, for M1; ctrl+q ends the app.
 - R2: `ZplanApp.action_run_next` on a stand-in app (no Textual widget runs): no row to start gives the one line
   «Not done: no stage is ready to start.» and no start branch; a busy slot hands the held-back ready row to
   `action_run_milestone`, whose own busy branch writes the existing busy note.
@@ -201,9 +201,6 @@ class RunCommandShell(MilestoneShell):
             await self.type(pilot, "/approve\n")
             await self.until(pilot, lambda: any(r.startable for r in self.app.rows()))
             await self.type(pilot, "/run\n")
-            await self.shows(pilot, "Start M1")
-            self.assertEqual(self.driver.sent, [])
-            await pilot.press("enter")  # «yes» without a letter key (a Russian layout has no Latin `y`)
             await self.until(pilot, lambda: len(self.driver.sent) == 1)
             self.assertEqual(self.app.focused.id, "input", screen_text(self.app))
             self.assertEqual(len(self.driver.sent), 1)

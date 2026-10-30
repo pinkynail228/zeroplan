@@ -188,7 +188,7 @@ Profile states of a project (shown by `zplan doctor`, `zplan profile` and Settin
 
 | State | Meaning | New plans and milestones | Watching, stopping, export |
 | --- | --- | --- | --- |
-| `never` | Neither accepted nor postponed; the proposal (or an existing valid file) is shown on the first start. | Refused until you accept or postpone (`process.pending`). | Work. |
+| `never` | Neither accepted nor postponed; the proposal (or an existing valid file) is shown on the first start. | Allowed with the proposal's values, frozen like a chosen profile; nothing is written to the project until you accept. | Work. |
 | `later` | Postponed: the snapshot of the shown proposal, stored outside the project, is used; header «profile not saved». If the file appears it is accepted. | Allowed with the snapshot values. | Work. |
 | `accepted` | `zplan.process.json` is present and valid; the decision is recorded in `process-state.json`. | Allowed with the file's values. Edits are picked up before the next submission or start; a change between a preview and its confirmation is refused and shown again (`process.changed`). | Work. |
 | `missing` | The accepted file was deleted or the branch lacks it. | Refused with the fix (`process.missing`). | Work. |
@@ -565,7 +565,6 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `engine.rejected` | Zeroshot deterministically rejected an operation. | A contract or admission refusal. | `zplan doctor`; diagnostics under [i]. |
 | `engine.bad_output` | Zeroshot returned oversized or malformed output. | A tool/version mismatch. | `zplan doctor`; reinstall with `zplan setup` if it persists. |
 | `engine.identity_changed` | The pinned executable or its state changed. | Binary replaced or version mismatch. | Use the original isolated paths or reinstall. |
-| `journal.history_unavailable` | The engine's run history could not be read for the journal. | `zeroshot ui` did not start or answer, or returned malformed data. | `zplan doctor`; the journal catches up later. |
 | `toolchain.mismatch` | A plan or run is frozen on another Zeroshot toolchain whose executable is gone or changed. | A newer zplan release replaced the default toolchain and the recorded executable no longer matches its sha256. | Finish it on the older zplan (its tools directory is kept), or start over from a new plan revision on the current toolchain. |
 | `engine.checkout` | The disposable planner checkout is missing or could not be prepared. | Disk, Git or an interrupted preparation. | Retry with a new revision ([n]); frozen history stays. |
 | `engine.intent_changed` | The frozen submission no longer matches its record. | Hand-edited state. | Not resumable; prepare a new revision ([n]). |
@@ -637,7 +636,6 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `process.invalid` | The project's zplan.process.json (or its rules/checks) is not valid. | A hand edit with an unknown key, a wrong type, an empty command or a rules path outside the repository. | Fix the key named in the message, or delete the file and run `zplan profile init`. |
 | `process.state` | The profile's acceptance record in zplan's state directory is damaged. | A hand edit or an interrupted write by another tool. | Delete the file named in the message; the profile is offered again. Plans and runs are untouched. |
 | `process.missing` | The accepted zplan.process.json is gone from the project. | The file was deleted or the branch without it was checked out. | `git checkout -- zplan.process.json`, or `zplan profile init` to create it again. |
-| `process.pending` | The project's process profile was neither accepted nor postponed. | The first-start choice was not made (the screen was left). | Start zplan and choose accept or later, or run `zplan profile init`. |
 | `process.unbuilt` | A gate the profile requires is not implemented in this version. | gates.task is `required`. | Set the gate to `off` in zplan.process.json. |
 | `process.changed` | The profile changed after the preview was shown. | zplan.process.json or the saved roles were edited meanwhile. | Look at the preview shown again and confirm it. |
 | `tui.unavailable` | The full-screen interface cannot start. | Textual is missing or not importable. | `zplan --plain`, or reinstall zplan. |

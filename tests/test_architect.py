@@ -244,12 +244,22 @@ class ArchitectTests(unittest.TestCase):
         self.assertIn("autonomy level", text)
         self.assertIn("merge.critic_pending", text)  # the retry instruction is stated
 
-    def test_c2_the_rules_forbid_asking_for_a_yes_in_the_chat_under_a_project_method_and_on_updates(self):
-        """C2 K2: the rule that an action the level leaves to the owner is never asked for in the chat is in
-        TOOL_RULES, so the first prompt under a project `zplan.architect.md` and the resumed-turn update carry it."""
+    def test_c2_the_rules_say_a_call_the_level_leaves_to_the_owner_becomes_a_card_and_forbid_a_yes_in_the_chat(self):
+        """C2 K2 / p6b A3: the rule that an action the level leaves to the owner is a card, said in one line and never
+        asked for in the chat, is in TOOL_RULES, so the first prompt under a project `zplan.architect.md` and the
+        resumed-turn update carry it; the shipped method's Plan and Merge lines say the same. Interpretation: the
+        rule is pinned by the key phrases `becomes a card` and `never ask for a yes in the chat` of the
+        whitespace-normalized text, and the old reason alone (`a chat reply cannot do it`) is no longer the rule."""
         (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
         for text in (build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
+            text = " ".join(text.split())
+            self.assertIn("becomes a card", text)
             self.assertIn("never ask for a yes in the chat", text)
+            self.assertNotIn("a chat reply cannot do it", text)
+        method = " ".join(architect.method().split())
+        self.assertIn("becomes a card", method)
+        self.assertIn("never ask for a yes in the chat", method)
+        self.assertIn("the owner's merge card", method.split("## Merge")[1])
 
     def test_a8_f4_the_rules_send_a_rejected_check_to_revise_and_keep_edit_for_the_owners_text(self):
         """A8 F4: the tool rules say to read the findings in zplan_status after a rejected check and call
@@ -681,6 +691,9 @@ class ArchitectTests(unittest.TestCase):
         self.assertLessEqual(len(raw), 4600)
         self.assertNotIn("devtools/", method)
         self.assertNotIn("new and changed tests", method)
+        self.assertNotIn("1.5x", method)
+        self.assertIn("merge gate raises the independent critic", method)
+        self.assertIn("only the owner can override it", method)
         self.assertIn("Done = the task's DoD passes, not the suite.", method)
         self.assertIsNone(re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}[./]\d{1,2}[./]\d{4}", method))
         for text in (text, update):

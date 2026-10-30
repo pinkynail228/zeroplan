@@ -51,10 +51,8 @@ class PlanGateShell(tpr.ProfileTest, PlanningShell):
         self.assertTrue(lines)  # the planner's dispute response is among the services' lines (their words are not pinned)
         async with self.shell(size=(140, 50)) as pilot:
             await self.open_plan(pilot)
-            await self.press_button(pilot, "approve")
-            await self.shows(pilot, "Approve plan r1?")
-            await self.press_button(pilot, "yes")
-            await self.until(pilot, lambda: type(self.app.screen).__name__ != "ConfirmScreen")
+            await self.press_button(pilot, "approve")  # p4a: the button is the consent, no second question
+            await self.until(pilot, lambda: self.app.snapshot.status == "approved")
             await pilot.pause(0.5)
         self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
 
@@ -69,8 +67,6 @@ class PlanGateShell(tpr.ProfileTest, PlanningShell):
         async with self.shell(self.controller(profile=True), size=(140, 50)) as pilot:
             await self.open_plan(pilot)
             await self.press_button(pilot, "approve")
-            await self.shows(pilot, "Approve plan r1?")
-            await self.press_button(pilot, "yes")
             await self.shows(pilot, "/view → revise")  # the refusal's `[r]` hint as the TUI step (K1d glossary)
         self.assertEqual(self.sidecar().parent.joinpath("planning.json").read_bytes(), before)
         self.assertEqual(self.stored()["revisions"][0]["status"], "proposed")
@@ -80,7 +76,7 @@ class PlanGateShell(tpr.ProfileTest, PlanningShell):
     def planning_json(self):
         return self.sidecar().parent / "planning.json"
 
-    async def test_o4_the_override_form_cancels_refuses_a_short_reason_and_approves_with_a_valid_one(self):
+    async def test_o4_the_override_form_cancels_refuses_a_too_long_reason_and_approves_with_a_valid_one(self):
         self.argued("exhausted")
         path = self.planning_json()
         before = path.read_bytes()
@@ -97,9 +93,9 @@ class PlanGateShell(tpr.ProfileTest, PlanningShell):
             self.assertEqual(path.read_bytes(), before)
             await self.press_button(pilot, "override")
             await self.shows(pilot, "Approve plan r1 despite the check?")
-            await self.type(pilot, "too short")
+            await self.type(pilot, "x" * 501)
             await self.press_button(pilot, "send")
-            await self.shows(pilot, "500")  # the refusal names the reason length range (10-500)
+            await self.shows(pilot, "at most 500")  # the refusal names the reason length limit
             self.assertEqual(path.read_bytes(), before)
             await self.press_button(pilot, "override")
             await self.shows(pilot, "Approve plan r1 despite the check?")

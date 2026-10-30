@@ -18,6 +18,7 @@ import copy
 from dataclasses import dataclass, field, replace
 import errno
 import hashlib
+import itertools
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -46,6 +47,7 @@ AUTONOMY_LEVELS = ("auto", "supervised", "manual")
 # The whole-number `autonomy` keys -> (low, high); `level` is checked against AUTONOMY_LEVELS instead.
 AUTONOMY_RANGES = {"max_runs": (1, 5), "worker_round_minutes": (5, 240), "run_minutes": (10, 1440),
                    "structural_round": (2, 10), "wakeups_per_hour": (1, 60), "architect_retries": (0, 10)}
+PARALLEL_RUNS_CAP = 3  # the engine's own cap on active milestone runs (runs.MAX_RUNS): a saved 4 or 5 acts as 3
 TOP_KEYS = ("preset", "rules", "roles", "gates", "limits", "autonomy", "risk", "checks")
 V2_KEYS = ("autonomy", "risk")  # the top keys only zplan.default/2 carries
 RISK = ("rules", "triggers")
@@ -69,7 +71,7 @@ OFF = "no check"
 NO_QUALIFICATION = "no qualification"
 LATER_NOTE = "profile not saved"
 NEXT_STAGES = "for later stages"
-LEVEL_NAMES = {"auto": "auto", "supervised": "ask about the plan", "manual": "ask about everything"}  # the owner's words for autonomy.level
+LEVEL_NAMES = {"auto": "auto", "supervised": "ask about the plan and risky merges", "manual": "ask about everything"}  # the owner's words for autonomy.level
 UNBUILT = {"task": "the task check is not built yet: turn it off in " + PROFILE_FILE}
 SOURCE_NAMES = {"file": PROFILE_FILE, "user": "roles.json", "preset": "preset " + PRESET, "proposal": "proposal",
                 "snapshot": "profile snapshot"}
@@ -639,7 +641,8 @@ def detect_checks(root):
     """The one obvious test command, found by reading files only (nothing is executed): package.json scripts.test,
     else a Makefile `test:` target, else pytest when it is configured, else `test_*.py` files under tests/ (unittest
     discovery), else `test_*.py` files directly in the root (unittest's own discovery), each only when one such file
-    imports unittest; otherwise none."""
+    imports unittest; else the same files when one imports pytest or defines a top-level `def test_` (pytest-style
+    tests without a pytest configuration); otherwise none."""
     root = Path(root)
     manifest = root / "package.json"
     try:
@@ -670,17 +673,31 @@ def detect_checks(root):
             return [{"name": "test", "argv": ["python3", "-m", "unittest"], "timeout_s": DEFAULT_TIMEOUT}]
     except OSError:
         pass
+    try:
+        if any(_pytest_style(path) for path in itertools.chain((root / "tests").rglob("test_*.py"), root.glob("test_*.py"))):
+            return [{"name": "test", "argv": ["python3", "-m", "pytest"], "timeout_s": DEFAULT_TIMEOUT}]
+    except OSError:
+        pass
     return []
 
 
 def _names_unittest(path):
     """Whether a test file (read, never run) has an `import unittest` or `from unittest` line; a file that is
     unreadable, over MAX_FILE_BYTES or not UTF-8 counts as not naming it."""
+    return _file_matches(path, r"^[ \t]*(?:import|from)[ \t]+unittest\b")
+
+
+def _pytest_style(path):
+    """Whether a test file (read, never run) is pytest-style: no unittest import, and an `import pytest` / `from pytest`
+    line or a top-level `def test_`; unreadable, oversized or non-UTF-8 files are not."""
+    return not _names_unittest(path) and _file_matches(path, r"^(?:[ \t]*(?:import|from)[ \t]+pytest\b|def[ \t]+test_)")
+
+
+def _file_matches(path, pattern):
     try:
         if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
             return False
-        return re.search(r"^[ \t]*(?:import|from)[ \t]+unittest\b", path.read_text(encoding="utf-8"),
-                         re.MULTILINE) is not None
+        return re.search(pattern, path.read_text(encoding="utf-8"), re.MULTILINE) is not None
     except (OSError, UnicodeError):
         return False
 
@@ -742,8 +759,14 @@ class Form:
 
 def form_of(config):
     autonomy = config.get("autonomy", {})
-    return Form(autonomy.get("level"), autonomy.get("max_runs"), config["gates"]["merge"], bool(config["checks"]),
+    return Form(autonomy.get("level"), parallel_runs(autonomy.get("max_runs")), config["gates"]["merge"], bool(config["checks"]),
                 tuple((name, config["roles"][name]["model"], config["roles"][name]["effort"]) for name in ROLES))
+
+
+def parallel_runs(value):
+    """The parallel milestone runs a profile's `autonomy.max_runs` admits: the value capped at PARALLEL_RUNS_CAP,
+    None for an absent one."""
+    return min(value, PARALLEL_RUNS_CAP) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 CHANGE_KEYS = ("level", "max_runs", "merge", "roles")
@@ -1183,7 +1206,14 @@ class Profile:
         status = self.status()
         if status.state != "never" or status.present:
             raise Blocked("The profile is already decided or a file was found: accept it.", family="action.refused")
-        shown = status.resolved  # the proposal the bootstrap screen shows: rules and checks found, not the bare preset
+        return self.settle(status)
+
+    def settle(self, status):
+        """A "never" status becomes "later" for the proposal it shows (rules and checks found, not the bare preset):
+        stored outside the project, the project is not written. Any other status is returned as it is."""
+        if status.state != "never":
+            return status
+        shown = status.resolved
         self._write(make_record("later", shown.digest, snapshot_of(shown)))
         return self.status()
 
@@ -1191,11 +1221,9 @@ class Profile:
 
     def guard(self, kind):
         """The shared refusal for a new planning ("plan"), milestone ("milestone") or merge ("merge") action;
-        returns the Status whose resolved configuration the action must use. Raises before any side effect."""
+        returns the Status whose resolved configuration the action must use. An undecided profile ("never") works as
+        proposed: it is recorded as "later" once the action is allowed. Raises before any side effect."""
         status = self.status()
-        if status.state == "never":
-            raise Blocked("The project's process profile is not accepted yet: accept or postpone it (run zplan, "
-                          "or zplan profile init).", family="process.pending")
         if status.state == "missing":
             raise Blocked(status.problem, family="process.missing")
         if status.state == "malformed":
@@ -1205,7 +1233,7 @@ class Profile:
         gates = status.resolved.config["gates"]
         if kind == "milestone" and gates["task"] == "required":
             raise Blocked(UNBUILT["task"], family="process.unbuilt")
-        return status
+        return self.settle(status)
 
     def freeze_plan(self):
         """The one snapshot a new plan revision runs on, read now: (planning roles, frozen) where frozen is
@@ -1280,7 +1308,7 @@ def describe(status, with_sources=True):
         a = resolved.config["autonomy"]
         lines.append("  autonomy: %s · up to %d runs · worker round %d min · run %d min · check after round "
                      "%d · wake-ups %d/h · retries %d%s" % (
-                         a["level"], a["max_runs"], a["worker_round_minutes"], a["run_minutes"], a["structural_round"],
+                         a["level"], parallel_runs(a["max_runs"]), a["worker_round_minutes"], a["run_minutes"], a["structural_round"],
                          a["wakeups_per_hour"], a["architect_retries"], where("autonomy.level")))
     if resolved.config.get("risk"):
         lines.append("  risk: %d rules · %d triggers%s (%s)" % (
@@ -1325,7 +1353,7 @@ def bootstrap_lines(status):
         autonomy = resolved.config.get("autonomy")
         if autonomy:
             lines.append("  Autonomy: %s · parallel runs: %d" % (
-                LEVEL_NAMES.get(autonomy["level"], autonomy["level"]), autonomy["max_runs"]))
+                LEVEL_NAMES.get(autonomy["level"], autonomy["level"]), parallel_runs(autonomy["max_runs"])))
     if status.present:
         lines.append("  Accept - the file stays as it is; the decision is remembered outside the project.")
     else:

@@ -52,22 +52,25 @@ so tasks sharing a file need no extra serialization. IDs P1-P7 avoid the mechani
 |---|---|---|---|
 | P1 Lean tests and dead code | T1 delete journal.py, its test and catalog entry; correct the 5 false docstrings. T2 the v1 golden test checks stored documents, not a rebuilt hash. T3 shipped prompts: acceptance runs no checks, VERIFY_RULE asks for coverage of a gap, no unconditional rerun of `incomplete`; the method loses the 1.5x line and its merge-critic line matches the gate | journal, catalog, milestone, engine prompts, architect_method, their tests | Q1 for T3; the rule files and budget.py removal are mine, same day |
 | P2 Merge you can trust | T4 the level matrix (O4, F6) and consistent check messages. T5 critic triggers (F1) | autonomy, delivery, runs, merge_critic, tui/controller | — |
-| P3 First start without hands | T6 work from the proposed profile without the modal (F2) and max_runs from it (F5). T7 profile persistence (Q4). T8 narrow pytest detection (R8). T9 max_runs offered 1-3 (F7) | process, tui/modals, delivery | Q3, Q4 |
+| P3 First start without hands | T6 work from the proposed profile without the modal (F2) and max_runs from it (F5). T8 narrow pytest detection (R8). T9 max_runs offered 1-3 (F7) | process, tui/modals, delivery | Q3, Q4 |
 | P4 Fewer confirmations, visible plan | T10 a typed command is consent (F3). T11 the plan card lists the milestones before an auto-approval (W4). T12 any printable override reason (F8) | tui/app, screens, card_kinds, planning, authority, task_gate | Q3 |
 | P5 Stale only when it matters | T13 approve with "based on <sha>, N commits since"; re-plan only when those commits touch the plan's write-sets (F4) | authority, planning | — |
 | P6 Consent card (mechanism M1, core) | design section -> critic -> tasks: the stored pending action, re-checked on consent, a repeat is a no-op; the architect never relays a command | controller, card_kinds, card_host, architect, strings | design first |
 | P7 UI follows events (mechanism M2, narrowed) | T re-observation with backoff; T a true end card and S5's history line after the architect's merge | controller, app, feed, delivery | after P6 |
 
-Outside 0.9.0's path, any free slot: P8 `--plain` cut (Q2: B1; T routing and a clear error, T delete menu-only code,
+Moved to the UX plan (2026-10-30, preflight p093): profile persistence (Q4) needs a rule for a snapshot-accepted profile vs a file the owner writes later (`zplan profile init`, /setup edits); it goes with the first start in the chat. Outside 0.9.0's path, any free slot: P8 `--plain` cut (Q2: B1; T routing and a clear error, T delete menu-only code,
 tests and docs; cli.py overlaps P2's merge wait, so after P2). Q5 local origin: its own design.
 Order: P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P7, one after another (shared prompts, catalog and hotspot files).
+0.9.0 scope (2026-10-30): P1-P4 and P6 (P3 without T7, P4 without the end screen's merge confirm). P7 joins the
+UX plan's "UI acts on events"; P5 (F4) waits for its own design: it moves the plan's source identity, a persisted
+contract, with no user report behind it.
 
 ## Harness (owner's go 2026-10-30)
 | # | Change | Why |
 |---|---|---|
 | H1 | One run per milestone: run.sh takes several task files and builds one milestone with those tasks (the product's own driver already loops tasks and runs final_verify once); one worktree, gate and merge per milestone | removes the per-slice brief/gate/merge/STATE overhead of 232 merges in 2 weeks; dogfoods the multi-task path users get |
 | H2 | CALIBRATION keeps date, task, result and the lesson; numbers come from metrics.py and the run store | the objective columns duplicate the run store and are often "not recorded" |
-| H3 | Tester feedback, walk and soak records move from the pause dir into the private archive (docs/history/records/), excluded from export like the archive | the plan's evidence lives outside git today |
+| H3 | Tester feedback, walk and soak records move from the pause dir into the private archive (folder records), excluded from export | the plan's evidence lives outside git today |
 
 ## Later and not doing
 Later: M1 conflict recovery, M2 commit queue, transient retry and retry after a project change (no incident);

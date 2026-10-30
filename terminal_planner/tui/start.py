@@ -136,6 +136,13 @@ def cannot_be_project(path) -> bool:
         return False
 
 
+def folder_hint(path) -> Path:
+    """Where `mkdir my-project` works: beside the refused path when the owner can write there (the home folder, a
+    mounted external drive), else in the home folder (`/` is read-only on macOS)."""
+    path = Path(path).resolve()
+    return (path if os.access(path, os.W_OK) else Path.home()) / "my-project"
+
+
 def run_git(path, *args, input=None):
     try:
         result = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, input=input)
@@ -343,7 +350,7 @@ class StartApp(App):
             card.append(clip(short(self.info.path), self.card_width()) + "\n", style="dim")
             if not self.info.ready and self.info.exists and cannot_be_project(self.info.path):
                 card.append("The home folder or the top of a disk cannot be a project.\nMake a folder for it: "
-                            "mkdir %s\n" % short(Path(self.info.path).resolve() / "my-project"), style="yellow")
+                            "mkdir %s\n" % short(folder_hint(self.info.path)), style="yellow")
         elif kind == "other":
             card.append("Another folder\n", style="bold")
             card.append("The path to a project folder or to a new folder.\n", style="dim")

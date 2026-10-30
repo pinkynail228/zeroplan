@@ -1565,7 +1565,7 @@ class TerminalTests(ProjectTest):
         state = self.stored()
         self.assertEqual([(r["milestone"], r["delivery"]) for r in state["runs"]], [("M1", "integrated"), ("M2", "integrated")])
         log = self.git("log", "--first-parent", "--format=%s", "main").decode()
-        self.assertEqual(log.count("Merge zplan/"), 2)
+        self.assertEqual(log.count("Merge M"), 2)
 
     def test_a2_ctrl_c_detaches_and_w_reattaches(self):
         output = self.run_session(PLAN + "a\n" + START, keys=[None, KeyboardInterrupt])
@@ -1714,7 +1714,7 @@ class TerminalTests(ProjectTest):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--version"], cwd=ROOT,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "zplan 0.8.3")
+        self.assertEqual(result.stdout.strip(), "zplan 0.9.0")
 
     def test_fixture_cli_journey(self):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--project", str(self.project),

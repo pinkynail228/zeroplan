@@ -1,8 +1,7 @@
 """The `/` command palette of the chat input (release 0.5.2, run w2): the rows a typed command lists, and the
 decision over the line the owner submitted.
 
-Nothing wires it into the app yet: the integration run i2 composes the widget above the prompt box and runs what
-`submit` returns. `Palette(Static)` is the list itself — `show_for(value, state)` hides it unless the typed value is
+`tui/app.py` composes the widget above the prompt box and runs what `submit` returns. `Palette(Static)` is the list itself — `show_for(value, state)` hides it unless the typed value is
 a command (`/...`) and otherwise draws the commands the frozen registry (`slash`) lists for it:
 `slash.matches(value, state)` filtered by `slash.available(command, state)`, at most `MAX_ROWS` of them, in that
 order. One row per command: the name in bold, then the description `strings.text` gives its id, dimmed; a row never

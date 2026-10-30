@@ -181,13 +181,13 @@ class ProfileScreen(Modal):
     hands only what the owner changed to `submit(changes, done)`; a refusal comes back as the reason, shown here
     while the editor stays open and nothing is written. «cancel» and Esc close it unchanged. The picked button of a
     group carries «● » (apart from the focus); the keys are the one hint line at the bottom (the modal's key bar).
-    A value in the file outside the offered ones shows as a button of its own. Without a check the merge gate offers only «you merge, no check»,
+    A value in the file outside the offered ones shows as a button of its own. Without a check the merge gate offers only «no check before merging»,
     with the reason. Dismisses with True once saved, else False."""
     bar = "tui_profile"
     LEVELS = tuple(process.LEVEL_NAMES.items())
     RUNS = (1, 2, 3)
-    MERGES = (("required", "automatic on green checks"), ("off", "you merge, " + process.OFF))
-    NO_CHECKS = "There are no checks, so merging automatically on green checks is unavailable."
+    MERGES = (("required", "checks before merging"), ("off", process.OFF + " before merging"))
+    NO_CHECKS = "There are no checks, so the merge check is unavailable."
     EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
     MARK = "● "
     BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("ctrl+s", "save", "Save", show=False),

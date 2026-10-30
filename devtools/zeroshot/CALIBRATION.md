@@ -230,3 +230,20 @@ One row per finished `ZS_RUNTIME=deepseek` run. Objective columns first; the orc
 | 2026-10-29 | d3b-arrows-keep-cycling (Claude lane, zplan graph) | low | default | 1 start | 1 | worker done; acceptance_review crashed (Claude provider 403); orchestrator review + gate 906 OK | ~15 min | not recorded | merged | same |
 | 2026-10-29 | d3c-cycle-by-card-key (Claude lane, zplan graph) | low | default | 1 start | 1 | A1, A2, A3 OK; reviewers accepted round 1; gate 8 modules 156 OK | ~10 min | not recorded | merged | a latch on a widget breaks on refresh: key state by identity, not object |
 | 2026-10-30 | p09a-elegant-critic (Claude lane, zplan graph) | medium | default | 2 starts (1 preflight conflict: v2 graph goldens in test_task_gate.py; 1 force-stopped on the owner's stop) | 0 | none | ~10 min | not recorded | dropped (replan: the product already had the elegance rules; the critic line moves to F1) | a brief from a process note, not a user report; check the product mechanism first |
+
+## From 2026-10-30 (H1-H2: one row per milestone run)
+
+| Date | Run | Result | Lesson |
+|---|---|---|---|
+| 2026-10-30 | p091 (P1: p1a dead code, p1b review prompts; first H1 two-task run) | merged 692e11c, 11 min, 2 rounds | two tasks in one run worked end to end; one gate for both |
+| 2026-10-30 | p092 (P2: merge matrix, critic triggers, merge words) | merged, attempt 2, 22 min, 3 rounds | attempt 1 review_conflict: a status-row test outside the write-set pinned the old decision; grep tests for every returned value, not only texts |
+| 2026-10-30 | p093 (P3: pytest check, proposal works; p3b moved out) | merged, attempt 2, 20 min, 2 rounds | attempt 1 preflight showed profile persistence needs a file-vs-snapshot rule: a design question, not a brief fix |
+| 2026-10-30 | p094 (P4: override reason, plan visible, typed consent) | merged, 4th start, 49 min, 4 rounds | three preflight conflicts on pinned confirms; the fix was to narrow the task (end-screen merge out), not to keep widening the write-set |
+| 2026-10-30 | v090 (version 0.9.0) | merged, 6 min, 1 round | derived from v083 by substitution |
+| 2026-10-30 | u6 (scheme states) | merged, 6 min, 1 round | a one-function display fix with exact flow examples needs no more |
+| 2026-10-30 | u4 (commit titles, disk-root hint) | merged, 13 min, 2 rounds | naming which helper must not change (title(r) is a stored identity) kept the change off persisted records |
+| 2026-10-30 | p096 (P6: consent request and card) | merged, 39 min, 2 rounds | the critic turned a new card into reuse of the plan and merge cards; ~350 product lines in two tasks |
+| 2026-10-30 | correction to p096 | its merge message says "tests.test_tui_split OK"; it failed (exact name-list pin, card_kinds gained names) and the merge was chained with `;` instead of `&&` | repaired by r1; the gate is one && chain, as step 4 says |
+| 2026-10-30 | r1 (split test subset) | merged, 2 min, 1 round | a test that pins a module's whole name list is whack-a-mole; assert the invariant |
+| 2026-10-30 | r23 (critic rel090 BLOCK 1-2, process.pending) | merged, 16 min, 2 rounds; r2 attempt 1 died on the Claude 5-hour limit at select_init | a release critic on the accumulated diff caught two real merge-policy holes |
+| 2026-10-30 | r4 (vet on the gated path) | merged, 13 min, 1 round | a repair for one path of a policy must name every path the policy covers (r2 named only the ungated one) |

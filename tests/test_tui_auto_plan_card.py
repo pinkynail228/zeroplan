@@ -32,10 +32,11 @@ import tui_support  # noqa: F401
 from tui_support import HAVE_TEXTUAL, screen_text
 
 from terminal_planner import process
-from terminal_planner.authority import Authority
+from terminal_planner.authority import Authority, canonical
 from terminal_planner.planning import PlanView
 from terminal_planner.tui import strings
-from test_tui_approve_card import HAVE, MISSING_REASON, ApproveCardShell, _Screen, proposal
+from test_tui_approve_card import (GOAL, HAVE, ROLES, JOINT_PLAN, MISSING_REASON, ApproveCardShell, JointEngine, _Screen,
+                                   proposal)
 
 try:
     from textual.widgets import Button
@@ -67,9 +68,11 @@ class _NarrowScreen(_Screen):
         """UI-only: the stand-in has no panes to show."""
 
 
-def card_of(snapshot, narrow=False):
+def card_of(snapshot, narrow=False, width=0):
     screen = _NarrowScreen(snapshot)
     screen.narrow = narrow
+    if width:  # the laid-out card slot (rows, cells) the real screen reports
+        screen.question_text_room = lambda: (6, width)
     return list(ui.CARD_SOURCES["plan"](screen))[0]
 
 
@@ -98,6 +101,33 @@ class AutoPlanCardTests(unittest.TestCase):
                 self.assertTrue(spec.title.startswith("Plan · "), spec.title)  # the counts are the planning service's own text
                 self.assertNotIn("Approve?", spec.text)
                 self.assertNotIn("on the right", spec.text)
+
+    def test_p4b_a1_the_card_lists_the_milestones_with_their_task_counts(self):
+        """p4b A1/A2 at unit level, on the plan view's body as `Planning.proposal` writes it: «M1 <title> · N tasks»
+        per milestone under the text, the same in `auto` and under the owner's own approval, at most five lines and
+        then «…and N more», a title cut with `…` to the card width; a stale card lists nothing. Interpretation: the
+        counts and ids are read from the view's milestone and task lines, the one form of the proposal the snapshot
+        holds."""
+        def view(count, stale=False):
+            body = ["", "Plan r1 · %d milestones · %d tasks · checked" % (count, count + 1)]
+            for number in range(1, count + 1):
+                body.append("  M%d %s  (after: —)" % (number, "Add --lines" if number == 1 else "Docs %d" % number))
+                body.extend("    T%d%d Do it · 1 check" % (number, task) for task in range(2 if number == 1 else 1))
+            return replace(proposal(), plan=PlanView("proposal", 1, "proposed", tuple(body), ("approve",),
+                                                      family="plan.stale" if stale else None))
+        for level in ("auto", "manual"):
+            with self.subTest(level=level):
+                two = card_of(replace(view(2), profile=profile_view(level)))
+                head = strings.text("card.plan_auto_text" if level == "auto" else "card.plan_text")
+                self.assertEqual(two.text.split("\n"), [head, "M1 Add --lines · 2 tasks", "M2 Docs 2 · 1 task"])
+                seven = card_of(replace(view(7), profile=profile_view(level))).text.split("\n")
+                self.assertEqual(seven[1:], ["M%d %s · %s" % (n, "Add --lines" if n == 1 else "Docs %d" % n,
+                                                            "2 tasks" if n == 1 else "1 task") for n in range(1, 6)]
+                                 + ["…and 2 more"])
+        lines = card_of(view(2), width=20).text.split("\n")[1:]
+        self.assertEqual(lines, ["M1 Add --… · 2 tasks", "M2 Docs 2 · 1 task"])
+        self.assertTrue(all(len(line) <= 20 for line in lines), lines)
+        self.assertNotIn("M1", card_of(view(2, stale=True)).text)
 
     def test_c1_the_bar_job_follows_the_policy(self):
         """The bar says the architect approves in `auto`, and waits for the owner at the other levels."""
@@ -170,7 +200,24 @@ class AutoPlanCardTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE and HAVE_TEXTUAL, MISSING_REASON)
 class AutoPlanCardShell(ApproveCardShell):
-    def propose_at(self, level):
+    def propose_milestones(self, count):
+        """The joint proposal with `count` one-task milestones in place of its single one."""
+        class ManyEngine(JointEngine):
+            def output(self, authority):
+                output = super().output(authority)
+                plan = dict(JOINT_PLAN, requirements=[{"id": "R%d" % n, "text": "Requirement %d." % n}
+                                                      for n in range(1, count + 1)], milestones=[
+                    {"id": "M%d" % n, "title": "Milestone number %d" % n, "depends_on": [], "slices": [
+                        {"id": "S%d" % n, "title": "Slice", "requirements": ["R%d" % n], "tasks": [
+                            {"id": "T%d" % n, "title": "The task", "checks": ["A deterministic test"]}]}]}
+                    for n in range(1, count + 1)])
+                output["proposal"] = canonical(plan)
+                return output
+        with Authority(self.state, self.project, fixture_id="test") as authority:
+            authority.begin(GOAL, ROLES, "fixture")
+            ManyEngine().proposal(authority, lambda _: None)
+
+    def propose_at(self, level, milestones=None):
         """The joint proposal under an accepted profile of autonomy `level` (the file committed first, as the
         parallel-watch fixtures do)."""
         (self.project / process.PROFILE_FILE).write_text(json.dumps(
@@ -180,19 +227,25 @@ class AutoPlanCardShell(ApproveCardShell):
         with Authority(self.state, self.project, fixture_id="test") as authority:
             authority.profile = process.Profile.of(authority)
             authority.profile.accept()
-        self.propose_joint()
+        self.propose_joint() if milestones is None else self.propose_milestones(milestones)
 
     def labels(self):
         return [button.label.plain for button in self.card().query(Button)]
 
     async def test_c1_at_80x24_in_auto_the_card_and_the_bar_do_not_ask(self):
-        self.propose_at("auto")
+        """Also p4b A1/A2 on the real app: seven milestones list five lines and «…and 2 more» above the buttons,
+        and at 80x24 the single button is still drawn."""
+        self.propose_at("auto", milestones=7)
         async with self.shell(self.controller(profile=True), size=(80, 24)) as pilot:
             await self.loaded(pilot)
             card = await self.card_shown(pilot)
-            self.assertEqual(card.spec.text, strings.text("card.plan_auto_text"))
+            self.assertEqual(card.spec.text.split("\n"), [strings.text("card.plan_auto_text")]
+                             + ["M%d Milestone number %d · 1 task" % (n, n) for n in range(1, 6)] + ["…and 2 more"])
             self.assertEqual(self.labels(), [strings.text("card.revise_only")])
             shown = screen_text(self.app)
+            self.assertIn(strings.text("card.revise_only"), shown)  # the button row is on screen under the list
+            self.assertIn("…and 2 more", shown)
+            self.assertIn("M5 Milestone number 5 · 1 task", shown)
             self.assertNotIn("Approve?", shown)
             self.assertNotIn("on the right", shown)
             self.assertIn(strings.text("bar.approving_plan"), shown)
@@ -203,12 +256,12 @@ class AutoPlanCardShell(ApproveCardShell):
         async with self.shell(self.controller(profile=True), size=(140, 40)) as pilot:
             await self.loaded(pilot)
             card = await self.card_shown(pilot)
-            self.assertEqual(card.spec.text, strings.text("card.plan_text"))
+            self.assertEqual(card.spec.text.split("\n")[0], strings.text("card.plan_text"))
             self.assertEqual(self.labels(), [strings.text("card.approve_yes"), strings.text("card.revise")])
             self.assertIn(strings.text("bar.waiting_approve"), screen_text(self.app))
             await pilot.resize_terminal(80, 24)
             await self.until(pilot, lambda: self.card() is not None
-                             and self.card().spec.text == strings.text("card.plan_text_narrow"))
+                             and self.card().spec.text.startswith(strings.text("card.plan_text_narrow")))
             await pilot.pause(0.3)
             self.assertNotIn("on the right", screen_text(self.app))
             self.assertEqual(self.labels(), [strings.text("card.approve_yes"), strings.text("card.revise")])

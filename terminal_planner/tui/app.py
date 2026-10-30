@@ -615,7 +615,7 @@ def override_plan_card(screen, argument, key):
     version = int(key.rsplit(":", 1)[1])
     screen.app.push_screen(
         NoteScreen("Approve plan r%s despite the check?" % version, answer=True,
-                   label="Reason (one line, 10–500 characters); the plan check stays on record."),
+                   label="Reason (one line, at most 500 characters); the plan check stays on record."),
         lambda text: screen.app.override_note(version, text))
 
 
@@ -2409,6 +2409,10 @@ class ZplanApp(App):
         controller.on_plan_submission = self.plan_submission
         # D4c: the architect's commit proposal (worker thread) is drawn as a card on the UI thread.
         controller.on_commit_proposal = lambda proposal: self.from_worker(self.changed)
+        # P6: the architect's request (a start, a continue or a new attempt) and its asks for an approval or a merge
+        # change on the worker; the request card and the plan and merge cards' ask lines are drawn on the UI thread.
+        controller.on_consent_request = lambda request: self.from_worker(self.changed)
+        controller.on_asked = lambda asked: self.from_worker(self.changed)
         self.follow = follow
         self.chat_prepare = chat_prepare or chat_module.default_prepare
         self.chat_binding = chat_binding or chat_module.architect_binding
@@ -3494,8 +3498,7 @@ class ZplanApp(App):
                     "! " + FIX_KEY.sub("", summary(c.line)) for c in outcome.checks])
                 self.request_check()
             else:
-                preview = outcome.data
-                self.confirm(outcome.lines[0], lambda: self.begin_run(preview), enter_yes=True)
+                self.begin_run(outcome.data)  # the typed command or pressed button is the consent
             self.changed()
         self.controller.preview_start(row.id, self.deliver(previewed))
 
@@ -3508,11 +3511,10 @@ class ZplanApp(App):
                 self.clear_pending()
                 self.run_note = "Not started: %s Screen refreshed." % error
             elif outcome.kind == "changed":
-                # The profile changed after the preview: nothing started; the new preview is confirmed again.
+                # The profile changed after the preview: nothing started; the new preview line is shown and the owner
+                # starts again with /run.
                 self.clear_pending()
-                self.run_note = "Not started: " + outcome.lines[0]
-                fresh = outcome.data
-                self.confirm(outcome.lines[1], lambda: self.begin_run(fresh), enter_yes=True)
+                self.run_note = "\n".join(["Not started: " + outcome.lines[0], outcome.lines[1]])
             else:
                 self.confirm_pending()
                 self.run_note = ""
@@ -3558,10 +3560,7 @@ class ZplanApp(App):
 
     def resume_milestone(self, row):
         token = row.token
-        self.confirm("Continue %s (attempt %s)?\nThe same attempt in its working tree; what is already done is not lost."
-                     % (row.id, token.attempt),
-                     lambda: self.attempt_job("resume", row.id,
-                                              lambda done: self.controller.resume_run(token, done)), enter_yes=True)
+        self.attempt_job("resume", row.id, lambda done: self.controller.resume_run(token, done))
 
     def new_attempt_milestone(self, row):
         """[g] on a stopped or failed milestone: the new-attempt form (what it does, the field, the confirm key)."""

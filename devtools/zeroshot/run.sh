@@ -1,7 +1,8 @@
 #!/bin/sh
 # Run a local Zeroshot software-change review cycle on zplan in an isolated worktree.
-# Usage: [ZS_ATTEMPT=2] devtools/zeroshot/run.sh NAME TASK_FILE [--validate-only]  (ZS_ATTEMPT: rerun after a failed run on the same worktree HEAD)
-# TASK_FILE is plain text; the shared test-environment preamble is appended.
+# Usage: [ZS_ATTEMPT=2] devtools/zeroshot/run.sh NAME TASK_FILE [TASK_FILE...] [--validate-only]  (ZS_ATTEMPT: rerun after a failed run on the same worktree HEAD)
+# Each TASK_FILE is plain text, one task of the milestone NAME, run in the given order (H1, docs/PLAN_0.9.md); the shared
+# test-environment preamble is appended. The upstream template lane (ZS_GRAPH=template) takes one task file.
 # ZS_RUNTIME=deepseek: DeepSeek worker through the shared Yandex adapter (~/.local/share/yandex-adapter/README.md,
 # instance zplan, port ${ADAPTER_PORT:-8797}) and gpt-6.1-sol high reviewers on the default Codex lane (runtime-deepseek.json).
 # Default on the Claude lane (since 2026-10-25, after T1, the first real graph run): the run goes through zplan's own
@@ -12,7 +13,11 @@
 # /tmp/zs-zplan/NAME.lock). Each run gets its own TMPDIR (NAME.tmp). The native run can outlive this CLI
 # (Ctrl-C/detach), so both stay until the orchestrator's cleanup after a terminal status (devtools/zeroshot/ORCHESTRATOR.md step 5).
 set -eu
-name=$1; task=$2; shift 2
+name=$1; shift
+tasks=
+while [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; do tasks="$tasks $1"; shift; done
+[ -n "$tasks" ] || { echo "usage: run.sh NAME TASK_FILE [TASK_FILE...] [--validate-only]" >&2; exit 2; }
+task=${tasks# }; task=${task%% *}
 repo=$(git rev-parse --show-toplevel)
 here=$repo/devtools/zeroshot
 work=/tmp/zs-zplan/$name
@@ -20,8 +25,10 @@ command -v python3.13 >/dev/null 2>&1 || { echo "run: python3.13 is required for
 mkdir -p /tmp/zs-zplan
 # Brief cap (ORCHESTRATOR.md step 1): 3 KB. The night of 2026-10-25 ran briefs of 3.5-6.9 KB, grown by design-critic
 # passes; ZS_BRIEF_MAX overrides it for one run (record why in STATE).
-size=$(wc -c < "$task" | tr -d ' ')
-[ "$size" -le "${ZS_BRIEF_MAX:-3072}" ] || { echo "brief $task is $size bytes, cap ${ZS_BRIEF_MAX:-3072}: cut it or split the slice" >&2; exit 2; }
+for t in $tasks; do
+  size=$(wc -c < "$t" | tr -d ' ')
+  [ "$size" -le "${ZS_BRIEF_MAX:-3072}" ] || { echo "brief $t is $size bytes, cap ${ZS_BRIEF_MAX:-3072}: cut it or split the slice" >&2; exit 2; }
+done
 # Disk guard: reviewer scratch copies filled the disk once (STATE Open). Threshold ZS_MIN_FREE_GB (default 30).
 free=$(df -Pk /tmp | awk 'NR==2 {print int($4/1048576)}')
 [ "$free" -ge "${ZS_MIN_FREE_GB:-30}" ] || { echo "only ${free} GB free on /tmp; clean /tmp/zs-agent-* of finished runs" >&2; exit 2; }
@@ -100,9 +107,11 @@ grep -qxF /.claude/settings.local.json "$exclude" 2>/dev/null || echo /.claude/s
 # Pinned native tools are untracked; link them so admission tests see the same environment.
 [ -e "$repo/.tools" ] && [ ! -e "$work/.tools" ] && ln -s "$repo/.tools" "$work/.tools"
 if [ "$graph" = zplan ]; then
-  python3.13 "$here/milestone_run.py" documents "$task" "$work.docs" --runtime "$runtime" --worktree "$work" \
-    --preamble "$here/preamble.md"
+  # shellcheck disable=SC2086  # task file names carry no spaces (devtools/zeroshot/tasks/NAME.md)
+  python3.13 "$here/milestone_run.py" documents $tasks "$work.docs" --runtime "$runtime" --worktree "$work" \
+    --preamble "$here/preamble.md" --title "$name"
 else
+  [ "$task" = "${tasks# }" ] || { echo "the template lane takes one task file" >&2; exit 2; }
   python3 -c 'import json,sys; print(json.dumps({"task": open(sys.argv[1]).read().strip() + "\n\n" + open(sys.argv[2]).read()}))' \
     "$task" "$here/preamble.md" > "$work.input.json"
 fi

@@ -5,8 +5,8 @@ fixtures and real temporary Git repositories only; no provider, no network. The 
 through the scripted `NativeEngine` harness; the fixture driver produces the scripted verdict.
 
 Interpretations (nothing in the parent text fixes them; kept here for the reviewers):
-- `reasons` treats exactly a `False` fact as a checked "no"; a fact that is `True`, omitted or any other value is
-  unchecked and is raised. The parent names only true/omitted vs false, and "omitted = unchecked, never no".
+- `reasons` raises a path-less trigger only for a fact that is exactly `True` (p2c, owner decision F1); an omitted,
+  `False` or any other value raises nothing, so a low-risk merge without facts needs no critic.
 - The critic output is schemaVersion "1" with exactly `verdict` (go|block) and `findings`; the parent fixes the
   verdict names and that the parser reproduces them, not the output's field names.
 - The identity's `input_digest` digests the semantic input the critic judges besides the pinned merge identity (the
@@ -126,29 +126,32 @@ class CriticBase(tpr.ProfileTest):
 class ReasonsTests(unittest.TestCase):
     """`reasons(risk, facts)` -> the sorted trigger names of one merge (C1)."""
 
-    def test_the_parent_example(self):
-        """medium tier, no path triggers, both checkable facts false -> only the omitted trigger."""
-        self.assertEqual(merge_critic.reasons({"tier": "medium", "triggers": [], "unmatched": []},
-                                              {"data_loss": False, "process_kill": False}),
-                         ["disagreement"])
+    def test_a_low_risk_merge_with_no_facts_raises_nothing(self):
+        """p2c A1: no tier, no path trigger and no fact -> no reason, so no critic."""
+        self.assertEqual(merge_critic.reasons({"tier": "low", "triggers": [], "unmatched": []}, {}), [])
+        self.assertEqual(merge_critic.reasons({"tier": "medium", "triggers": [], "unmatched": []}, {}), [])
 
     def test_a_high_tier_adds_tier_high_and_path_triggers_are_kept(self):
-        self.assertEqual(merge_critic.reasons({"tier": "high", "triggers": ["secrets"], "unmatched": []}, {}),
-                         ["data_loss", "disagreement", "process_kill", "secrets", "tier:high"])
+        """p2c A2: `tier:high` and matched path triggers raise the critic, with or without facts."""
+        self.assertEqual(merge_critic.reasons({"tier": "high", "triggers": ["installer"], "unmatched": []}, {}),
+                         ["installer", "tier:high"])
         self.assertEqual(merge_critic.reasons({"tier": "low", "triggers": ["packaging"], "unmatched": []},
                                               {"disagreement": False}),
-                         ["data_loss", "packaging", "process_kill"])
+                         ["packaging"])
 
     def test_the_three_preset_triggers_are_the_path_less_ones(self):
         self.assertEqual(sorted(merge_critic.PRESET_TRIGGERS), ["data_loss", "disagreement", "process_kill"])
 
-    def test_a_false_fact_is_a_no_and_everything_else_is_unchecked(self):
-        for facts, expected in (({"data_loss": False}, ["disagreement", "process_kill"]),
-                                ({"data_loss": True}, ["data_loss", "disagreement", "process_kill"]),
-                                ({}, ["data_loss", "disagreement", "process_kill"]),
-                                ({"process_kill": 0}, ["data_loss", "disagreement", "process_kill"])):
+    def test_only_a_true_fact_raises_a_path_less_trigger(self):
+        """p2c A2: an omitted or `False` fact raises nothing; exactly `True` raises its trigger (`0` is not `True`)."""
+        for facts, expected in (({"data_loss": False}, []),
+                                ({"data_loss": True}, ["data_loss"]),
+                                ({"data_loss": True, "process_kill": True, "disagreement": False},
+                                 ["data_loss", "process_kill"]),
+                                ({}, []),
+                                ({"process_kill": 0}, [])):
             with self.subTest(facts=facts):
-                self.assertEqual(merge_critic.reasons({"tier": "medium", "triggers": [], "unmatched": []}, facts),
+                self.assertEqual(merge_critic.reasons({"tier": "low", "triggers": [], "unmatched": []}, facts),
                                  expected)
 
 

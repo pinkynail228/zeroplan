@@ -606,13 +606,13 @@ class RejectedCardRefusalTests(tpr.ProfileTest, planning_shell.PlanningShell):
             await self.loaded(pilot)
             await self.until(pilot, lambda: "rejected:plan:1" in self.app.screen.card_specs)
             await pilot.pause(0.3)
-            for reason in ("too short", "the owner accepts the broad scope"):
+            for reason in ("x" * 501, "the owner accepts the broad scope"):
                 self.app.screen.run_command("/approve", "", "rejected:plan:1")
                 await self.shows(pilot, "Approve plan r1 despite the check?")
                 await self.type(pilot, reason)
                 await self.press_button(pilot, "send")
                 await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
-                if reason == "too short":
+                if len(reason) > 500:
                     await self.until(pilot, lambda: "Not done: A reason is required" in self.flat())
                     self.assertIn("rejected:plan:1", self.app.screen.card_specs)
                     self.assertEqual(path.read_bytes(), before)

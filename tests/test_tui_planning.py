@@ -459,9 +459,11 @@ class DecisionTests(PlanningShell):
                     await self.type(pilot, note)
                     await self.press_button(pilot, "send")
                     await self.shows(pilot, "Plan r2 · 2 milestones")
-                elif key in ("a", "x"):
+                elif key == "x":  # p4a: approve acts at once; reject still asks
                     await self.press_button(pilot, "yes")
                     await self.until(pilot, lambda: self.app.plan_lines)
+                elif key == "a":
+                    await self.until(pilot, lambda: self.app.snapshot.status == "approved")
         return self.summary(self.stored())
 
     async def test_k1c2_the_plan_screen_answers_with_buttons_not_letters(self):
@@ -523,9 +525,7 @@ class DecisionTests(PlanningShell):
                 await self.until(pilot, lambda: self.app.focused is not None and self.app.focused.name == "reject")
             screen.render_state()  # the real offered actions again
             await self.until(pilot, lambda: names() == screen.offered())
-            await self.press_button(pilot, "approve")  # Enter on the button does what the old letter did
-            await self.shows(pilot, "Approve plan r1?")
-            await self.press_button(pilot, "yes")
+            await self.press_button(pilot, "approve")  # Enter on the button does what the old letter did (p4a: at once)
             await self.until(pilot, lambda: self.app.snapshot.status == "approved")
             await self.until(pilot, lambda: "approve" not in names())
             await pilot.press("escape", "escape")  # the first closes the verdict note, the second goes back
@@ -549,23 +549,20 @@ class DecisionTests(PlanningShell):
         self.assertEqual(await self.tui_state("x"), plain)
         self.assertEqual(plain[0][1], "proposed")
 
-    async def test_a5_decisions_are_asked_first_and_enter_never_decides(self):
+    async def test_a5_the_approve_button_acts_at_once_without_a_question(self):
+        """p4a A2: the plan screen's «approve» button (the focus starts on it, so Enter presses it too) is the
+        consent: it approves with no «Approve plan r1?» question."""
         self.propose()
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
             await self.panel(pilot)
             await self.command(pilot, "/view")
             await self.shows(pilot, "Plan r1 · 2 milestones")
-            await pilot.press("enter", "enter")
+            self.assertEqual(self.app.snapshot.status, "proposed")
             await self.press_button(pilot, "approve")
-            self.assertIn("Approve plan r1?", screen_text(self.app))
-            await pilot.press("y", "space", "a")  # no letter answers
-            await pilot.pause(0.2)
-            self.assertIn("Approve plan r1?", screen_text(self.app))
-            await pilot.press("enter")  # the focus starts on «no»: Enter declines
-            await pilot.pause(0.2)
-            self.assertEqual(type(self.app.screen).__name__, "PlanScreen")
-        self.assertEqual(self.stored()["revisions"][0]["status"], "proposed")
+            await self.until(pilot, lambda: self.app.snapshot.status == "approved")
+            self.assertNotIn("Approve plan r1?", screen_text(self.app))
+            self.assertNotEqual(type(self.app.screen).__name__, "ConfirmScreen")
 
     async def test_a5_i_shows_the_full_requirements_and_checks(self):
         self.propose()
@@ -868,7 +865,6 @@ class PlanScreenInteractionTests(PlanningShell):
             await self.until(pilot, lambda: "approve" in self.buttons(self.app.screen))
             await self.until(pilot, lambda: getattr(self.app.focused, "name", None) == "approve")  # not «подробнее»
             await self.press_button(pilot, "approve")
-            await self.press_button(pilot, "yes")
             await self.until(pilot, lambda: self.buttons(self.app.screen) == ["revise", "info"])
             await self.until(pilot, lambda: getattr(self.app.focused, "name", None) == "revise")
             await self.press_button(pilot, "info")

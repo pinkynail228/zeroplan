@@ -6,7 +6,7 @@ policy and the action can never disagree about which profile is in effect. `leve
 caller already resolved once, so the Controller decides on the very digest its preview was built on. `decide` is
 the whole policy: the Controller consults it before an action runs. `AUTOMATIC` is the release gate the plan
 named: with A4b and A7 merged (2026-10-25) automatic actions are on, so auto and supervised let the architect
-start, resume and re-brief; the merge action still follows the profile's own `gates.merge`."""
+start, resume and re-brief; the merge action follows the level and the candidate's risk tier."""
 
 from .authority import Blocked
 
@@ -18,7 +18,7 @@ ACTIONS = ("start", "stop", "approve", "resume", "rebrief", "edit", "merge")
 AUTOMATIC = True
 
 
-def decide(level, action, gate=None):
+def decide(level, action, gate=None, tier=None):
     """What the Controller does with `action` at `level`: "allow" or "ask".
 
     stop is always allowed: it ends an attempt and merges nothing, so no autonomy level gates it. edit is allowed at
@@ -26,14 +26,15 @@ def decide(level, action, gate=None):
     never an unreviewed action. start asks at every level while `AUTOMATIC` is off; with it on, auto and supervised
     allow and manual asks. resume and rebrief follow start (they open a new attempt, from an unchanged brief).
     approve asks at every level while `AUTOMATIC` is off; with it on only auto allows it, so supervised and manual
-    plan approvals stay the owner's. merge is the owner's unless the profile it was read from requires the merge
-    gate (`gates.merge` == "required", passed as `gate`): then auto allows it and supervised and manual ask, so a
-    gated merge still needs the owner above auto. An unknown level is manual and asks; an unknown action asks (fail
-    closed)."""
+    plan approvals stay the owner's. merge follows the level and the candidate's risk `tier` (low, medium or high,
+    from `process.risk_of`): auto allows it, supervised allows it below high and asks on high or on a tier it does
+    not know, manual asks. The merge gate (`gate`, `gates.merge`) only decides whether checks and the critic run
+    before the merge; it does not change who merges. An unknown level is manual and asks; an unknown action asks
+    (fail closed)."""
     if action == "stop" or action == "edit":
         return "allow"
     if action == "merge":
-        return "allow" if gate == "required" and level == "auto" else "ask"
+        return "allow" if level == "auto" or (level == "supervised" and tier in ("low", "medium")) else "ask"
     if action in ("start", "resume", "rebrief"):
         if not AUTOMATIC:
             return "ask"

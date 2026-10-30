@@ -438,7 +438,8 @@ on request. You can quit and reopen `zplan` to keep observing the same run.
 
 When the milestone is `done, waiting for merge`, its card offers «see the changes» for the full diff.
 With a Git identity configured, the target branch checked out and its working tree clean, press the card's «merge»
-(or type `/merge`) to merge the result. zplan never pushes; dependent milestones become ready after the merge.
+(or type `/merge`) to merge the result; at `auto` (and at `supervised` for a change that is not high risk) the
+architect merges it itself. zplan never pushes; dependent milestones become ready after the merge.
 
 # Line UI
 
@@ -484,7 +485,12 @@ The first `zplan` in a project whose process profile was never decided shows one
 shell and `--plain` alike): the rules files found (`AGENTS.md`, then `CLAUDE.md`), the test command when it is
 obvious without running anything (`package.json` `scripts.test` → `npm test`, a Makefile `test:` target → `make
 test`; otherwise «no qualification»), the gates (plan check required, task and merge checks «no check»), and
-the role bindings. Keys: `a` accept — writes `zplan.process.json` in the project root (commit it so the profile is
+the role bindings. «configure» (and `/setup` → «profile») edits the autonomy level («auto», «ask about the plan and
+risky merges», «ask about everything»), the parallel runs, the merge rule and each role's model and effort; the
+«merge» rule row reads «checks before merging» or «no check before merging» (without a test check only the second,
+with the reason «There are no checks, so the merge check is unavailable.»). It decides whether checks run before a
+merge, not who merges: that follows the level (`auto` merges after the reviews, `supervised` unless the change is
+high risk, `manual` asks). Keys: `a` accept — writes `zplan.process.json` in the project root (commit it so the profile is
 shared; an existing valid file is only recorded, never rewritten); `l` later — nothing is written to the project,
 the shown values apply and the header says «profile not saved»; `q` leaves without deciding (new plans and
 runs are refused until you decide; watching, stopping and export keep working).

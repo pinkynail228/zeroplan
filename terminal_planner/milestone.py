@@ -33,9 +33,9 @@ REVIEW_BAR = ("A review rejects only when a check or the title of input.task fai
               "non-blocking note marked `note:` and never rejects the change.")
 # The verification rule the worker follows (H3): proportionate to the change, the project's own way. Tests assert it.
 VERIFY_RULE = ("Verify the change the project's own way and in proportion to it: in a project with a test setup, a "
-               "behaviour change (a new feature included) gets a relevant test, and a test the task asks for (a "
-               "project's first included) is written; a change to docs, copy or config files alone gets no new test, "
-               "only the project's existing checks.")
+               "behaviour change (a new feature included) that existing tests do not cover gets a relevant test (extend an "
+               "existing test first), and a test the task asks for (a project's first included) is written; a change "
+               "to docs, copy or config files alone gets no new test, only the project's existing checks.")
 MANIFEST = ".zplan/milestone.json"
 BASELINE = ".zplan/baseline.json"
 BEFORE = ".zplan/milestone.before.json"
@@ -501,8 +501,9 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
         context + ["task", "acceptanceVerdict", "acceptanceFindings", "codeVerdict", "codeFindings"],
         writes=[write("workerReport", "worker", "out", "report")], timeout=WORKER_TIMEOUT)
     acceptance = verifier("acceptance_review", read_only + (
-        "Fresh acceptance review of input.task. Gather fresh evidence yourself (run the checks); do not trust "
-        "workerReport. " + REVIEW_BAR + " On rejection diagnostic.message names the failing check or title and how to "
+        "Fresh acceptance review of input.task. Judge the diff, the tests and the results workerReport reports; run "
+        "no checks (the final check runs them); do not accept a worker claim without evidence in the diff or tests. "
+        + REVIEW_BAR + " On rejection diagnostic.message names the failing check or title and how to "
         "reproduce it; when the review accepts, it carries the notes, each prefixed `note:`. " + CONFLICT_BAR),
         context + ["task", "workerReport"], "verdict", ["accepted", "rejected", "conflict"], "acceptanceVerdict",
         "acceptanceFindings", timeout=WORKER_TIMEOUT)

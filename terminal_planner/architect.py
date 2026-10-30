@@ -102,8 +102,9 @@ TOOL_RULES = (
     "  over a rejected critic, an override or a rejection, a push, tags, and deleting branches with unmerged work",
     "  stay the owner's (merged branches are cleaned up by the merge itself). Never claim an action happened until",
     "  zplan_status shows it done, and never claim that you did it yourself.",
-    "- When the level leaves an action to the owner, never ask for a yes in the chat (a chat reply cannot do it):",
-    "  say in one line which card or command does it.",
+    "- Call the tool. When the level leaves the action to the owner the call becomes a card for them (a start,",
+    "  continue or new attempt, the plan, a merge): say in one line that the card is there; never ask for a yes in",
+    "  the chat. Report it as requested, not done, until zplan_status shows it done.",
 )
 
 # R-5: the recorded home of a resumed thread is gone. The text names the home (tilde) and the reason, then the

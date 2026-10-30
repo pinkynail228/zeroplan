@@ -265,6 +265,29 @@ def plan_fields(plan):
 MERGE_FILES = 20  # the changed files a status row names before it only counts the rest
 
 
+def changed_paths(app, r):
+    """The files the attempt's result changes against its destination base (as the end screen lists them), all of
+    them; [] for an attempt not exported yet, None when Git cannot list them."""
+    result, destination = extended(r)["result"] or {}, r["destination"]
+    commit = result.get("commit")
+    if commit is None:
+        return []
+    listing = git_call(app.authority.project, "diff", "--name-only", "--no-renames", "-z", destination["base"], commit)
+    if listing.returncode:
+        return None
+    return [name for name in listing.stdout.decode(errors="replace").split("\0") if name]
+
+
+def merge_tier(status, paths):
+    """The risk tier the merge policy decides on: `process.risk_of` over the candidate's `paths` under the profile
+    read `status`. A profile without a `risk` section, no profile and paths that cannot be listed (None) are "high"
+    (fail closed)."""
+    resolved = getattr(status, "resolved", None)
+    if resolved is None or paths is None or "risk" not in resolved.config:
+        return "high"
+    return process.risk_of(resolved.config, paths)["tier"]
+
+
 def merge_fields(app, row, status):
     """What the architect needs to decide a merge from `zplan_status` alone: the result commit, its branch, the
     destination branch, the files the result changes against the destination (at most `MERGE_FILES`, then
@@ -273,20 +296,14 @@ def merge_fields(app, row, status):
     Git cannot list them; an attempt not exported yet has no commit and no files."""
     r = app.delivery.latest(row.id)
     result, destination = extended(r)["result"] or {}, r["destination"]
-    commit, files, more = result.get("commit"), [], 0
-    if commit is not None:
-        listing = git_call(app.authority.project, "diff", "--name-only", "--no-renames", "-z", destination["base"], commit)
-        if listing.returncode:
-            files = None
-        else:
-            names = [name for name in listing.stdout.decode(errors="replace").split("\0") if name]
-            files, more = names[:MERGE_FILES], max(0, len(names) - MERGE_FILES)
+    names = changed_paths(app, r)
+    files, more = (None, 0) if names is None else (names[:MERGE_FILES], max(0, len(names) - MERGE_FILES))
     resolved = getattr(status, "resolved", None)
     gate = autonomy.merge_gate(status)
-    return {"commit": commit, "branch": result.get("branch"), "destination": destination["branch"],
+    return {"commit": result.get("commit"), "branch": result.get("branch"), "destination": destination["branch"],
             "files": files, "more": more, "gate": gate,
             "checks": [c["name"] for c in resolved.config["checks"]] if resolved is not None else [],
-            "decision": autonomy.decide(autonomy.level_of(status), "merge", gate)}
+            "decision": autonomy.decide(autonomy.level_of(status), "merge", gate, merge_tier(status, names))}
 
 
 def draft_token(identity, milestone):
@@ -359,6 +376,24 @@ class CommitProposal:
     lines: Tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ConsentRequest:
+    """An architect action the autonomy level leaves to the owner, kept until the owner answers it: `action` is
+    `start`, `resume` or `rebrief`, `args` the tool's own arguments, `digest` the profile digest the policy read
+    (None: no profile), `preview` the start's `Preview` as it was built. It runs nothing: only the owner's answer
+    does (`Controller.consent`, `Controller.decline`). `state` is `awaiting`, `done`, `declined`, `stale` (the
+    profile, plan or attempt moved: nothing ran) or `failed`, and `lines` what the card and the architect's status
+    show."""
+    id: str
+    action: str
+    milestone: str
+    args: dict
+    digest: Optional[str]
+    preview: object = None
+    state: str = "awaiting"
+    lines: Tuple[str, ...] = ()
+
+
 class Controller:
     """Serialized access to one planning session. Callbacks run on the worker thread; the UI marshals them."""
 
@@ -399,6 +434,14 @@ class Controller:
         self.commit_proposal = None
         self.on_commit_proposal = None
         self._project_op = threading.Lock()
+        # P6: an action the level leaves to the owner. A start, resume or rebrief becomes one stored request (None:
+        # none yet) the owner answers (`consent`, `decline`); an approve or a merge stays the owner's own card or
+        # command, and `asked` records that the architect asked for it ("approve": the plan version, "merge": the
+        # milestone). The worker sets both; the app shows them through the worker-callable hooks.
+        self.consent_request = None
+        self.asked = {}
+        self.on_consent_request = None
+        self.on_asked = None
         # A6b2b: the architect chat's wake-up. The app sets `on_observed` to `chat.notify` (called on the worker after
         # each completed observation job; it only marks a request and hands over, never waits) and `snapshot_source`
         # to `chat_snapshot` (what the feed port's `snapshot()` returns, called off the UI thread like the chat's own
@@ -702,6 +745,12 @@ class Controller:
         if proposal is not None:
             payload["commit"] = {"state": proposal.state, "paths": list(proposal.selection.paths),
                                  "lines": list(proposal.lines)}
+        request = self.consent_request
+        if request is not None:
+            payload["consent"] = {"id": request.id, "action": request.action, "milestone": request.milestone,
+                                  "state": request.state, "lines": list(request.lines)}
+        if self.asked:
+            payload["asked"] = dict(self.asked)
         if not fresh:
             payload["stale"] = True
         return payload
@@ -859,12 +908,12 @@ class Controller:
             raise Blocked("Invalid argument token.", family="architect.request_invalid")
         return token
 
-    @staticmethod
-    def _start_tool(app, milestone, revision):
+    def _start_tool(self, app, milestone, revision):
         """Preview then start in one job. The current revision is required (else today's `Changed`); the policy
         decides on the very profile digest the preview was built on, so a profile that moved after the preview is
         today's `ProfileChanged` refusal rather than a policy answer read from another profile, and
-        `Delivery.start`'s own final digest check is kept."""
+        `Delivery.start`'s own final digest check is kept. A start the level leaves to the owner becomes a
+        `ConsentRequest` holding that preview."""
         delivery = app.delivery
         plan = delivery.plan()  # a session without a plan names no current revision: today's `Changed`, no crash
         if plan is None or plan.get("version") != revision:
@@ -879,8 +928,8 @@ class Controller:
             raise ProfileChanged("The process profile changed after the preview: check the new values and "
                                  "confirm the start again.")
         if autonomy.decide(autonomy.level_of(status), "start") == "ask":
-            raise Blocked("Starting %s is done by the owner in the zplan interface (autonomy policy): /run, or its "
-                          "card. A chat reply does not start it." % milestone, family="autonomy.ask")
+            return self._request(
+                "start", milestone, {"milestone": milestone, "revision": revision}, status, preview)
         r = delivery.start(preview, app.roles)
         return {"milestone": r["milestone"], "plan_revision": r["plan_revision"], "attempt": r["attempt"],
                 "run_id": r["run_id"], "status": r["status"]}
@@ -896,12 +945,12 @@ class Controller:
         delivery.stop(r)
         return {"milestone": r["milestone"], "attempt": r["attempt"], "run_id": r["run_id"], "status": r["status"]}
 
-    @staticmethod
-    def _approve_tool(app, revision):
+    def _approve_tool(self, app, revision):
         """Approve the current plan revision in one job. A revision that is not the current one is today's `Changed`;
         the policy decides on the very profile digest the revision's gate was argued under, so a profile that moved
         is today's `ProfileChanged` (never an approval the live configuration no longer backs). `Authority.approve`
-        keeps the verifier pass, the plan gate and its own digest check."""
+        keeps the verifier pass, the plan gate and its own digest check. An approval the level leaves to the owner
+        is recorded as asked and left to the plan card."""
         delivery = app.delivery
         plan = delivery.plan()  # a session without a plan names no current revision: today's `Changed`, no crash
         if plan is None or plan.get("version") != revision:
@@ -912,17 +961,16 @@ class Controller:
             raise ProfileChanged("The process profile changed after the plan check: check the configuration and "
                                  "approve again.")
         if autonomy.decide(autonomy.level_of(status), "approve") == "ask":
-            raise Blocked("Approving plan r%s is done by the owner in the zplan interface (autonomy policy): "
-                          "/approve, or the plan card. A chat reply does not approve it." % revision,
-                          family="autonomy.ask")
+            return self._ask("approve", revision, "plan")
         app.planning.approve(revision)
+        self._answered("approve", revision)
         return {"revision": revision, "status": "approved"}
 
-    @staticmethod
-    def _resume_tool(app, milestone, token):
+    def _resume_tool(self, app, milestone, token):
         """Resume the exact attempt a status row named, in one job. The token is resolved exactly (an attempt that
         moved is today's `Changed`), then today's readiness gate `resume`, the autonomy policy and the milestone
-        profile guard, enforced before the dispatch and bound to the policy's own read."""
+        profile guard, enforced before the dispatch and bound to the policy's own read. A resume the level leaves
+        to the owner becomes a `ConsentRequest`."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
         blocked = Controller._blocked(app, "resume")
@@ -931,20 +979,19 @@ class Controller:
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         if autonomy.decide(autonomy.level_of(status), "resume") == "ask":
-            raise Blocked("Continuing %s is done by the owner in the zplan interface (autonomy policy): /run, or its "
-                          "card. A chat reply does not continue it." % milestone, family="autonomy.ask")
+            return self._request("resume", milestone, {"milestone": milestone, "token": token_fields(token)}, status)
         Controller._action_status(app, "milestone", status)  # the guard the owner's own resume applies, before it
         res = delivery.resume(r)
         return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
                 "run_id": res["run_id"], "status": res["status"]}
 
-    @staticmethod
-    def _rebrief_tool(app, milestone, token, note):
+    def _rebrief_tool(self, app, milestone, token, note):
         """A new attempt with the owner's note, in one job. The token is resolved exactly (an attempt that moved is
         today's `Changed`), then today's readiness gate `start`, the autonomy policy and the milestone profile
         guard, and `check_followup` inside the service. A `needs_owner` attempt is answered, any other unsuccessful
         attempt gets a new attempt; the note is added to the attempt's task notes, the brief itself unchanged. The
-        attempt's roles come from the same profile read the policy decided on, so the two never disagree."""
+        attempt's roles come from the same profile read the policy decided on, so the two never disagree. A rebrief
+        the level leaves to the owner becomes a `ConsentRequest`."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
         blocked = Controller._blocked(app, "start")
@@ -953,16 +1000,22 @@ class Controller:
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         if autonomy.decide(autonomy.level_of(status), "rebrief") == "ask":
-            raise Blocked("A new attempt of %s is made by the owner in the zplan interface (autonomy policy): "
-                          "/attempt, or its card. A chat reply does not make it." % milestone,
-                          family="autonomy.ask")
+            return self._request("rebrief", milestone,
+                                 {"milestone": milestone, "token": token_fields(token), "note": note}, status)
+        res = Controller._rebrief_attempt(app, r, note, status)
+        return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
+                "run_id": res["run_id"], "status": res["status"]}
+
+    @staticmethod
+    def _rebrief_attempt(app, r, note, status):
+        """The new attempt of `r` with the owner's note, after the policy read `status` allowed it or the owner
+        granted it: the profile the attempt runs under is bound to that read, and the cap guard comes first."""
+        delivery = app.delivery
         enforced = Controller._action_status(app, "milestone", status)  # the profile the attempt itself runs under
         roles = enforced.resolved.roles() if enforced is not None else None
         delivery.admission()  # C3: the same cap guard the owner's own paths take, before the attempt is created
-        res = (delivery.runs.answer(r, note, roles) if r["outcome"] == "needs_owner"
-               else delivery.runs.retry(r, note, roles))
-        return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
-                "run_id": res["run_id"], "status": res["status"]}
+        return (delivery.runs.answer(r, note, roles) if r["outcome"] == "needs_owner"
+                else delivery.runs.retry(r, note, roles))
 
     @staticmethod
     def _brake(app):
@@ -1056,25 +1109,142 @@ class Controller:
         if proposal is not None and proposal.id == proposal_id and proposal.state == "awaiting":
             self.commit_proposal = replace(proposal, state="declined", lines=("The owner declined the commit.",))
 
-    @staticmethod
-    def _merge_tool(app, milestone, token):
+    def consent(self, request_id, done=None):
+        """The owner's «yes» to the architect's request: run the stored action through the existing operations and
+        their checks, as one job (the closing guard of every mutation applies). The profile, the plan revision and
+        the attempt must be those the architect asked about; when one moved the request is `stale` and nothing
+        ran. A request that is not awaiting any more is left as it is: its «yes» does nothing. Returns what `post`
+        returns."""
+        def work(app, delivery):
+            request = self.consent_request
+            if request is None or request.id != request_id:
+                raise Blocked("This request is no longer valid: ask the architect again.", family="action.refused")
+            if request.state != "awaiting":
+                return Outcome(request.state, lines=request.lines, data=request)
+            try:
+                lines = self._grant(app, request)
+                state = "done"
+            except (Changed, ProfileChanged) as error:
+                state, lines = "stale", (summary(error),)
+            except (Blocked, OSError, ValueError) as error:
+                state, lines = "failed", (summary(error),)
+            return self._settled(request, state, lines)
+        return self._job("consent", work, done)
+
+    def decline(self, request_id, done=None):
+        """The owner's «no» to the architect's request: it is dropped and nothing runs; a request that is not
+        awaiting stays as it is. Runs as one job like `consent`."""
+        def work(app, delivery):
+            request = self.consent_request
+            if request is None or request.id != request_id or request.state != "awaiting":
+                return Outcome("ignored")
+            return self._settled(request, "declined", ("The owner declined the architect's request.",))
+        return self._job("decline", work, done)
+
+    def _settled(self, request, state, lines):
+        """The request ends in `state`: stored, shown by the hook and returned for the owner's card."""
+        request = replace(request, state=state, lines=tuple(lines))
+        self.consent_request = request
+        self._notify(self.on_consent_request, request)
+        return Outcome(state, lines=request.lines, data=request)
+
+    def _grant(self, app, request):
+        """Run the action the owner granted: the same readiness gate, profile guard and service call the architect's
+        own tool makes at a level that allows it, on the profile the policy read when the architect asked. A
+        profile that moved since is `ProfileChanged`, a start whose attempt or plan revision moved is the
+        service's `Changed`, a token that moved is `Changed`; nothing has run then. Returns the receipt lines."""
+        delivery = app.delivery
+        status = autonomy.status_of(app.profile)
+        if (status.digest if status is not None else None) != request.digest:
+            raise ProfileChanged("The process profile changed after the architect asked: nothing was done. Ask the "
+                                 "architect again.")
+        args, milestone = request.args, request.milestone
+        r = None
+        if request.action != "start":  # the exact attempt the architect's status row named
+            r = delivery.resolve(self._token_argument(args, milestone), exact=True)
+        blocked = self._blocked(app, "resume" if request.action == "resume" else "start")
+        if blocked:
+            raise Blocked("Not ready: " + "; ".join(check.line for check in blocked.checks), family="action.refused")
+        if request.action == "start":
+            res = delivery.start(request.preview, app.roles)
+        elif request.action == "resume":
+            Controller._action_status(app, "milestone", status)  # the guard the owner's own resume applies
+            res = delivery.resume(r)
+        else:
+            res = Controller._rebrief_attempt(app, r, args["note"], status)
+        verb = {"start": "started", "resume": "continued", "rebrief": "new attempt"}[request.action]
+        return ("%s %s · plan r%s · attempt %s" % (res["milestone"], verb, res["plan_revision"], res["attempt"]),)
+
+    def _merge_tool(self, app, milestone, token):
         """Merge the exact attempt a status row named, in one job. The token is resolved exactly (an attempt that
         moved is today's `Changed`), then the autonomy policy decides on the same profile read the merge is bound to:
-        `Delivery.merge` gets the digest the policy saw as `expected`, so a profile that moved to another one is
-        `process.changed` and nothing is merged. `merge` asks unless the profile requires the merge gate
-        (`gates.merge: required`), where auto allows and supervised and manual ask; the result is `Delivery.merge`'s
-        own (`kind` and `line`)."""
+        `Delivery.merge` gets the digest the policy saw as `expected`, so a profile that moved to another one, before or
+        during the merge, is `process.changed` and nothing is merged. Without the merge gate the tier is judged
+        again on the integrated candidate's own paths right before landing (`vet`): a high one asks like the estimate.
+        The decision follows the level and the candidate's risk tier (auto allows, supervised asks on high risk, manual asks); the merge gate only decides whether checks and the critic
+        run. The result is `Delivery.merge`'s own (`kind` and `line`); a landed merge without the gate says that no
+        merge check or critic ran."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
         status = autonomy.status_of(app.profile)  # the policy's own read, once
-        gate = autonomy.merge_gate(status)
-        if autonomy.decide(autonomy.level_of(status), "merge", gate) == "ask":
-            why = "" if gate == "required" else " The profile has no merge check, so the merge is the owner's."
-            raise Blocked("Merging %s is done by the owner in the zplan interface (autonomy policy): the merge card, "
-                          "or /merge.%s A chat reply does not merge it." % (milestone, why),
-                          family="autonomy.ask")
-        merged = delivery.merge(r, expected=status.digest if status is not None else None)
-        return {"milestone": r["milestone"], "kind": merged.kind, "line": merged.line}
+        gate, level = autonomy.merge_gate(status), autonomy.level_of(status)
+        if autonomy.decide(level, "merge", gate, merge_tier(status, changed_paths(app, r))) == "ask":
+            return self._ask("merge", milestone, "merge")
+
+        def vet(paths):  # the tier of the candidate that lands, not of the result branch (a rename on main can raise it)
+            if autonomy.decide(level, "merge", gate, merge_tier(status, paths)) == "ask":
+                raise Blocked("The merge candidate changes files the profile rates high risk: the owner decides.",
+                              family="autonomy.ask")
+
+        merged = delivery.merge(r, expected=status.digest if status is not None else None, vet=vet)
+        if merged.family == "autonomy.ask":
+            return self._ask("merge", milestone, "merge")
+        if merged.kind == "integrated":
+            self._answered("merge", milestone)
+        line = merged.line
+        if merged.kind == "integrated" and gate != "required":
+            line += " No merge check or critic ran: the profile's merge gate is off."
+        return {"milestone": r["milestone"], "kind": merged.kind, "line": line}
+
+    def _notify(self, hook, *args):
+        """Tell the screen (a worker-callable hook); a screen that went away is not the job's failure."""
+        if hook is not None:
+            try:
+                hook(*args)
+            except Exception:  # the UI went away
+                pass
+
+    def _request(self, action, milestone, args, status, preview=None):
+        """The architect's `action` at "ask": store one `ConsentRequest` and answer `awaiting_owner` with its id; the
+        owner's answer is what acts. The same request again is the same id; another one while a request awaits is
+        refused naming the awaiting one. `status` is the policy's read, whose digest the owner's answer is checked
+        against."""
+        request = self.consent_request
+        if request is not None and request.state == "awaiting":
+            if (request.action, request.args) != (action, args):
+                raise Blocked("Request %s (%s %s) is waiting for the owner: wait for the answer before asking "
+                              "for another action." % (request.id, request.action, request.milestone),
+                              family="autonomy.ask")
+            return {"status": "awaiting_owner", "request": request.id}
+        request = ConsentRequest(uuid.uuid4().hex[:12], action, milestone, args,
+                                 status.digest if status is not None else None, preview)
+        self.consent_request = request
+        self._notify(self.on_consent_request, request)
+        return {"status": "awaiting_owner", "request": request.id}
+
+    def _ask(self, action, value, card):
+        """Record that the architect asked for `action` ("approve": the plan version, "merge": the milestone), which
+        stays the owner's own card or command, and answer the architect with the card that holds it."""
+        self.asked[action] = value
+        self._notify(self.on_asked, dict(self.asked))
+        return {"status": "awaiting_owner", "card": card}
+
+    def _answered(self, action, value):
+        """The owner's own card or command (or an allowed action) did what the architect asked for `value`: the ask
+        is over."""
+        if self.asked.get(action) == value:
+            del self.asked[action]
+            self._notify(self.on_asked, dict(self.asked))
 
     @staticmethod
     def _action_status(app, kind, status):
@@ -1229,18 +1399,21 @@ class Controller:
     def approve_plan(self, version, done):
         def work(app, planning):
             planning.approve(version)
+            self._answered("approve", version)
             return Outcome("approved")
         return self._plan_job("approve", work, done)
 
     def override_plan(self, version, reason, done):
         def work(app, planning):
             planning.override(version, reason)
+            self._answered("approve", version)
             return Outcome("overridden")
         return self._plan_job("override", work, done)
 
     def reject_plan(self, version, done):
         def work(app, planning):
             planning.reject(version)
+            self._answered("approve", version)
             return Outcome("rejected")
         return self._plan_job("reject", work, done)
 
@@ -1524,6 +1697,8 @@ class Controller:
                     return
                 outcome, error = None, "zplan is closing; the merge was not repeated."
             self._merge_wait(None)
+            if error is None and outcome.kind == "integrated":
+                self._answered("merge", token.milestone)
             if done is not None:
                 done(outcome, error)
         return self._job("merge", run, settle)

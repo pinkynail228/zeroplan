@@ -14,7 +14,7 @@ Interpretations (the reviewers never see the worker's summary):
   (no file replace, no commit).
 - «profile» on a «later» profile edits the snapshot in effect (not a new proposal); saving writes it, with the
   owner's values, as the accepted file.
-- Without a check the merge gate offers only «you merge, no check» (a stored `required` stays as it is until the owner presses it).
+- Without a check the merge gate offers only «no check before merging» (a stored `required` stays as it is until the owner presses it).
 - `tui_settings.profile` and `tui_bootstrap.configure` carry the key `right`: `tests/test_reference.py` lets a screen
   share one key only for the action sets it lists, and the buttons are reached by Tab or the arrows.
 - Whole-app drives: two.
@@ -94,7 +94,7 @@ class ChoiceEngineTests(ProfileEditTest):
         self.assertEqual(self.document()["roles"]["planner"], process.propose(self.project, {})["roles"]["planner"])
 
     def test_p1_the_merge_gate_needs_a_check(self):
-        """No check: «automatic on green checks» is refused with the reason, nothing is written."""
+        """No check: «checks before merging» is refused with the reason, nothing is written."""
         with self.assertRaisesRegex(Blocked, "gates.merge"):  # the reason's words are the services' (process.py)
             self.profile("accept", {"merge": "required"})
         (self.project / "package.json").write_text(json.dumps(CHECKS))
@@ -229,7 +229,7 @@ class EditorFormTests(unittest.IsolatedAsyncioTestCase):
                                     if (b.name or "").startswith(group + "=")]  # the picked one carries «● » (D6b)
             self.assertEqual(labels("level"), list(process.LEVEL_NAMES.values()))  # the services' level words
             self.assertEqual(labels("max_runs"), ["1", "2", "3", "5"])  # the file's 5 is a button of its own
-            self.assertEqual(labels("merge"), ["you merge, no check"])  # no check: only this one, with the reason
+            self.assertEqual(labels("merge"), ["no check before merging"])  # no check: only this one, with the reason
             self.assertIn("There are no checks", screen_text(host))
             for role, model, _ in self.ROLES:
                 self.assertEqual(host.screen.query_one("#profile-model-" + role, Input).value, model)
@@ -243,7 +243,7 @@ class EditorFormTests(unittest.IsolatedAsyncioTestCase):
             names = [b.name for b in host.screen.query("Button")]
             self.assertEqual(sum(n == "merge=required" for n in names) + sum(n == "merge=off" for n in names), 2)
             self.assertEqual([b.label.plain.removeprefix("● ") for b in host.screen.query("Button")
-                              if (b.name or "").startswith("merge=")], ["automatic on green checks", "you merge, no check"])
+                              if (b.name or "").startswith("merge=")], ["checks before merging", "no check before merging"])
             host.screen.query_one("#profile-merge-required", Button).press()
             host.screen.query_one("#profile-effort-worker-low", Button).press()
             host.screen.query_one("#profile-model-critic", Input).value = " new-model "

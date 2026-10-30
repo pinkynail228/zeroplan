@@ -1,8 +1,8 @@
 """Merge critic core (A7b): the trigger rule, the durable record, its graph and its run.
 
-Why: `runs.MilestoneRuns.gate_merge` (A7a) classifies the risk of a candidate but nothing acts on it; a risky
-merge needs a fresh critic whose BLOCK stops it. This module is the core alone -- it takes the risk classification
-and the semantic `facts` as input and is never called from `gate_merge` or Delivery (that wiring is A7b2).
+Why: `runs.MilestoneRuns.gate_merge` (A7a) classifies the risk of a candidate; a risky merge needs a fresh critic
+whose BLOCK stops it. This module is the core: it takes the risk classification and the semantic `facts` as input,
+and the merge gate (`runs.py`, `delivery.py`) raises the critic and checks its record through it.
 
 Reused from the task gate (`task_gate.py`): the durable-record validation style (a strictly validated optional
 list in the store, one entry per run, never rewritten in place), the store round-trip helpers (`persistable`,
@@ -13,7 +13,7 @@ bound to the *candidate identity of one merge* and is never re-dispatched to rep
 The trigger rule (`reasons`, C1) is the pure classification the wiring feeds: the tier and the path triggers come
 from `process.risk_of` over the changed paths, and the three path-less preset triggers (`data_loss`, `process_kill`,
 `disagreement`; process.py PRESET_V2) come from the semantic `facts` a later slice gathers -- `risk_of` matches
-paths only, so it can never raise them. A fact that is omitted is unchecked, never "no" ("no" is exactly `False`).
+paths only, so it can never raise them. A fact that is omitted or `False` raises nothing; only `True` does.
 
 The identity (C2) is the full merge identity a later `allows` compares: milestone, plan revision, attempt, the
 destination ref and its base, the result and candidate commits, the candidate tree, the configuration digest, the
@@ -55,13 +55,12 @@ INVALID = "Invalid merge check record; store rejected."
 
 def reasons(risk, facts):
     """The sorted trigger names of one merge (C1): `tier:high` for a high tier, every matched path trigger of
-    `risk` and every path-less preset trigger `facts` marks true or omits. `facts` is the semantic input the wiring
-    gathers; a path-less trigger it marks `False` is a checked "no" and is dropped, while a trigger it omits is
-    unchecked (never "no") and is raised."""
+    `risk` and every path-less preset trigger `facts` marks true. `facts` is the semantic input the wiring gathers; a
+    path-less trigger it omits or marks `False` is not raised, so a low-risk merge with no fact raises nothing."""
     found = set(risk["triggers"])
     if risk["tier"] == "high":
         found.add("tier:high")
-    found.update(name for name in PRESET_TRIGGERS if facts.get(name, True) is not False)
+    found.update(name for name in PRESET_TRIGGERS if facts.get(name) is True)
     return sorted(found)
 
 

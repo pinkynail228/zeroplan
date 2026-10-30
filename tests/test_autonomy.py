@@ -1,8 +1,9 @@
 """C4: the architect's autonomy policy. `decide` is pure; `level` reads the accepted profile and never raises.
 
 A5t2b: with the release gate on (`AUTOMATIC`, A4b and A7 merged 2026-10-25) auto and supervised let the architect
-start, resume and re-brief; edit is allowed at every level (it only proposes, the approval stays gated); merge asks
-unless the profile it was read from requires the merge gate (`gates.merge: required`), where only auto allows.
+start, resume and re-brief; edit is allowed at every level (it only proposes, the approval stays gated). p2a: merge
+follows the level and the candidate's risk tier (auto allows, supervised asks on high risk, manual asks); the merge
+gate (`gates.merge`) only decides whether checks and the critic run.
 
 Interpretations (the brief leaves them open):
 - `decide` takes the level as data; `level(profile)` is the one reader of it. The Controller calls both, so a
@@ -85,16 +86,17 @@ class DecideTests(unittest.TestCase):
                 with patch.object(autonomy, "AUTOMATIC", False):
                     self.assertEqual(autonomy.decide(level, "edit"), "allow")
 
-    def test_a_merge_is_the_owners_unless_the_profile_requires_the_gate(self):
-        """A5t2b C2: `merge` asks at every level unless the profile's `gates.merge` is "required" (passed as the
-        gate), where only auto allows; supervised and manual stay the owner's."""
-        for level in autonomy.LEVELS:
-            with self.subTest(level=level):
-                self.assertEqual(autonomy.decide(level, "merge"), "ask")           # off/None: the owner's
-                self.assertEqual(autonomy.decide(level, "merge", "off"), "ask")
-        self.assertEqual(autonomy.decide("auto", "merge", "required"), "allow")
-        self.assertEqual(autonomy.decide("supervised", "merge", "required"), "ask")
-        self.assertEqual(autonomy.decide("manual", "merge", "required"), "ask")
+    def test_a_merge_follows_the_level_and_the_risk_tier_not_the_gate(self):
+        """p2a A1: auto allows a merge at any tier and gate; supervised allows it below high and asks on high and on a
+        tier it does not know (none included); manual asks. The merge gate never changes the answer."""
+        for gate in (None, "off", "required"):
+            for tier in ("low", "medium", "high", "odd", None):
+                with self.subTest(gate=gate, tier=tier):
+                    self.assertEqual(autonomy.decide("auto", "merge", gate, tier), "allow")
+                    self.assertEqual(autonomy.decide("supervised", "merge", gate, tier),
+                                     "allow" if tier in ("low", "medium") else "ask")
+                    self.assertEqual(autonomy.decide("manual", "merge", gate, tier), "ask")
+                    self.assertEqual(autonomy.decide("yolo", "merge", gate, tier), "ask")
 
     def test_with_the_gate_on_an_approve_is_allowed_for_auto_only(self):
         """A5t2a C4: with the gate on, only auto lets the architect approve the plan; supervised and manual plan

@@ -38,7 +38,7 @@ from .engine import (CAUSE_NAMES, CAUSE_UNKNOWN, LOG_LIMIT, NativeEngine, Observ
                      SliceEnded, binding_identity, check_socket_path, observed_cause, reset_value)
 from .export import IDENTITY, OPTIONS, create_branch, environment, tracked
 from .export import run_git as export_git
-from .process import RISK_TIERS, risk_of
+from .process import RISK_TIERS, ProfileChanged, risk_of
 from .snapshot import listed
 
 
@@ -165,6 +165,13 @@ def names(project_id, approval, milestone_id, attempt):
 
 def title(r):
     return "Milestone %s attempt %s (plan revision %s)" % (r["milestone"], r["attempt"], r["plan_revision"])
+
+
+def milestone_title(r):
+    """The milestone's title for the project's history: the one frozen with the attempt's manifest, on one line and
+    cut to 72 characters with «…». Not `title(r)`, which is the native run's title."""
+    text = " ".join(r["manifest"]["milestone"]["title"].split())
+    return text if len(text) <= 72 else text[:71] + "…"
 
 
 def result_branch(r):
@@ -642,9 +649,10 @@ def gate_paths(project, head, tree):
 
 def commit_candidate(project, r, tree, head, result, identity, trailer=None):
     """The merge commit of `tree` over (head, result), made off-tree with `commit-tree` under the owner's identity;
-    `trailer` is an optional second message paragraph."""
+    the second message paragraph names the result branch, then the optional `trailer`."""
     name, email = identity
-    message = ["-m", "Merge %s: %s" % (r["result"]["branch"], title(r))] + (["-m", trailer] if trailer else [])
+    message = ["-m", "Merge %s: %s" % (r["milestone"], milestone_title(r)),
+               "-m", "\n".join(["Branch: " + r["result"]["branch"]] + ([trailer] if trailer else []))]
     made = git_call(project, "commit-tree", tree, "-p", head, "-p", result, *message,
                     env={"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
                          "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email})
@@ -1507,7 +1515,8 @@ class MilestoneRuns:
             r["delivery"] = "exporting"
             self.save(r)
         tree = r["result"]["tree"]
-        message = ["zplan: %s" % title(r), "Plan approval %s; product tree %s." % (r["approval"][:8], tree)]
+        message = ["zplan: %s %s (attempt %s, plan revision %s)" % (r["milestone"], milestone_title(r), r["attempt"], r["plan_revision"]),
+                   "Plan approval %s; product tree %s." % (r["approval"][:8], tree)]
         sha, _ = create_branch(project, worktree, base, r["result"]["branch"], message,
                                lambda: self.product_tree(r) == tree, exclude=CONTROL)
         r["result"]["commit"] = sha
@@ -1520,7 +1529,7 @@ class MilestoneRuns:
         """True while the project has an unfinished merge (MERGE_HEAD)."""
         return git_call(project, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
 
-    def merge(self, r, resolved=None, critic=None, slice=None):
+    def merge(self, r, resolved=None, critic=None, slice=None, pinned=None, vet=None):
         """Owner-confirmed merge of the result commit into its destination branch.
 
         Only on a target whose HEAD is that branch, with the owner's configured Git user, and never while a merge is
@@ -1530,7 +1539,10 @@ class MilestoneRuns:
         ignored or modified file is refused (`Overlap`). With `gates.merge: required` in `resolved` the merge is
         gated (`gate_merge`). `critic(r, gate, paths)` runs the merge critic of one gated candidate
         after its checks passed and returns its record or raises a refusal; a raised-reason candidate lands only on a
-        stored `go` for its exact identity (`gate_merge`); `slice` bounds the critic's observation."""
+        stored `go` for its exact identity (`gate_merge`); `slice` bounds the critic's observation. An ungated merge
+        lands only under the profile digest `pinned` (`land` re-reads it; None: no comparison). Either path, when
+        `vet` is given, lands only after `vet(paths)` -- the paths of the integrated candidate's tree, not of the
+        result branch -- did not raise; a gated candidate is vetted, new or reused, before the critic."""
         self.check_current(r)
         self.upgrade(r)
         require(r["delivery"] in {"awaiting_merge", "conflict"}, "Merge is possible only for an exported result.", family="action.refused")
@@ -1546,13 +1558,17 @@ class MilestoneRuns:
         identity = configured_identity(project)
         require(identity is not None, "Git user.name/user.email are not configured; merge forbidden (git config user.name ...).", family="readiness.identity")
         if resolved is not None and resolved.config["gates"]["merge"] == "required":
-            return self.gate_merge(r, resolved, identity, critic, slice)
+            return self.gate_merge(r, resolved, identity, critic, slice, vet)
         head = run_git(project, "rev-parse", "HEAD")
         tree = self.merge_tree(r, ref, head, sha, project)
         if tree is None:  # a conflicted merge: recorded, the tree is untouched
             return r
+        if vet is not None:
+            vet(gate_paths(project, head, tree))
         candidate = commit_candidate(project, r, tree, head, sha, identity)
-        return self.land(r, ref, head, candidate, project)
+        if pinned is not None and self.authority.live_profile_digest() != pinned:
+            raise ProfileChanged("The process profile changed during the merge: check the new values and repeat the merge.")
+        return self.land(r, ref, head, candidate, project, pinned)
 
     def merge_tree(self, r, ref, head, result, project):
         """The tree of the merge of (head, result), built off-tree by `merge-tree --write-tree`. A conflicting merge
@@ -1605,7 +1621,7 @@ class MilestoneRuns:
         self.save(r)
         return r
 
-    def gate_merge(self, r, resolved, identity, critic=None, slice=None):
+    def gate_merge(self, r, resolved, identity, critic=None, slice=None, vet=None):
         """The gated merge (A7a) with the merge critic (A7b2): a candidate commit of the destination head and the
         result is built without touching the tree, the project checks run on exactly that commit, then the merge
         critic judges the candidate and only its `go` for exactly that identity lets it land.
@@ -1620,7 +1636,8 @@ class MilestoneRuns:
         merge or the configuration changed during the checks or the critic, nothing is merged and a later merge builds
         a new candidate. The candidate's message states `passed` before the checks ran: the commit only lands if they
         did. Its risk is read from the diff of the head against the candidate's tree (the candidate's own diff, known
-        before the message that carries the tier is written)."""
+        before the message that carries the tier is written). `vet(paths)`, when given, runs on those paths once the checks
+        passed, before the critic and the landing: a raise lands nothing and the gate record stays."""
         project, config = self.authority.project, resolved.config
         ref, branch, result = "refs/heads/" + r["destination"]["branch"], r["result"]["branch"], r["result"]["commit"]
         head, pinned = run_git(project, "rev-parse", "HEAD"), resolved.digest
@@ -1636,6 +1653,8 @@ class MilestoneRuns:
             failed = next(c for c in gate["evidence"]["checks"] if c["status"] != 0)
             raise Blocked("The check '%s' failed (%s); the merge was not done." % (failed["name"], failed["status"]),
                           family="merge.checks_failed")
+        if vet is not None:  # the caller's last word on the candidate's own paths, before the critic and the landing
+            vet(paths)
         names = merge_critic.reasons(gate["risk"], {})
         if names:
             # The landing itself requires a stored `go` for exactly this candidate: a missing callback, a None, a

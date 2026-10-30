@@ -501,18 +501,23 @@ class GraphStructureTests(unittest.TestCase):
 
     def test_the_worker_and_repair_verify_in_proportion_to_the_change(self):
         """H3 P1/P2/P4: the worker and both repair texts carry the one VERIFY_RULE constant (own way, in proportion; a
-        behaviour change gets a relevant test, a requested test is written, docs/copy/config alone get none), "with
-        tests" is in no node's instructions, and the final check's `incomplete` no longer lists a failed command (a
-        check that runs and fails is rejected) while a missing tool stays. Interpretation: none."""
+        behaviour change that existing tests do not cover gets a relevant test, a requested test is written,
+        docs/copy/config alone get none), "with tests" is in no node's instructions, the acceptance review runs no
+        checks (the final check runs them) while the code review is not told so, and the final check's `incomplete`
+        no longer lists a failed command (a check that runs and fails is rejected) while a missing tool stays. Interpretation: none."""
         rule = milestone.VERIFY_RULE
-        for part in ("the project's own way and in proportion", "behaviour change (a new feature included) gets a "
-                     "relevant test", "a project's first included", "docs, copy or config files alone gets no new test"):
+        for part in ("the project's own way and in proportion", "behaviour change (a new feature included) that "
+                     "existing tests do not cover gets a relevant test (extend an existing test first)",
+                     "a project's first included", "docs, copy or config files alone gets no new test"):
             self.assertIn(part, rule)
         by_name = {n["name"]: n for n in nodes(milestone.milestone_graph(2)["root"])}
         for name in ("worker", "repair", "empty_repair"):
             self.assertIn(rule, by_name[name]["instructions"], name)
         for node in by_name.values():
             self.assertNotIn("with tests", node.get("instructions", ""), node["name"])
+        self.assertIn("run no checks", by_name["acceptance_review"]["instructions"])
+        self.assertNotIn("run the checks", by_name["acceptance_review"]["instructions"])
+        self.assertNotIn("run no checks", by_name["code_review"]["instructions"])
         for name in ("final_verify", "final_reverify", "empty_final_verify", "empty_final_reverify"):
             text = by_name[name]["instructions"]
             self.assertNotIn("a failed command", text, name)

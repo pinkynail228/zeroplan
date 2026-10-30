@@ -672,9 +672,10 @@ class Delivery:
         return profile.guard(kind) if profile is not None else None
 
     def slots(self):
-        """How many milestone attempts the live profile admits side by side (C1): `autonomy.max_runs` of the accepted
-        profile, capped by the engine's own `runs.MAX_RUNS` (the hard cap `admit` enforces). 1 when the profile has
-        no `autonomy` (preset /1), is not accepted or cannot be read -- today's single slot, so every single-slot
+        """How many milestone attempts the live profile admits side by side (C1): `autonomy.max_runs` of the resolved
+        profile in any usable state, capped by the engine's own `runs.MAX_RUNS` (the hard cap `admit` enforces). 1
+        when the profile has no `autonomy` (preset /1), is missing, malformed or cannot be read --
+        today's single slot, so every single-slot
         behaviour and message stays. Reads the bound `Authority.profile` with `status(write=False)`, like
         `task_gate_admission`, so a refusal never writes the store."""
         profile = getattr(self.authority, "profile", None)
@@ -684,7 +685,7 @@ class Delivery:
             status = None  # a corrupt or deleted store reads as "no autonomy": today's single slot, never a crash
         resolved = getattr(status, "resolved", None)
         value = None
-        if resolved is not None and getattr(status, "state", None) == "accepted":
+        if resolved is not None:  # any usable state: accepted, "later" or undecided (the proposal)
             value = resolved.config.get("autonomy", {}).get("max_runs")
         return min(value, MAX_RUNS) if isinstance(value, int) and not isinstance(value, bool) else 1
 
@@ -755,8 +756,6 @@ class Delivery:
         profile = self.authority.profile
         require(profile is not None, "The process profile is not bound: the task check is not allowed.", family="action.refused")
         status = profile.status(write=False)
-        if status.state == "never":
-            raise Blocked("The project's process profile is not accepted yet: accept or postpone it.", family="process.pending")
         if status.state == "missing":
             raise Blocked(status.problem, family="process.missing")
         if status.state == "malformed":
@@ -769,7 +768,7 @@ class Delivery:
                 "Milestone %s is not in the approved plan." % milestone_id, family="action.refused")
         require(status.resolved is not None and status.resolved.config["gates"]["task"] == "required",
                 "The task check is turned off in %s." % process.PROFILE_FILE, family="action.refused")
-        return status, plan
+        return profile.settle(status), plan  # an undecided profile ("never") works as proposed: recorded as "later"
 
     def task_gate_engine(self, plan):
         """The engine environment that dispatches the gate (R-3): the same factory the plan gate uses. A native
@@ -1143,13 +1142,15 @@ class Delivery:
     def merge_question(r):
         return "Merge the result of %s into %s?" % (r["milestone"], r["destination"]["branch"])
 
-    def merge(self, r, slice=CRITIC_SLICE, expected=None):
+    def merge(self, r, slice=CRITIC_SLICE, expected=None, vet=None):
         """The confirmed merge. A conflict keeps the attempt open (its end view names the files).
 
         A gated merge runs the merge critic (`critic_authorize`) between the checks and the landing: `slice` bounds
         its one observation (`None` waits for the whole run; the Controller's call keeps the default). `expected`
         is the profile digest a caller decided on (the architect's merge policy): the merge's own profile read must
-        be that profile, else `ProfileChanged` and nothing is merged."""
+        be that profile, else `ProfileChanged` and nothing is merged; without a gate the landing is bound to that
+        digest (else to the profile read here), so a profile that changes during the merge lands nothing. `vet(paths)`
+        is the caller's last word on an ungated candidate's own changed paths (`MilestoneRuns.merge`)."""
         try:
             status = self.guard("merge")
             if expected is not None and (status is None or status.digest != expected):
@@ -1157,7 +1158,9 @@ class Delivery:
                                      "repeat the merge.")
             resolved = status.resolved if status is not None else None
             self.runs.merge(r, resolved,
-                            critic=lambda rr, gate, paths: self.critic_authorize(rr, gate, paths, resolved, slice))
+                            critic=lambda rr, gate, paths: self.critic_authorize(rr, gate, paths, resolved, slice),
+                            pinned=expected if expected is not None else (status.digest if status is not None else None),
+                            vet=vet)
         except Overlap as error:
             return Merge("overlap", refusal(error), True, error.paths, error.family or "")
         except Blocked as error:

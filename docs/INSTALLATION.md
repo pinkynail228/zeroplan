@@ -34,10 +34,12 @@ brew install python node
 - **Autonomy.** The process profile zplan proposes on the first start in a project sets `autonomy.level` to `auto`:
   while the full-screen shell is open, the architect approves a checked plan and starts or resumes ready
   milestones by itself. `"autonomy": {"level": "manual"}` in `zplan.process.json` makes it ask for each of these;
-  `supervised` asks for the plan approval and for every merge. On that first start «configure» sets the autonomy level,
+  `supervised` asks for the plan approval and for high-risk merges. On that first start «configure» sets the autonomy level,
   parallel runs (1-3), the merge rule and each role's model and effort before saving; `/setup` → «profile» changes them
-  later. Merges stay yours unless the profile sets `gates.merge` to `required` at level `auto`; the proposed profile
-  does that whenever zplan found a test command, and the architect then merges a milestone whose merge gate passed.
+  later. At `auto` the architect merges each milestone after its reviews pass, `supervised` unless the change is high
+  risk, and `manual` never. `gates.merge` only decides whether the project's checks (and, on a high-risk change, the
+  merge critic) run first: the proposed profile sets it to `required` whenever zplan found a test command, and
+  without it the merge runs no check and says so.
 - **Stop a run.** In the full-screen shell type `/stop` and answer «yes»: it stops the milestone selected in the list,
   else the first running one (or the planner while it plans); repeat for each running milestone. In the line UI (`zplan --plain`) press `k` + Enter while watching the milestone, then
   `y`. Quitting zplan or closing the terminal only detaches.

@@ -614,6 +614,36 @@ class CardHost:
         self.app.controller.decline_commit(key.split(":", 1)[1])
         self.close_card(key, strings.text("card.commit_declined", time=card_clock()))
 
+    def confirm_consent(self, key):
+        """«yes» on the architect's request card (`/approve`): the controller runs the stored action (`consent`, one
+        job with its own checks). The card closes as a receipt of what the answer was: what started, or why nothing
+        did (the profile, plan or attempt moved, a refused gate); a job that was not admitted (the interface is
+        closing) leaves it open."""
+        def settled(outcome, error):
+            if error or outcome is None:
+                text = strings.text("card.consent_failed", time=card_clock(), reason=error or MOVED)
+            elif outcome.kind == "done":
+                text = strings.text("card.consent_done", time=card_clock(), lines="\n".join(outcome.lines))
+            elif outcome.kind == "declined":
+                text = strings.text("card.consent_declined", time=card_clock())
+            else:
+                text = strings.text("card.consent_failed", time=card_clock(), reason="\n".join(outcome.lines))
+            self.close_card(key, text)
+            self.app.request_refresh()
+            self.app.changed()
+
+        self.app.controller.consent(key.split(":", 1)[1], self.app.deliver(settled))
+
+    def decline_consent(self, key):
+        """«no» on the architect's request card (`/decline`): nothing is run; the card closes as a receipt. A request
+        that is no longer awaiting is no decision: the next render takes its card off."""
+        def settled(outcome, error):
+            if error is None and outcome is not None and outcome.kind == "declined":
+                self.close_card(key, strings.text("card.consent_declined", time=card_clock()))
+            self.app.changed()
+
+        self.app.controller.decline(key.split(":", 1)[1], self.app.deliver(settled))
+
     def merge_later(self, key, milestone):
         """«merge later» (`/merge later`): the owner decided not to merge now. The card closes as a receipt and the
         branch stays as it is; nothing is merged or written."""

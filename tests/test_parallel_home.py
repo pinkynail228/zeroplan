@@ -56,6 +56,24 @@ class SlotsTests(ParallelRunsTest):
             self.assertEqual(service.slots(), 2)
             self.bind_slots(a, 5)
             self.assertEqual(service.slots(), runs.MAX_RUNS)  # the engine's hard cap, regardless of the profile
+            lines = "\n".join(process.describe(a.profile.status()))
+            self.assertIn("up to 3 runs", lines)  # p3a A3: a saved 5 is shown as the 3 that act
+            self.assertNotIn("5 runs", lines)
+            self.assertEqual(process.view(a.profile).form.max_runs, 3)
+
+    def test_p3a_an_undecided_or_postponed_profile_admits_its_proposals_max_runs(self):
+        """p3a A3. The slots come from the resolved configuration in any usable state: undecided (the proposal's 3),
+        "later" (its stored snapshot's 3, which `guard` records by itself) -- not the single slot an unaccepted profile
+        gave before."""
+        with self.fixture_authority() as a:
+            self.approve_parallel(a)
+            service = self.service(a, self.fixture_runs(a))
+            a.profile = process.Profile.of(a)
+            self.assertEqual(a.profile.status().state, "never")
+            self.assertEqual(service.slots(), 3)
+            a.profile.guard("milestone")  # records "later"
+            self.assertEqual(a.profile.status().state, "later")
+            self.assertEqual(service.slots(), 3)
 
     def test_c1_a_preset_without_autonomy_and_an_unaccepted_or_unreadable_profile_keep_one_slot(self):
         with self.fixture_authority() as a:

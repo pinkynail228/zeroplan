@@ -462,9 +462,7 @@ class NarrowApproveCardTests(ApproveCardShell):
             await self.panel(pilot)
             await self.command(pilot, "/view")
             await self.until(pilot, lambda: type(self.app.screen).__name__ == "PlanScreen")
-            await self.press_button(pilot, "approve")
-            await self.shows(pilot, "Approve plan r1?")
-            await self.press_button(pilot, "yes")
+            await self.press_button(pilot, "approve")  # p4a: the button is the consent, no second question
             await self.until(pilot, lambda: self.card() is None)
         self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
 

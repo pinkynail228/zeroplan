@@ -19,7 +19,7 @@
   <a href="#install">Install</a> · <a href="#try-it-free">Try it free</a> · <a href="#use-it-on-your-project">Use it</a> · <a href="docs/USER_FLOW.md">Guide</a>
 </p>
 
-Early release (0.8), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
+Early release (0.9), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
 
 ## Why zeroplan
 
@@ -27,8 +27,8 @@ Early release (0.8), macOS on Apple silicon only. Real runs use your Codex login
   critic checks that the plan covers it, and you approve it.
 - **Every task is reviewed twice.** A worker writes it; an acceptance review and a code review must both pass, or
   the task goes back for another round.
-- **Your checkout stays yours.** Each milestone runs in its own Git worktree and ends as a branch that you merge.
-  zplan never pushes.
+- **Your checkout stays yours.** Each milestone runs in its own Git worktree and ends as a
+  branch that zplan merges after its reviews pass, or that you merge, by autonomy level. zplan never pushes.
 - **Runs outlive the terminal.** Up to 3 independent milestones run side by side; close the terminal and `zplan`
   reattaches.
 
@@ -52,7 +52,7 @@ flowchart TD
     H -->|every task accepted| I[Final check of the milestone]
   end
   E -->|zplan submits the milestone| G
-  I --> J{The branch is merged: by zplan at autonomy auto when the profile has a merge check, else by you}
+  I --> J{The branch is merged: by zplan at autonomy auto, or at supervised unless the change is high risk, else by you}
 ```
 
 Each milestone's graph follows Zeroshot's own
@@ -102,8 +102,8 @@ asks "Merge into main?", `/merge`. The demo plan's M2 can wait. The architect ch
 > - **Agents have full access.** They run as your user without approval prompts and can read or change any file
 >   your user can. Use a machine where that is acceptable.
 > - **It acts on its own by default.** At autonomy `auto` zplan approves a checked plan, starts milestones and merges
->   those whose tests pass; a project with no test check waits for your `/merge`. On the first start choose
->   `supervised` to approve plans and merges yourself, or `manual` to approve every run too.
+>   each milestone once its reviews pass; without a test check it merges without one and says so. On the first
+>   start choose `supervised` to approve plans and high-risk merges yourself, or `manual` to approve everything.
 > - **`/stop` stops a run.** Quitting zplan only detaches.
 
 ```sh

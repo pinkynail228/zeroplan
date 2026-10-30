@@ -86,6 +86,26 @@ class MilestoneRunTests(Scratch):
         self.assertEqual((docs["runtime"]["harness"], nodes["worker"]["model"], nodes["preflight"]["model"], nodes["select"]["model"]),
                          ("claude", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5"))
 
+    def test_h1_several_task_files_become_one_milestone_in_order(self):
+        """H1: two task files -> one milestone titled by --title, slices S1/S2 owning R1/R2 with tasks T1/T2 in the
+        given order; several files without --title are refused and nothing is written."""
+        second = self.dir / "second.md"
+        second.write_text(TASK.replace("D1x — a small change", "D1y — the next change", 1))
+        result = self.documents("--title", "p1", task=self.task)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        refused = subprocess.run([sys.executable, str(REPO / "devtools/zeroshot/milestone_run.py"), "documents",
+                                  str(self.task), str(second), str(self.dir / "docs2"), "--runtime",
+                                  str(REPO / "devtools/zeroshot/runtime.json")], capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("--title", refused.stderr)
+        self.assertFalse((self.dir / "docs2").exists())
+        result = subprocess.run([sys.executable, str(REPO / "devtools/zeroshot/milestone_run.py"), "documents",
+                                 str(self.task), str(second), str(self.dir / "docs3"), "--runtime",
+                                 str(REPO / "devtools/zeroshot/runtime.json"), "--title", "p1"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        baseline = decode((self.dir / "docs3" / "baseline.json").read_text())
+        self.assertEqual([(t["id"], t["title"][:3]) for t in baseline["tasks"]], [("T1", "D1x"), ("T2", "D1y")])
+
     def test_c2_a_missing_field_is_named_and_nothing_is_written(self):
         """C2: a file without `Write-set:` (and without `Risk:`) exits 2 naming both; a DeepSeek-style node is refused."""
         self.task.write_text(TASK.replace("Write-set:", "Files:").split("Risk:")[0])

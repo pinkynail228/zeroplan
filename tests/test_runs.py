@@ -1182,6 +1182,11 @@ class DeliveryTests(RunsTest):
             self.assertRegex(r["result"]["branch"], r"^zplan/m1-[0-9a-f]{6}-r1-[0-9a-f]{8}-a1$")
             self.assertEqual(self.git("rev-parse", "refs/heads/" + r["result"]["branch"]).decode().strip(), sha)
             self.assertEqual(self.parents(sha), [base])
+            # u4w: the history names the milestone; the native run's title (`runs.title`) is another string.
+            name = r["manifest"]["milestone"]["title"]
+            self.assertEqual(self.git("log", "-1", "--format=%s", sha).decode().strip(),
+                             "zplan: M1 %s (attempt 1, plan revision 1)" % name)
+            self.assertEqual(runs.title(r), "Milestone M1 attempt 1 (plan revision 1)")
             self.assertEqual(self.tree(sha), ["ZPLAN_FIXTURE.md", "source.txt"])
             self.assertEqual((self.head(), self.git("status", "--porcelain")), (base, b""))
             self.assertIs(controller.finish(r), r)
@@ -1191,6 +1196,11 @@ class DeliveryTests(RunsTest):
             controller.merge(r)
             merge = self.head()
             self.assertEqual(self.parents(merge), [base, sha])
+            self.assertEqual(self.git("log", "-1", "--format=%s%n%n%b", merge).decode().strip(),
+                             "Merge M1: %s\n\nBranch: %s" % (name, r["result"]["branch"]))
+            long = dict(r, manifest={"milestone": {"title": "Add  a\nvery " + "long " * 20 + "title"}})
+            self.assertEqual(len(runs.milestone_title(long)), 72)
+            self.assertTrue(runs.milestone_title(long).startswith("Add a very long long") and runs.milestone_title(long).endswith("…"))
             self.assertEqual(self.git("log", "-1", "--format=%an <%ae>", merge).decode().strip(), "Fixture <fixture@example.invalid>")
             self.assertEqual((r["delivery"], r["integration"]), ("integrated", {
                 "destination": "refs/heads/" + r["destination"]["branch"], "commit": merge, "conflicts": [], "aborted": None}))
