@@ -1638,37 +1638,31 @@ class BootstrapPlainTests(ProfileTest):
         self.assertEqual(process.detect_checks(self.project)[0]["argv"], ["make", "test"])
 
     def test_a_unittest_check_needs_a_test_file_that_uses_unittest(self):
-        """C1b U1-U3 + p3c A1/A2. A root or tests/ `test_*.py` gives a unittest check only when it has `import unittest`
+        """C1b U1-U3 + r5 A1. A root or tests/ `test_*.py` gives a unittest check only when it has `import unittest`
         or `from unittest`; a pytest-style file (`import pytest`, `from pytest`, or a top-level `def test_`, no unittest
-        import) gives `python3 -m pytest` after the unittest rules, with or without a pytest config; a test_data.py with
-        neither gives none (merge stays off); an oversized, non-UTF-8 or unreadable file is neither unittest nor
-        pytest-style. Interpretation: one naming file among several is enough; the pytest-style rule reads the same
-        locations as the unittest rules (tests/ recursively, root files only)."""
+        import) gives no check unless pytest is configured (zplan's check PATH may lack pytest); a test_data.py with
+        neither gives none (merge stays off); an oversized, non-UTF-8 or unreadable file does not name unittest.
+        Interpretation: one naming file among several is enough; root files only, tests/ recursively."""
         argv = lambda: (process.detect_checks(self.project) or [{"argv": None}])[0]["argv"]
-        pytest_argv = ["python3", "-m", "pytest"]
         (self.project / "test_data.py").write_text("DATA = [1, 2]\n")
         self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "test_data.py").write_text("def helper_test_x():\n    pass\n    def test_nested(): pass\n")
         self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "tests").mkdir()
-        (self.project / "test_x.py").write_text("def test_x():\n    assert 1\n")
-        self.assertEqual(process.detect_checks(self.project), [
-            {"name": "test", "argv": pytest_argv, "timeout_s": process.DEFAULT_TIMEOUT}])
-        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "required")
-        (self.project / "test_x.py").unlink()
-        (self.project / "tests" / "test_y.py").write_text("import pytest\n")
-        self.assertEqual(argv(), pytest_argv)
-        (self.project / "tests" / "test_y.py").write_text("from pytest import raises\n")
-        self.assertEqual(argv(), pytest_argv)
-        (self.project / "tests" / "test_y.py").write_text("def test_y():\n    assert 1\n")
-        self.assertEqual(argv(), pytest_argv)
+        (self.project / "test_wc.py").write_text("def test_counts():\n    assert 1\n")
+        self.assertEqual(process.detect_checks(self.project), [])
+        self.assertEqual(process.propose(self.project, {})["gates"]["merge"], "off")
+        (self.project / "test_wc.py").unlink()
+        for text in ("import pytest\n", "from pytest import raises\n", "def test_y():\n    assert 1\n"):
+            (self.project / "tests" / "test_y.py").write_text(text)
+            self.assertEqual(process.detect_checks(self.project), [], text)
         (self.project / "pytest.ini").write_text("")
-        self.assertEqual(argv(), pytest_argv)
+        self.assertEqual(argv(), ["python3", "-m", "pytest"])
         (self.project / "pytest.ini").unlink()
         (self.project / "test_big.py").write_text("import unittest\n" + "#" * process.MAX_FILE_BYTES)
         (self.project / "test_bin.py").write_bytes(b"import unittest\n\xff\xfe")
         (self.project / "test_dir.py").mkdir()
-        self.assertEqual(argv(), pytest_argv)
+        self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "tests" / "test_y.py").unlink()
         self.assertEqual(process.detect_checks(self.project), [])
         (self.project / "test_ok.py").write_text("x = 1\nimport unittest\n")

@@ -18,7 +18,6 @@ import copy
 from dataclasses import dataclass, field, replace
 import errno
 import hashlib
-import itertools
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -641,8 +640,7 @@ def detect_checks(root):
     """The one obvious test command, found by reading files only (nothing is executed): package.json scripts.test,
     else a Makefile `test:` target, else pytest when it is configured, else `test_*.py` files under tests/ (unittest
     discovery), else `test_*.py` files directly in the root (unittest's own discovery), each only when one such file
-    imports unittest; else the same files when one imports pytest or defines a top-level `def test_` (pytest-style
-    tests without a pytest configuration); otherwise none."""
+    imports unittest; otherwise none."""
     root = Path(root)
     manifest = root / "package.json"
     try:
@@ -673,11 +671,6 @@ def detect_checks(root):
             return [{"name": "test", "argv": ["python3", "-m", "unittest"], "timeout_s": DEFAULT_TIMEOUT}]
     except OSError:
         pass
-    try:
-        if any(_pytest_style(path) for path in itertools.chain((root / "tests").rglob("test_*.py"), root.glob("test_*.py"))):
-            return [{"name": "test", "argv": ["python3", "-m", "pytest"], "timeout_s": DEFAULT_TIMEOUT}]
-    except OSError:
-        pass
     return []
 
 
@@ -685,12 +678,6 @@ def _names_unittest(path):
     """Whether a test file (read, never run) has an `import unittest` or `from unittest` line; a file that is
     unreadable, over MAX_FILE_BYTES or not UTF-8 counts as not naming it."""
     return _file_matches(path, r"^[ \t]*(?:import|from)[ \t]+unittest\b")
-
-
-def _pytest_style(path):
-    """Whether a test file (read, never run) is pytest-style: no unittest import, and an `import pytest` / `from pytest`
-    line or a top-level `def test_`; unreadable, oversized or non-UTF-8 files are not."""
-    return not _names_unittest(path) and _file_matches(path, r"^(?:[ \t]*(?:import|from)[ \t]+pytest\b|def[ \t]+test_)")
 
 
 def _file_matches(path, pattern):

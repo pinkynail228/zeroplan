@@ -127,7 +127,7 @@ merge), `question` (a stage needs an owner answer) and `error` (a failure or a b
 | `/plan GOAL` | `idle`, `draft`, `error` | Start the planner on the goal typed after it; readiness is re-checked first and a goal is never lost. With no text it decides the open goal-draft card (the same as its «yes, draft the plan») or sends the unsent revision |
 | `/approve` | `plan_ready`, `question`, `error` | Approve the proposed plan (the plan card's «yes, approve»); on an owner-question card send the answer draft, or open the answer note when there is none, and `/approve simplify`, `/approve split` or `/approve skip` sends that quick answer. With no card it opens the plan screen, whose button «approve» approves |
 | `/decline` | `draft`, `plan_ready`, `question` | Say «no» to the open card: a goal draft is dropped from the conversation, a proposed plan opens the revision note, an owner question opens the answer note, where `Enter` sends |
-| `/run` | any | The «Next:» action of the selected milestone (else the first one that has an action): start a ready one (the confirmation names milestone, plan revision and attempt; its buttons are «yes» and «no»), resume a recoverable failure, begin a new attempt, or check an unconfirmed submission or stop |
+| `/run` | any | The «Next:» action of the selected milestone (else the first one that has an action): start a ready one at once (no confirmation), resume a recoverable failure, begin a new attempt, or check an unconfirmed submission or stop |
 | `/stop` | `running`, `planning` | The stop confirmation of the running milestone — it names that milestone even when another row is selected — or of the planner. The unfinished work of the attempt is not accepted |
 | `/merge` | `merge` | Merge the stage whose card is open, with no modal; with no card open it opens the run-end screen, which holds «merge» and «changes» |
 | `/diff` | `merge`, `idle` | Open the selected finished stage's diff as a canvas tab |
@@ -161,7 +161,7 @@ its button «start the planner» starts the planner. Its buttons follow the plan
 | «log in» | Codex login in the terminal (the screen is suspended and restored) |
 | «watch» | Watch the planner again |
 | «log» | The tail of the planner's Zeroshot log |
-| «approve» | Approve the revision (asks «yes» / «no» first); nothing is started |
+| «approve» | Approve the revision at once; nothing is started |
 | «approve despite the check» | Approve a plan the critic rejected, with a typed reason in a note |
 | «revise» | Open the revision note: describe the change, press «send revision»; a new revision is planned |
 | «decline» | Decline the proposal (asks «yes» / «no» first) |
@@ -423,7 +423,7 @@ screens; the command or button it names works from the home screen.
 ## Developing zplan with zplan
 
 Run `zplan` from this repository to develop zplan itself. Give the planner a small goal, review and approve
-the plan, then start the ready milestone with `/run` and confirm with «yes».
+the plan, then start the ready milestone with `/run`, which starts it at once.
 
 While it runs, use the live panel to follow the work:
 
