@@ -36,10 +36,15 @@ class Planner(FixtureEngine):
 
     def __init__(self):
         self.sent = []        # revisions that reached the planner (one entry per real submission)
+        self.stopped = []     # run ids of the stops that reached it
         self.running = False
         self.entered = threading.Event()
         self.cause = None
         self.fails = False
+
+    def force_stop(self, binding, run_id, cwd):
+        """The planner's stop (`Planning.stop`) reaches the engine; the double only counts it."""
+        self.stopped.append(run_id)
 
     def prepare(self, authority):
         """The frozen intent a native submission is made from (what the store holds before any receipt)."""
@@ -220,6 +225,48 @@ class GoalCommandTests(PlanningShell):
         self.assertEqual(self.planner.sent, [])
         self.assertEqual(self.stored()["revisions"][0]["status"], "planning")
 
+    def test_v2g_a1_a3_the_owners_plan_jobs_leave_one_result_each(self):
+        """V2g A1/A3: the goal saved but not sent (a readiness check fails) is `{plan, unsent, owner, revision 1}`
+        whose lines hold the failing item; the planner's stop is `{stop_planner, requested}` and a stop with no
+        running planner is refused with its family. The owner's results reach no `on_result`. Interpretation: the
+        unsent lines are the failing checks' lines; the fixture engine skips the origin check, so the failing item
+        is the branch one."""
+        readiness = Readiness(check("git"), check("branch", False, DIRTY, key="d"))
+        controller = self.controller(readiness)
+        heard = []
+        controller.on_result = heard.append
+        controller.start()
+
+        def run(job, *args):
+            box, event = [], threading.Event()
+            job(*args, lambda outcome, error: (box.append((outcome, error)), event.set()))
+            self.assertTrue(event.wait(20))
+            return box[0]
+
+        outcome, error = run(controller.start_planning, GOAL)
+        self.assertEqual((outcome.kind, error), ("unsent", None))
+        [result] = controller.results()
+        self.assertEqual((result["operation"], result["outcome"], result["origin"], result["subject"]),
+                         ("plan", "unsent", "owner", {"revision": 1}))
+        self.assertEqual(result["lines"], [DIRTY])
+        self.assertNotIn("request", result)
+        _, error = run(controller.stop_planner)  # nothing runs: the service refuses
+        self.assertIn("running planner", error)
+        refused = controller.results()[-1]
+        self.assertEqual((refused["operation"], refused["outcome"], refused["family"]),
+                         ("stop_planner", "refused", "action.refused"))
+        controller.stop()
+        self.plan(receipt=True)
+        self.planner.running = True
+        controller = self.controller()
+        controller.start()
+        outcome, error = run(controller.stop_planner)
+        self.assertIsNone(error)
+        self.assertEqual(outcome.kind, "stopping")
+        stop = controller.results()[-1]
+        self.assertEqual((stop["operation"], stop["outcome"], stop["origin"]), ("stop_planner", "requested", "owner"))
+        self.assertEqual((len(self.planner.stopped), heard), (1, []))
+
 
 # A3 ---------------------------------------------------------------------------------------------------------
 
@@ -332,8 +379,8 @@ class RevisionStateTests(PlanningShell):
         self.plan(receipt=True)
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
-            await self.shows(pilot, "Checking that the plan covers the goal…")  # observation resumed by itself
-            await self.until(pilot, lambda: self.app.snapshot.status == "proposed")
+            await self.until(pilot, lambda: self.app.snapshot.status == "proposed")  # observation resumed by itself
+            self.assertIn("Checking that the plan covers the goal…", list(self.app.progress))
         self.assertEqual(self.planner.sent, [])  # observed, never resubmitted
         self.assertEqual(self.stored()["revisions"][0]["status"], "proposed")
 
@@ -448,20 +495,17 @@ class DecisionTests(PlanningShell):
                 for r in state["revisions"]]
 
     async def tui_state(self, *keys, note=None):
-        """The plain flow's keys (`a`, `r`, `x`) answered on the TUI plan screen by their buttons (K1c2)."""
+        """The plain flow's keys (`a`, `r`) answered on the TUI plan screen by their buttons (K1c2)."""
         async with self.shell(size=(120, 40)) as pilot:
             await self.open_plan(pilot)
             await self.shows(pilot, "Plan r1 · 2 milestones")
             for key in keys:
-                await self.press_button(pilot, {"a": "approve", "r": "revise", "x": "reject"}[key])
+                await self.press_button(pilot, {"a": "approve", "r": "revise"}[key])
                 await pilot.pause(0.2)
                 if key == "r" and note is not None:
                     await self.type(pilot, note)
                     await self.press_button(pilot, "send")
                     await self.shows(pilot, "Plan r2 · 2 milestones")
-                elif key == "x":  # p4a: approve acts at once; reject still asks
-                    await self.press_button(pilot, "yes")
-                    await self.until(pilot, lambda: self.app.plan_lines)
                 elif key == "a":
                     await self.until(pilot, lambda: self.app.snapshot.status == "approved")
         return self.summary(self.stored())
@@ -486,7 +530,8 @@ class DecisionTests(PlanningShell):
             names = lambda: [button.name for button in screen.query("#plan-buttons Button")]
             await self.until(pilot, lambda: names() and names() == screen.offered())
             self.assertEqual(names(), screen.offered())
-            self.assertTrue({"approve", "revise", "reject", "info"} <= set(names()))
+            self.assertTrue({"approve", "revise", "info"} <= set(names()))
+            self.assertNotIn("reject", names())  # v3b: the plan screen has no decline button
             self.assertEqual([button.label.plain for button in screen.query("#plan-buttons Button")],
                              [catalog.label("tui_plan." + name) for name in names()])
             self.assertEqual(self.app.focused.name, names()[0])
@@ -519,10 +564,10 @@ class DecisionTests(PlanningShell):
                 screen.render_state()
                 await self.until(pilot, lambda: names() == ["tail", "info"])
                 await self.until(pilot, lambda: self.app.focused is not None and self.app.focused.name == "info")
-            with patch.object(screen, "offered", return_value=["reject", "watch"]):
+            with patch.object(screen, "offered", return_value=["revise", "watch"]):
                 screen.render_state()
-                await self.until(pilot, lambda: names() == ["reject", "watch"])
-                await self.until(pilot, lambda: self.app.focused is not None and self.app.focused.name == "reject")
+                await self.until(pilot, lambda: names() == ["revise", "watch"])
+                await self.until(pilot, lambda: self.app.focused is not None and self.app.focused.name == "revise")
             screen.render_state()  # the real offered actions again
             await self.until(pilot, lambda: names() == screen.offered())
             await self.press_button(pilot, "approve")  # Enter on the button does what the old letter did (p4a: at once)
@@ -543,10 +588,23 @@ class DecisionTests(PlanningShell):
         self.assertEqual(await self.tui_state("r", note="Add tests"), plain)
         self.assertEqual([row[:2] for row in plain], [(1, "proposed"), (2, "proposed")])
 
-    async def test_a5_reject_changes_nothing_like_the_plain_flow(self):
-        plain, output, _ = self.plain_state("p", GOAL, "", "g", "x", "q")
-        self.assertIn("not approved; nothing was started", output)
-        self.assertEqual(await self.tui_state("x"), plain)
+    async def test_v3b_the_decline_action_is_gone_end_to_end(self):
+        """v3b A1/A2: a proposal offers approve, revise, requirements (a stale one revise, requirements); no layer has
+        a decline: `Planning.reject`, `Controller.reject_plan`, the CLI handler, the plan screen's action and the
+        catalog entries are gone, and the old plain key `x` does what any unknown key does (the store is unchanged).
+
+        Interpretation: "what any unknown key gets" is checked by comparing with another unknown key (`z`)."""
+        from terminal_planner import catalog
+        from terminal_planner.planning import Planning
+        from terminal_planner.tui.controller import Controller
+        from terminal_planner.tui.screens import PlanScreen
+        for owner, name in ((Planning, "reject"), (Controller, "reject_plan"), (PlanScreen, "action_reject"),
+                            (Terminal, "reject")):
+            self.assertFalse(hasattr(owner, name), (owner, name))
+        self.assertEqual([i for i in catalog.ACTIONS if i in ("plan.reject", "tui_plan.reject")], [])
+        plain, _, _ = self.plain_state("p", GOAL, "", "g", "x", "q", "q")
+        unknown, _, _ = self.plain_state("p", GOAL, "", "g", "z", "q", "q")
+        self.assertEqual(plain, unknown)
         self.assertEqual(plain[0][1], "proposed")
 
     async def test_a5_the_approve_button_acts_at_once_without_a_question(self):
@@ -812,11 +870,12 @@ class PaneTabTests(PlanningShell):
         from textual.widgets import TabbedContent
         return self.app.query_one("#right", TabbedContent).active
 
-    async def test_a1b_a_planner_active_at_start_opens_the_live_tab_and_it_stays(self):
+    async def test_a1b_a_planner_active_at_start_opens_the_live_tab_and_the_plan_comes_forward_at_its_end(self):
         """A1b through `tui_support` at both supported sizes: the store holds an observing revision, the app
         resumes the planner observation on its own (that happens whatever `follow` says: only a run's observation is
         gated by it), so a planner is active when the first snapshot arrives and the start tab is «Сейчас»; when the
-        planner finishes and `watching` is over, the app does not switch the tab back — only the owner's keys do."""
+        planner finishes and `watching` is over, the proposal comes forward (u5a/v3i: `watched` moves to the Drafts tab, no
+        tab having been chosen by the owner)."""
         for size in ((160, 45), (120, 40)):
             with self.subTest(size=size):
                 self.state = self.root / ("state-planner-%sx%s" % size)
@@ -829,7 +888,7 @@ class PaneTabTests(PlanningShell):
                     self.planner.running = False  # the planner finishes its last slice
                     await self.until(pilot, lambda: not self.app.watching)
                     await pilot.pause(0.3)
-                    self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # the app did not switch it back
+                    self.assertEqual(self.tab(), self.ui.TAB_DRAFTS)  # u5a/v3i: the planner's end brings the proposal (Drafts) forward
                     self.assertEqual(self.app.snapshot.status, "proposed")
 
 
@@ -898,7 +957,7 @@ class PlanScreenInteractionTests(PlanningShell):
         app.plan_is_stale = lambda: ZplanApp.plan_is_stale(app)
         app.say_note = lambda line: setattr(app, "plan_lines", (line,))  # the plan screen's half of `say_note`
 
-        def asked(text, family, actions=("revise", "reject", "requirements")):
+        def asked(text, family, actions=("revise", "requirements")):
             revised.clear()
             app.plan_lines = ()
             app.snapshot = SimpleNamespace(plan=PlanView("proposal", 1, "proposed", (), actions, family=family))
@@ -906,7 +965,7 @@ class PlanScreenInteractionTests(PlanningShell):
             return list(revised), app.plan_lines
         self.assertEqual(asked("", "plan.stale"), ([RENEW_NOTE], ()))
         self.assertEqual(asked("", None), ([], (EMPTY_CHANGE,)))
-        self.assertEqual(asked("", "plan.stale", actions=("reject", "requirements")), ([], (EMPTY_CHANGE,)))
+        self.assertEqual(asked("", "plan.stale", actions=("requirements",)), ([], (EMPTY_CHANGE,)))
         self.assertEqual(asked("tighten T2", "plan.stale"), (["tighten T2"], ()))
         app.snapshot = None
         app.plan_lines = ()

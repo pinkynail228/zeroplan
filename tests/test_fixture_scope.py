@@ -51,7 +51,6 @@ from test_terminal_planner import ProjectTest, ScriptedTerminal
 from tui_support import HAVE_TEXTUAL, screen_text
 
 TEXTUAL_REASON = "Textual unavailable: ZPLAN_TEST_WHEELHOUSE with the textual 8.2.8 wheels is required"
-FIXTURE_LINE = "The architect chat is unavailable in the demo (--fixture)."
 PROFILE_FILE = process.PROFILE_FILE
 
 
@@ -226,64 +225,6 @@ class StartupRefusalTests(ProjectTest):
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
 class FixtureChatIsolationTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
     """R-2/A-1: a fixture TUI session shows the disabled chat and touches no production sink."""
-
-    def fixture_app(self, fixture_id="demo"):
-        """The app `cli.main`'s TUI path builds for `--fixture fixture_id`, with every sink spied and readiness
-        recorded for the whole test (the controller asks readiness while the pilot runs); returns (app, sinks)."""
-        accept_fixture_profile(self.project, self.state, fixture_id)
-        sinks = Sinks()
-        self.readiness_calls = []
-        stack = contextlib.ExitStack()
-        self.addCleanup(stack.close)
-        for p in spies(sinks):
-            stack.enter_context(p)
-        # fixture wiring asks readiness with tools=False: the demo needs no toolchain and never installs one
-        stack.enter_context(patch.object(cli, "readiness",
-                                         lambda project, state, tools=True: self.readiness_calls.append(tools) or []))
-        code, app = capture_tui(fixture_argv(self.project, self.state, fixture_id))
-        self.assertEqual(code, 0)
-        return app, sinks
-
-    async def until(self, pilot, condition, timeout=5.0):
-        end = time.monotonic() + timeout
-        while not condition():
-            self.assertLess(time.monotonic(), end, "timed out waiting:\n" + screen_text(self.app))
-            await pilot.pause(0.05)
-
-    async def test_a1_a_fixture_shell_shows_the_disabled_chat_and_reaches_no_sink(self):
-        """Startup, the send key, reset and retry all show the R-2 line; no `ArchitectChat`/`ArchitectStore`, no
-        provider, no tool probe and no production transcript access happen (spies). Named failure on the base: the
-        `chats` spy is not empty, because the fixture app is built with a real `ArchitectChat`."""
-        from terminal_planner.tui.chat_input import ChatInput
-        for fixture_id in ("demo", "demo-2_x"):
-            with self.subTest(fixture_id=fixture_id):
-                app, sinks = self.fixture_app(fixture_id)
-                self.app = app
-                self.addCleanup(app.controller.stop)
-                self.assertFalse(os.path.exists(Path(setup.data_root()) / "architect"))
-                async with app.run_test(size=(200, 50)) as pilot:
-                    await pilot.pause(0.2)
-                    await self.until(pilot, lambda: self.readiness_calls, 5.0)
-                    self.assertIsNone(app.chat)
-                    self.assertIsNone(app.controller.install)  # tools/login are "available": nothing to install,
-                    self.assertIsNone(app.controller.login)    # nothing to log into for the demo
-                    self.assertIn(FIXTURE_LINE, screen_text(app))
-                    field = app.query_one("#input", ChatInput)
-                    field.focus()
-                    field.value = "привет"
-                    await pilot.press("enter")  # the send key: refused, the text stays, nothing is queued
-                    self.assertEqual(app.chat, None)
-                    self.assertIn(FIXTURE_LINE, screen_text(app))
-                    self.assertEqual(field.value, "привет")
-                    field.value = "/new"
-                    await pilot.press("enter")  # reset: nothing to reset
-                    self.assertEqual(app.chat, None)
-                    app.retry_chat()             # the readiness retry path: nothing to retry
-                    self.assertEqual(app.chat, None)
-                    self.assertIn(FIXTURE_LINE, screen_text(app))
-                self.assertEqual(sinks.empty(), ([], [], [], [], [], []))
-                self.assertFalse(os.path.exists(Path(setup.data_root()) / "architect"))
-                self.assertTrue(self.readiness_calls and all(tools is False for tools in self.readiness_calls))
 
     async def test_a1_a_plain_fixture_session_has_no_chat_and_makes_no_sink(self):
         """The line UI in a fixture session is unchanged (it never had the chat) and reaches no sink either."""
@@ -502,7 +443,7 @@ class FixtureProfileTests(ProjectTest):
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
 class ProductionSessionTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
     """R-4/A-4: production (no `--fixture`) keeps working: the chat prepares with the real probes, one turn
-    completes with the scripted provider, and accepting the profile writes the target's file."""
+    completes with the scripted provider, and accepting the profile records a snapshot (v4a: no file is written)."""
 
     def controller(self):
         from terminal_planner.tui.controller import Controller
@@ -546,16 +487,15 @@ class ProductionSessionTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(0.2)
                 self.assertIn("Привет.", chat_band(app))
             self.assertEqual(prepares, [self.project])  # the production prepare (tool probes) ran
-        # production accept writes the file, and a second accept leaves it byte-identical
+        # production accept records a snapshot and never writes the file; a second accept changes nothing
         with RealAuthority(None, self.project) as authority:  # production: no --state-dir (canonical authority)
             status = Profile.of(authority).accept()
         self.assertEqual(status.state, "accepted")
         target = self.project / PROFILE_FILE
-        self.assertTrue(target.is_file())
-        before = target.read_bytes()
+        self.assertFalse(target.exists())
         with RealAuthority(None, self.project) as authority:
-            Profile.of(authority).accept()
-        self.assertEqual(target.read_bytes(), before)
+            self.assertEqual(Profile.of(authority).accept().digest, status.digest)
+        self.assertFalse(target.exists())
 
 
 class DocsTests(unittest.TestCase):
@@ -573,7 +513,7 @@ class DocsTests(unittest.TestCase):
         self.assertIn("process.py:", architecture)
         self.assertIn("tui/chat.py:", architecture)
         flow = (repo / "docs" / "USER_FLOW.md").read_text(encoding="utf-8")
-        self.assertIn("The architect chat is unavailable in the demo", flow)
+        self.assertIn("scripted architect", flow)
         self.assertIn("zplan.process.json", flow)
 
     def test_a5_the_docs_markdown_stays_unbroken(self):

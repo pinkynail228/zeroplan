@@ -335,6 +335,59 @@ class ChatUnitTests(unittest.TestCase):
         self.assertNotEqual(instance.state.phase, "preparing", instance.state)
         return instance
 
+    def test_two_writer_close_and_reopen_preserves_the_second_windows_accepted_text(self):
+        release = self.root / "release-first-writer"
+        self.fixture.script([{"lines": OPENING, "release": str(release)}])
+        first = self.chat()
+        self.assertTrue(first.send("first writer")[0])
+        self.assertTrue(self.wait(lambda: len(self.fixture.calls()) == 1))
+        child_root = self.root / "second-window"
+        child_root.mkdir()
+        child = r'''
+import json, sys, time
+from pathlib import Path
+from test_tui_chat import Fixture
+from terminal_planner.tui.chat import ArchitectChat
+fixture = Fixture(Path(sys.argv[1]), Path(sys.argv[2]))
+chat = ArchitectChat(fixture.project, prepare=fixture.prepare(), binding=fixture.binding())
+chat.start()
+end = time.monotonic() + 5
+while chat.state.phase == "preparing" and time.monotonic() < end:
+    time.sleep(.01)
+accepted = chat.send("keep second window text")
+chat.shutdown()
+chat.close(timeout=.1)
+print(json.dumps(accepted), flush=True)
+'''
+        try:
+            result = subprocess.run([sys.executable, "-c", child, str(child_root), str(self.project)],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), [True, ""])
+            self.assertTrue(first.busy)  # writer one's provider still owns its real architect lock
+            reopened = ArchitectStore(self.project)
+            owners = [row["text"] for row in reopened.transcript() if row["role"] == "owner"]
+            self.assertEqual(owners, ["first writer", "keep second window text"])
+            again = self.chat()
+            self.assertTrue(any(entry.text == "keep second window text" for entry in again.state.entries))
+            self.assertEqual(len(self.fixture.calls()), 1)  # reopen never resends either operation
+            calls = child_root / "codex-bin" / "calls.jsonl"
+            self.assertFalse(calls.exists())
+        finally:
+            release.touch()
+            self.assertTrue(self.wait(lambda: not first.busy))
+
+    def test_operation_lock_contention_refuses_before_acceptance(self):
+        chat = self.chat()
+        with (self.fixture.store().directory / "operations.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            accepted, reason = chat.send("retain this input")
+        self.assertFalse(accepted)
+        self.assertIn("architect.busy", reason)
+        self.assertFalse(chat.busy)
+        self.assertEqual(self.fixture.calls(), [])
+        self.assertEqual(self.fixture.store().transcript(), [])
+
     @staticmethod
     def wait(condition, timeout=5.0):
         end = time.monotonic() + timeout
@@ -378,30 +431,22 @@ class ChatUnitTests(unittest.TestCase):
             release.write_text("go")
             chat.close()
 
-    def test_i9_a5_a_late_timestamp_read_never_drops_the_reply_that_landed_meanwhile(self):
-        """i9-look-fix F2 (regression): the stamp reader read the transcript while it held only the owner row and was
-        held there; the reply then completed and its events drained; only then was the reader released. Its stale
-        read must stamp the owner line alone — a whole-history replacement would put `[owner]` over
-        `[owner, architect]` and lose «Привет.» from the UI (it stays in the store). The final history is both
-        entries, in order, and the owner line carries its stored `ts`. No interpretation beyond the task's example."""
-        store = StampPausedStore(self.project)
+    def test_i9_a5_delayed_history_delivery_keeps_the_reply_and_the_owner_timestamp(self):
+        """The UI may process the owner's timestamp/history only after the provider reply is durable.
+        Draining that delayed delivery must keep both rows in order, with the stored timestamp.
+        Persistence now precedes preparation synchronously, so no polling timestamp reader is required."""
+        store = self.fixture.store()
         gate = Deferred()
         chat = self.chat(store=store, hand_over=gate.hand_over, gate=gate)
-        try:
-            self.assertTrue(chat.send("ordinary question")[0])
-            self.assertTrue(store.inside.wait(5))  # the reader holds its read of [owner]
-            self.assertTrue(self.drain_until(gate, lambda: not chat.busy
-                                             and [e.role for e in chat.state.entries] == ["owner", "architect"]),
-                            chat.state)
-            store.release.set()
-            self.assertTrue(self.wait(lambda: not any(t.name == "zplan-chat-stamp" for t in threading.enumerate())))
-            gate.drain()  # the released reader's stamp reaches the UI after the reply did
-            self.assertEqual([(e.role, e.text) for e in chat.state.entries],
-                             [("owner", "ordinary question"), ("architect", "Привет.")])
-            self.assertRegex(chat.state.entries[0].at, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-        finally:
-            store.release.set()
-            chat.close()
+        self.assertTrue(chat.send("ordinary question")[0])
+        self.assertTrue(self.wait(lambda: any(row["role"] == "architect" for row in store.transcript())))
+        # No UI callback ran while both transcript rows were written.
+        self.assertEqual([(e.role, e.text) for e in chat.state.entries], [("owner", "ordinary question")])
+        self.assertTrue(self.drain_until(gate, lambda: not chat.busy), chat.state)
+        self.assertEqual([(e.role, e.text) for e in chat.state.entries],
+                         [("owner", "ordinary question"), ("architect", "Привет.")])
+        self.assertEqual(chat.state.entries[0].at, store.transcript()[0]["ts"])
+        self.assertRegex(chat.state.entries[0].at, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
     def test_c6_two_windows_take_turns_and_each_reloads_the_other_history(self):
         first, second = self.chat(), self.chat()
@@ -416,15 +461,52 @@ class ChatUnitTests(unittest.TestCase):
                          ["первый", "второй"])  # the second window reloaded the first window's turn
         self.assertEqual(self.fixture.calls()[1]["argv"][:3], ["exec", "resume", THREAD])  # same thread id
 
-    def test_c6_a_send_while_the_other_window_holds_the_lock_is_refused_and_writes_nothing(self):
-        before = self.fixture.files()
+    def test_the_tui_send_uses_the_shared_operation_contract(self):
+        chat = self.chat()
+        self.assertTrue(chat.send("typed message")[0])
+        self.assertTrue(self.wait(lambda: not chat.busy, 6), chat.state)
+        (owner,) = [row for row in self.fixture.store().transcript() if row["role"] == "owner"]
+        self.assertEqual(owner["text"], "typed message")
+        self.assertEqual(owner["project_id"], adapter.project_key(self.project))
+        for key in ("id", "conversation_id", "turn_id", "operation_id", "ts"):
+            self.assertTrue(owner[key], key)
+        self.assertEqual(owner["conversation_id"], self.fixture.store().load()["conversation_id"])
+        (reply,) = [row for row in self.fixture.store().transcript() if row["role"] == "architect"]
+        self.assertEqual(reply["turn_id"], owner["turn_id"])
+        operations = (self.fixture.store().directory / "operations.jsonl").read_text().splitlines()
+        records = [json.loads(line) for line in operations]
+        self.assertEqual({record["operation_id"] for record in records}, {owner["operation_id"]})
+        self.assertIn("accepted", [record["state"] for record in records])
+        self.assertEqual(records[-1]["state"], "completed")
+
+    def test_a_failed_turn_keeps_its_partial_response_on_the_same_turn_id(self):
+        self.fixture.script([{"lines": PARTIAL, "exit": 1}])
+        chat = self.chat()
+        self.assertTrue(chat.send("failure evidence")[0])
+        self.assertTrue(self.wait(lambda: not chat.busy, 6), chat.state)
+        rows = self.fixture.store().transcript()
+        owner = next(row for row in rows if row["role"] == "owner")
+        error = next(row for row in rows if row["role"] == "error")
+        self.assertEqual(error["turn_id"], owner["turn_id"])
+        self.assertEqual(error["partial"], "Начало ответа")
+        self.assertEqual(error["status"], "failed")
+        reopened = self.chat(store=self.fixture.store())
+        self.assertEqual([entry.text for entry in reopened.state.entries],
+                         [entry.text for entry in chat.state.entries])
+        self.assertEqual(len(self.fixture.store().transcript()), len(rows))
+
+    def test_c6_a_send_refused_by_the_other_window_keeps_the_owner_message_and_starts_no_provider(self):
         chat = self.chat(store=self.fixture.store())
         with self.fixture.store().lock_path.open("w") as held:
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the other window's turn
             self.assertTrue(chat.send("первый")[0])
             self.assertTrue(self.wait(lambda: not chat.busy, 6), chat.state)
         self.assertIn("architect.locked", chat.state.note)
-        self.assertEqual(self.fixture.files(), before)   # refused and wrote nothing
+        owners = [row for row in self.fixture.store().transcript() if row["role"] == "owner"]
+        self.assertEqual([row["text"] for row in owners], ["первый"])  # durable before the failed provider operation
+        operations = [json.loads(line) for line in
+                      (self.fixture.store().directory / "operations.jsonl").read_text().splitlines()]
+        self.assertEqual(operations[-1]["state"], "failed")
         self.assertEqual(self.fixture.calls(), [])
 
     def test_c6_reset_takes_the_lock_too_and_writes_nothing_when_it_is_held(self):
@@ -580,6 +662,29 @@ class ChatUnitTests(unittest.TestCase):
             self.assertEqual(instance.state.phase, "blocked")
             self.assertIn("process.invalid", instance.state.refusal)
 
+    def test_a_pending_goal_belongs_to_its_project_and_survives_a_reopen(self):
+        """v4b A3/A4: the goal is kept beside the project's store, so a chat of another folder finds none (and a
+        record that names another folder is ignored); a reopened chat of the same project finds it on readiness and
+        stays pending until `goal_sent`."""
+        store = self.fixture.store()
+        self.assertEqual(store.keep_goal("Add a changelog"), "kept")
+        self.assertEqual(store.keep_goal("Add a changelog"), "same")
+        other = self.root / "other-project"
+        other.mkdir()
+        self.assertIsNone(ArchitectStore(other).pending_goal())
+        goal = json.loads(store.goal_path.read_text())
+        store.goal_path.write_text(json.dumps(dict(goal, project=str(other))))
+        self.assertIsNone(store.pending_goal())
+        store.goal_path.write_text(json.dumps(goal))
+        found = []
+        instance = self.chat(on_ready=lambda: found.append(store.pending_goal()))
+        self.assertTrue(self.wait(lambda: found, 5))
+        self.assertEqual(found[0]["text"], "Add a changelog")
+        self.assertEqual(instance.pending_goal()["id"], goal["id"])  # only an accepted send marks it sent
+        instance.goal_sent(goal["id"])
+        self.assertIsNone(instance.pending_goal())
+        self.assertEqual(store.keep_goal("Add a changelog"), "kept")  # a sent goal does not block a new one
+
     def test_c7_a_blocked_chat_prepares_again_once_retried(self):
         """A refused chat is not stuck: `retry()` (what the app calls once readiness is fixed) prepares it again on
         its own thread and without a turn, so a fixed toolchain, login or role is picked up without a restart; a
@@ -644,7 +749,7 @@ class ChatUnitTests(unittest.TestCase):
 
     def test_c7_a_profile_broken_between_turns_is_refused_before_any_process(self):
         """A profile that goes invalid after the chat was prepared (an empty architect model) ends the next turn as
-        the catalog refusal of its family: no Codex process starts and the store is not written."""
+        the catalog refusal of its family: no Codex process starts, but the accepted message and failure survive."""
         with self.roles_root():
             self.write_role("first-model", "high")
             chat = self.chat(binding=self.profile_binding())
@@ -655,8 +760,14 @@ class ChatUnitTests(unittest.TestCase):
         self.assertIn("process.invalid", chat.state.note)
         self.assertIn("Give a model ID", chat.state.note)
         store = self.fixture.store()
-        self.assertFalse(store.transcript_path.exists())
-        self.assertFalse(store.session_path.exists())
+        owner, error = store.transcript()
+        self.assertEqual((owner["role"], owner["text"], error["role"], error["status"]),
+                         ("owner", "вопрос", "error", "failed"))
+        self.assertEqual(owner["turn_id"], error["turn_id"])
+        self.assertEqual([entry.role for entry in chat.state.entries], ["owner", "error"])
+        reopened = self.chat(store=store)
+        self.assertEqual([entry.role for entry in reopened.state.entries], ["owner", "error"])
+        self.assertEqual(reopened.state.entries[0].text, "вопрос")
 
     def test_c9_the_header_provider_follows_the_codex_config_of_the_turn(self):
         """The header shows the provider the turn's own Codex process selects (docs/PROCESS_PROFILE.md:75): another
@@ -962,7 +1073,12 @@ class ChatUnitTests(unittest.TestCase):
         self.assertTrue(self.wait(lambda: not chat.busy, 6), chat.state)
         self.assertIn("not sent", chat.state.note)
         self.assertEqual(self.fixture.calls(), [])       # no Codex process was ever started
-        self.assertFalse(store.transcript_path.exists())
+        owner, failure = store.transcript()
+        self.assertEqual((owner["role"], owner["text"], failure["role"], failure["status"]),
+                         ("owner", "поздний", "error", "failed"))
+        self.assertEqual(owner["turn_id"], failure["turn_id"])
+        self.assertIn("not sent", failure["text"])
+        self.assertEqual([entry.role for entry in chat.state.entries], ["owner", "error"])
 
 
 def event(seq, state="awaiting_merge", previous="running", wake=True, milestone="M1", attempt=1, **extra):
@@ -1254,11 +1370,48 @@ class EventTurnTests(ChatUnitTests):
         self.assertFalse(accepted)
         self.assertIn("architect.busy", line)
         self.assertEqual(port.handled, [])  # the event turn has not finished yet
+        (owner,) = [row for row in self.fixture.store().transcript() if row["role"] == "owner"]
+        self.assertEqual(owner["text"], "стоп")  # accepted input is durable even while the event waits
         open(release, "w").close()
         self.assertTrue(self.wait(lambda: not chat.busy, 10), chat.state)
         self.assertEqual(port.handled, [1])  # the event turn acked before the owner's turn ran
-        self.assertEqual([row["role"] for row in self.fixture.store().transcript()][-2:], ["owner", "architect"])
+        rows = self.fixture.store().transcript()
+        self.assertEqual([row["role"] for row in rows], ["events", "owner", "architect", "architect"])
+        self.assertEqual(rows[-1]["turn_id"], owner["turn_id"])
         self.assertTrue(self.fixture.calls()[1]["stdin"].endswith("стоп"))
+
+    def test_first_event_preparation_preserves_a_queued_owners_conversation_id(self):
+        from terminal_planner.application import ApplicationService
+        port = Port([event(1)], {})
+        ready, release = threading.Event(), threading.Event()
+        original = adapter.foreign_servers
+
+        def boundary(*args, **kwargs):
+            result = original(*args, **kwargs)
+            ready.set()
+            if not release.wait(10):
+                raise TimeoutError("event preparation was not released")
+            return result
+
+        with patch.object(adapter, "foreign_servers", boundary):
+            chat = self.chat(feed=port)
+            try:
+                self.assertTrue(ready.wait(8))
+                self.assertEqual(chat.send("queued during preparation"), (True, ""))
+                owner = self.fixture.store().transcript()[0]
+                self.assertEqual(owner["role"], "owner")
+            finally:
+                release.set()
+            self.assertTrue(self.wait(lambda: port.handled == [1] and not chat.busy, 10), chat.state)
+        reopened = self.fixture.store()
+        self.assertEqual(reopened.load()["conversation_id"], owner["conversation_id"])
+        service = ApplicationService(self.fixture.architect(store=reopened))
+        self.assertEqual(service.new_request("next").conversation_id, owner["conversation_id"])
+        self.assertEqual(chat.send("subsequent owner"), (True, ""))
+        self.assertTrue(self.wait(lambda: not chat.busy, 10), chat.state)
+        owners = [row for row in reopened.transcript() if row["role"] == "owner"]
+        self.assertEqual([row["conversation_id"] for row in owners], [owner["conversation_id"]] * 2)
+        self.assertEqual(len(self.fixture.calls()), 3)
 
     def test_c4_cancel_ends_the_event_turn_and_the_waiting_message_still_runs(self):
         """C4: esc cancels the running event turn only; the owner message waiting behind it still runs after."""
@@ -1272,7 +1425,10 @@ class EventTurnTests(ChatUnitTests):
         port.events = []  # the cancelled event stays pending; A6b3 owns backoff, this checks the owner-first rule
         self.assertTrue(self.wait(lambda: not chat.busy, 10), chat.state)
         self.assertEqual(port.handled, [])
-        self.assertEqual([row["role"] for row in self.fixture.store().transcript()][-2:], ["owner", "architect"])
+        rows = self.fixture.store().transcript()
+        self.assertEqual([row["role"] for row in rows], ["events", "owner", "error", "architect"])
+        self.assertEqual(rows[-1]["turn_id"], rows[1]["turn_id"])
+        self.assertEqual(rows[1]["text"], "стоп")
 
     def test_c4_a_message_sent_during_a_blocked_check_runs_before_the_event_turn(self):
         """C4 (regression): an owner message sent while a check is blocked in `pending()` (before the check can
@@ -1719,6 +1875,44 @@ class ChatJourneyTests(ChatShell):
             await pilot.pause()
             self.assertIn("gpt-6.1-sol/high · 15 tok", screen_text(self.app))
 
+    async def test_a_goal_typed_before_the_chat_is_ready_is_kept_and_sent_once_when_it_is(self):
+        """v4b A1/A2: with no login, Enter keeps the line as the project's one pending goal (the input clears, one
+        saved line shows; the same text keeps one goal, another replaces it), and the readiness that follows sends it
+        as one ordinary owner turn; a later readiness refresh sends nothing. Interpretation: the goal is a
+        `pending_goal.json` beside the ArchitectStore; "sent" is marked once `send` accepted the turn."""
+        fixed = chat_module.threading.Event()
+        build = self.fixture.prepare()
+
+        def login(project=None):
+            if not fixed.is_set():
+                raise Blocked("No Codex login; run zplan login.", family="readiness.auth")
+            return build(project)
+
+        async with self.shell(chat_prepare=login) as pilot:
+            await self.loaded(pilot)
+            await self.until(pilot, lambda: self.app.chat.state.phase == "blocked")
+            await self.say(pilot, "Add a changelog")
+            await self.say(pilot, "Add a changelog")
+            self.assertEqual(self.query("#input").value, "")
+            self.assertEqual(screen_text(self.app).count("Goal saved for"), 1)
+            self.assertEqual(self.app.chat.pending_goal()["text"], "Add a changelog")
+            first = self.app.chat.pending_goal()["id"]
+            await self.say(pilot, "Add a license")
+            self.assertIn("Goal replaced for", screen_text(self.app))
+            self.assertEqual(self.app.chat.pending_goal()["text"], "Add a license")
+            await self.say(pilot, "Add a changelog")
+            self.assertNotEqual(self.app.chat.pending_goal()["id"], first)
+            self.assertEqual(self.fixture.calls(), [])
+            fixed.set()
+            self.app.chat.retry()
+            await self.until(pilot, lambda: self.app.chat.ready and self.app.chat.pending_goal() is None)
+            await self.chat_done(pilot)
+            owners = [row["text"] for row in self.fixture.store().transcript() if row["role"] == "owner"]
+            self.assertEqual(owners, ["Add a changelog"])
+            self.app.chat_ready()  # a further readiness refresh
+            await self.chat_done(pilot)
+            self.assertEqual(len(self.fixture.calls()), 1)
+
     async def test_c6b_the_bar_keeps_the_model_and_the_usage_over_a_long_history_and_a_new_turn(self):
         """The bar's tail (`model/effort · N tok`) is not tied to the conversation: it stays and carries the
         counters of the turn just ended although the stored transcript is longer than the pane."""
@@ -1950,11 +2144,7 @@ class ChatJourneyTests(ChatShell):
         self.assertIn("Write to the architect… or / for commands", text)  # ... and the input under the pane stays
 
     async def test_c4_c6_an_operation_the_other_window_refused_stays_visible_while_idle(self):
-        """u3b-chat C-4/C-6 with L-4: while another window holds the project's lock, the send and the reset
-        the chat refuses keep their line and catalog code on the screen. Both write nothing (C-6) and an idle
-        chat has no state row (L-4), so the refusal is the pane's own line above the chat — not a note that
-        disappears with the turn."""
-        before = self.fixture.files()
+        """The lock refusal stays visible and starts no provider; the owner message remains durable by contract."""
         async with self.shell(size=(80, 24)) as pilot:
             await self.loaded(pilot)
             await self.chat_ready(pilot)
@@ -1968,7 +2158,8 @@ class ChatJourneyTests(ChatShell):
                 await self.chat_done(pilot)
                 await pilot.pause()
                 self.assertIn("architect.locked", screen_text(self.app))
-        self.assertEqual(self.fixture.files(), before)  # both refusals wrote nothing (C-6)
+        owners = [row for row in self.fixture.store().transcript() if row["role"] == "owner"]
+        self.assertEqual([row["text"] for row in owners], ["чужой замок"])
         self.assertEqual(self.fixture.calls(), [])
 
     async def test_c6b_the_model_reply_is_rendered_without_terminal_control_sequences(self):
@@ -2049,8 +2240,9 @@ class ChatJourneyTests(ChatShell):
             text = chat_band(self.app)
             self.assertIn("zplan setup", text)
             self.assertIn("setup.tools_invalid", text)
-            await self.say(pilot, "вопрос")
-            self.assertEqual(self.query("#input").value, "вопрос")
+            await self.say(pilot, "вопрос")  # v4b: kept as the pending goal, the input clears
+            self.assertEqual(self.query("#input").value, "")
+            self.assertEqual(self.app.chat.pending_goal()["text"], "вопрос")
             await pilot.press("tab")  # back to the panel: its keys act again
             await self.command(pilot, "/setup")  # plan and milestone actions still work
             self.assertEqual(self.app.screen.__class__.__name__, "SettingsScreen")
@@ -2346,11 +2538,11 @@ class DraftJourneyTests(ChatShell):
         calls = self.fixture.calls()
         self.assertEqual(calls[0]["argv"][:2], ["exec", "--json"])              # the first turn: the preamble
         self.assertEqual(calls[1]["argv"][:3], ["exec", "resume", THREAD])      # the resumed turn: the update
-        self.assertIn("```zplan-goal", calls[0]["stdin"])
+        self.assertIn("```zplan-answer", calls[0]["stdin"])
         self.assertNotIn("Updated state snapshot (read-only):", calls[0]["stdin"])
         self.assertIn("Updated state snapshot (read-only):", calls[1]["stdin"])  # build_update, not the preamble
         self.assertNotIn("You are the zplan architect", calls[1]["stdin"])
-        self.assertIn("```zplan-goal", calls[1]["stdin"])
+        self.assertIn("```zplan-answer", calls[1]["stdin"])
         self.assertIn("```zplan-answer <milestone id>", calls[1]["stdin"])
 
     async def test_d0_the_identity_is_the_send_time_snapshot_not_a_later_refresh(self):
@@ -2474,11 +2666,12 @@ class DraftJourneyTests(ChatShell):
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
 class GoalDraftTests(ChatShell):
     """U-3/D-4b through the real app: the choice of the newest actionable goal draft, and the provenance re-check on
-    the controller worker when the draft card's `/plan` sends it.
+    the controller worker when the bare `/plan` sends it.
 
-    K1b removed the goal form and its `[c]` key: a draft reaches the planner only from its card (the button or the
-    typed `/plan`, `tests/test_tui_draft_card.py`), so the tests of the form (typed goal replaced only after asking,
-    provenance across Esc and `/view`, the key being text in every editor) are gone with it.
+    K1b removed the goal form and its `[c]` key: a draft reaches the planner only through the typed `/plan`
+    (`tests/test_tui_draft_card.py`; v3e: the draft card it used to come from is gone), so the tests of the form
+    (typed goal replaced only after asking, provenance across Esc and `/view`, the key being text in every editor) are
+    gone with it.
 
     Interpretations:
 
@@ -2488,7 +2681,7 @@ class GoalDraftTests(ChatShell):
       `planning.begin`; nothing is written and no export/finish runs. D-4b's synchronisation point is explicit:
       `controller.goal_identity` is patched to park the worker before it reads the plan identity, the test changes
       the plan identity on the same session, then releases it — so a check made when `/plan` was typed (UI
-      thread) instead of on the worker would be missed. The card is open (and so the screen's own check passes)
+      thread) instead of on the worker would be missed. The draft is sendable (and so the screen's own check passes)
       because the draft names the plan the screen shows when `/plan` is typed.
     - A draft line is `↳ goal draft: …` (0.6.3 V2 dropped the `reply N · arch ·` prefixes); the draft data
       contract (`chat.Draft`) is unchanged.
@@ -2512,7 +2705,7 @@ class GoalDraftTests(ChatShell):
         return store
 
     def newest_draft(self):
-        """The newest actionable goal draft of the retained history (what the draft card is built from)."""
+        """The newest actionable goal draft of the retained history (what `/plan` sends)."""
         return chat_module.newest_goal_draft(self.app.chat.state.entries)
 
     async def settled(self, pilot, timeout=5.0):
@@ -2522,9 +2715,9 @@ class GoalDraftTests(ChatShell):
         await self.until(pilot, lambda: self.newest_draft() is not None, timeout)
 
     async def open_draft(self, pilot):
-        """The draft's card is on the main screen, ready for `/plan`."""
+        """The draft is sendable on the main screen, ready for `/plan`."""
         await self.settled(pilot)
-        await self.until(pilot, lambda: self.app.screen.draft_card_open())
+        await self.until(pilot, lambda: self.app.screen.draft_sendable())
 
     def seed_plan(self):
         """Revision 1, planning, before the shell starts: the plan the screen shows and a draft can name."""
@@ -2553,10 +2746,10 @@ class GoalDraftTests(ChatShell):
         goal draft is not actionable (no identity, no success mark) leaves the older one the choice.
 
         i3a shrinks this test per `devtools/zeroshot/test-retire-0.5.2.md` (row i3a): the trigger it used to walk —
-        `[c]` opening the goal form — is the draft card now, so the data assertion stays and the old-UI assertion is
-        dropped; the card's own behaviour (show, «да», decline, a stale refusal) is `tests/test_tui_draft_card.py`.
-        Interpretation: the card's key is opaque, so the draft the screen carries is compared as `Draft` data
-        (`list(screen.draft_cards.values())`), never as a key string."""
+        `[c]` opening the goal form — is the typed `/plan` now, so the data assertion stays and the old-UI assertion is
+        dropped; the draft's own behaviour (the line, `/plan`, a stale refusal) is `tests/test_tui_draft_card.py`.
+        Interpretation: the draft's key is opaque, so the draft the screen carries is compared as `Draft` data
+        (`list(screen.sendable_drafts.values())`), never as a key string."""
         store = self.seed_goal_draft(text="Старая цель", identity="no plan")
         store.append("owner", text="ещё")
         store.append("architect", text="Ответ.", status="completed",
@@ -2574,16 +2767,16 @@ class GoalDraftTests(ChatShell):
             self.assertEqual(draft.identity, self.NO_PLAN)
             screen = self.app.screen
             self.assertEqual(type(screen).__name__, "MainScreen")
-            self.assertEqual(tui_module().draft_card_of(self.app.chat)[1], draft)  # the same source
-            self.assertTrue(screen.draft_card_open())         # and it is the one card the pane shows
-            self.assertEqual(list(screen.draft_cards.values()), [draft])
+            self.assertEqual(tui_module().newest_draft_of(self.app.chat)[1], draft)  # the same source
+            self.assertTrue(screen.draft_sendable())          # and it is the one draft `/plan` sends
+            self.assertEqual(list(screen.sendable_drafts.values()), [draft])
 
     async def test_u3_a_draft_pushed_out_of_the_retained_history_loses_the_key(self):
         """The source of the choice is the retained history alone: once the reply is pushed out of `HISTORY`
         entries there is no choice any more, even though the transcript still holds the draft.
 
         i3a shrinks this test per `devtools/zeroshot/test-retire-0.5.2.md` (row i3a): the assertion that replaced the
-        key's is the card's, which reads exactly the same source (`chat.newest_goal_draft`) — no card is shown."""
+        key's is the screen's, which reads exactly the same source (`chat.newest_goal_draft`) — nothing is sendable."""
         self.seed_goal_draft(text="Цель", after=chat_module.HISTORY)
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
@@ -2591,7 +2784,7 @@ class GoalDraftTests(ChatShell):
             self.assertIsNone(self.newest_draft())
             screen = self.app.screen
             self.assertEqual(type(screen).__name__, "MainScreen")
-            self.assertFalse(screen.draft_card_open())                     # the screen shows no card either
+            self.assertFalse(screen.draft_sendable())                      # the screen holds no draft either
             self.assertEqual(screen.card_widgets, {})
 
     # D-4b ---------------------------------------------------------------------
@@ -3560,7 +3753,7 @@ class LifecycleGuardChatTests(ChatShell):
     # --- the bound accepted profile and the approved native plan -----------------
 
     def accept_profile(self):
-        """A real accepted `zplan.process.json`, through a production session: the profile the pilot enforces."""
+        """An accepted profile (a snapshot), through a production session: the profile the pilot enforces."""
         with RealAuthority(None, self.project) as authority:
             process.Profile.of(authority).accept()
 
@@ -3694,7 +3887,7 @@ class LifecycleGuardChatTests(ChatShell):
             return authority.path
 
     def seed_goal_draft(self, text="Сделать X", identity="no plan"):
-        """One archived architect reply carrying one actionable goal draft (the draft card's source)."""
+        """One archived architect reply carrying one actionable goal draft (what a bare `/plan` sends)."""
         store = self.fixture.store()
         store.append("owner", text="вопрос")
         store.append("architect", text="Вот черновик.", status="completed",
@@ -3716,7 +3909,7 @@ class LifecycleGuardChatTests(ChatShell):
 
     async def open_draft(self, pilot):
         await self.settled(pilot)
-        await self.until(pilot, lambda: self.app.screen.draft_card_open())
+        await self.until(pilot, lambda: self.app.screen.draft_sendable())
 
     @staticmethod
     def identities(state):
@@ -3738,7 +3931,7 @@ class LifecycleGuardChatTests(ChatShell):
             before = json.loads(path.read_text())                     # the identity to preserve, read *before* the hand-over
             identities = self.identities(before)
             self.assertIn(before["runs"][0]["status"], runs_module.ACTIVE)  # M1 is provably a live writer here
-            await self.open_draft(pilot)                              # the draft card is open
+            await self.open_draft(pilot)                              # the draft is sendable
             self.app.screen.run_command("/plan")                      # ... and its goal is handed over (the card's
             await pilot.pause()                                       # button path: a running M1 keeps state `running`)
             await self.until(pilot, self.entered.is_set)              # a live slice parked on the held native run
@@ -3758,8 +3951,6 @@ class LifecycleGuardChatTests(ChatShell):
             self.finish.set()                                         # release the run: its watch returns the result
             await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
             await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "yes")
             await self.shows(pilot, "Merged: M1 → main.")
         self.assertEqual(json.loads(path.read_text())["runs"][0]["delivery"], "integrated")
 

@@ -18,7 +18,7 @@ OBSERVATION = {
     "review_loop": {"count": 1},
 }
 
-root = milestone.milestone_graph(1, 4)["root"]
+root = milestone.milestone_graph()["root"]
 drawn = scheme.render(root, OBSERVATION, 80, 58, limits={"review_loop": 4})
 console = Console(record=True, width=80, color_system="truecolor", file=open("/dev/null", "w"))
 console.print(drawn)

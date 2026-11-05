@@ -189,8 +189,8 @@ class StepApp(_AppBase):
 class StepTests(unittest.IsolatedAsyncioTestCase):
     async def test_c1_c4_events_are_one_line_steps_and_a_closed_card_is_one_dim_row(self):
         entries = chat_module.entries_of([{"role": "events", "text": summary_text()}])
-        receipt = strings.text("card.draft_sent", time="10:02")
-        spec = cards.closed(cards.draft_card("d", "10:01"), receipt)
+        receipt = strings.text("card.plan_done", time="10:02")
+        spec = cards.closed(cards.plan_card("d", "10:01", "2 stages", "3 tasks"), receipt)
         for size in ((80, 24), (140, 40)):
             with self.subTest(size=size):
                 app = StepApp(entries, spec)
@@ -211,7 +211,7 @@ class StepTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(lines), 8, lines)
                     card = app.query_one(cards.Card)
                     self.assertEqual(card.region.height, 1)
-                    self.assertNotIn("Goal draft", "".join(lines))
+                    self.assertNotIn(strings.text("card.plan_title", stages="2 stages", tasks="3 tasks"), "".join(lines))
                     self.assertFalse(list(card.query("Button")))
 
     def test_the_step_row_glyph_colour_and_the_dim_detail(self):

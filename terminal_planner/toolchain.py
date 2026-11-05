@@ -45,12 +45,12 @@ class Toolchain:
 
 
 DEFAULT = Toolchain(
-    zeroshot="10.16.0", codex="0.162.1", restic="0.19.1", runtime="runtime2",
+    zeroshot="11.0.0", codex="0.162.1", restic="0.19.1", runtime="runtime2",
     url_template="https://github.com/the-open-engine/zeroshot/releases/download/v{version}/zeroshot-v{version}-{target}.tar.gz",
     releases={
-        ("Linux", "x86_64"): ("x86_64-unknown-linux-musl", "2f1ad10956875eccb1aadf60b879fb4195db20fbffd9854a4537f0f1369c9a40"),
-        ("Linux", "aarch64"): ("aarch64-unknown-linux-musl", "6f58bc709bbf9e5d1959834e6f03357f0fe195e4463a7065301bb8b50f794ef3"),
-        ("Darwin", "arm64"): ("aarch64-apple-darwin", "d8da042239ea252b41ab39f3eba82892e51a7b01c3c0a63460d4f24bfe74e2ef"),
+        ("Linux", "x86_64"): ("x86_64-unknown-linux-musl", "8276d1a601975d8f21afa1cbe39744d2f3f6c206a195654fdf83519107e30c4c"),
+        ("Linux", "aarch64"): ("aarch64-unknown-linux-musl", "dc663492b9ebccb902227057a61ab78b9a3e7e0a96cdf5746cfc4b34b3ad6465"),
+        ("Darwin", "arm64"): ("aarch64-apple-darwin", "f3e349870e58a0b1da366389bfdb7298d5f28b287c420632ed91a07f96cf1710"),
     })
 
 # Shape of a stored native binding (planning.json `native_binding`, run record `binding`).

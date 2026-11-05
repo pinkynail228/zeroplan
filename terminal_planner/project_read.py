@@ -89,11 +89,27 @@ def is_credential(relative):
     return any(fnmatch.fnmatchcase(name, pattern) for pattern in CREDENTIAL_NAMES)
 
 
+def _note(real, only=None):
+    """What the read tools cannot see: the uncommitted paths (never a credential's), or whether `only` is one."""
+    changed = [path for path in uncommitted_paths(real) if not is_credential(path)]
+    if only is not None:
+        if only in changed:
+            return "The file has uncommitted changes; these lines are the last commit's."
+        return None
+    if not changed:
+        return None
+    return ("Not committed: %s. zplan's read tools, the plan check and the workers see only the last commit."
+            % shown_paths(changed))
+
+
 def _blob(real, relative, known):
     """The blob id of a listed path, or Blocked when it is a credential or not a regular file of the HEAD tree."""
     if is_credential(relative):
         raise Blocked("A credentials file is not read.", family="read.credential")
     if relative not in known:
+        if relative in uncommitted_paths(real):
+            raise Blocked("The file is not committed: zplan's read tools, the plan check and the workers see only "
+                          "the last commit.", family="read.uncommitted")
         raise Blocked("The file is not part of the project.", family="read.outside_project")
     return known[relative]
 
@@ -148,12 +164,19 @@ def _listed(known, prefix=""):
 def list_files(project, root, prefix=""):
     real = _check_root(project, root)
     _relative(prefix)  # the same boundary as a read; the prefix itself stays a plain string match
-    paths = []
+    paths, truncated = [], False
     for relative in _listed(_universe(real), prefix):
         if len(paths) == MAX_PATHS:
-            return {"paths": paths, "truncated": True}
+            truncated = True
+            break
         paths.append(relative)
-    return {"paths": paths, "truncated": False}
+    return _noted({"paths": paths, "truncated": truncated}, _note(real))
+
+
+def _noted(result, note):
+    if note:
+        result["note"] = note
+    return result
 
 
 def read_file(project, root, path, start=1, count=MAX_LINES):
@@ -180,7 +203,7 @@ def read_file(project, root, path, start=1, count=MAX_LINES):
             lines.append(_text(raw))
             if cut:
                 truncated = True
-    return {"path": relative, "start": start, "lines": lines, "truncated": truncated}
+    return _noted({"path": relative, "start": start, "lines": lines, "truncated": truncated}, _note(real, relative))
 
 
 def search(project, root, text):
@@ -189,7 +212,7 @@ def search(project, root, text):
     real = _check_root(project, root)
     hits = []
     if not text:
-        return {"hits": hits, "truncated": False}
+        return _noted({"hits": hits, "truncated": False}, _note(real))
     known = _universe(real)
     command = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", real, "grep", "-n", "-I", "-F", "-z",
                "--no-color", "-e", text, "HEAD", "--"]
@@ -205,8 +228,8 @@ def search(project, root, text):
                 if text not in line:
                     continue
                 if len(hits) == MAX_HITS:
-                    return {"hits": hits, "truncated": True}
+                    return _noted({"hits": hits, "truncated": True}, _note(real))
                 hits.append({"path": relative, "line": int(number), "text": line})
         finally:
             grep.kill()
-    return {"hits": hits, "truncated": False}
+    return _noted({"hits": hits, "truncated": False}, _note(real))

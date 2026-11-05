@@ -40,7 +40,8 @@ class VersionTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertIn('\nversion = "%s"\n' % __version__, project)
         self.assertEqual(install.VERSION, __version__)
-        self.assertEqual(install.VERSION, "0.9.0")
+        self.assertEqual(install.VERSION, "0.11.0")
+        self.assertIn("0.9.0", install.OWNED)  # an update from the previous release replaces its launcher
         self.assertIn("0.4.0", install.OWNED)  # the 0.9.0 installer keeps recognising the 0.4.0 launcher as ours
         self.assertIn("0.6.0", install.OWNED)  # and the 0.6.0 launcher too
         self.assertIn("0.6.1", install.OWNED)  # and the 0.6.1 launcher too
@@ -324,7 +325,7 @@ class InstalledGateTests(unittest.TestCase):
             self.assertFalse(str(Path(path).resolve()).startswith(str(checkout)), path)
 
     def test_launcher_prints_version_and_older_install_is_untouched(self):
-        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.9.0")
+        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.11.0")
         self.assertEqual(self.launcher.resolve(), (self.app / "bin/zplan").resolve())
         after = {path: value for path, value in tree(self.root / "data").items()
                  if not path.startswith("planning-kit/app/%s/" % install.VERSION)}
@@ -375,6 +376,26 @@ class InstalledGateTests(unittest.TestCase):
                     "print(resources.files('terminal_planner.tui').joinpath('zplan.tcss').read_text()[:40])")
         self.assertTrue(self.call([str(self.python), "-I", "-c", resource]).strip())  # the stylesheet ships and reads
 
+    def test_installed_exec_fixture_sends_and_replays_without_provider(self):
+        state = self.root / "exec-state"
+        goal = self.root / "exec-goal.md"
+        goal.write_text("Plan a small useful change", encoding="utf-8")
+        command = [str(self.launcher), "exec", "--project", str(self.project), "--goal", str(goal),
+                   "--operation-id", "installed-send", "--fixture", "exec", "--state-dir", str(state)]
+        first = json.loads(self.call(command))
+        journal, = state.rglob("operations.jsonl")
+        before = journal.read_bytes()
+        replay = json.loads(self.call(command))
+        self.assertFalse(first["replayed"])
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(first["turn_id"], replay["turn_id"])
+        self.assertEqual(first["model"]["status"], "completed")
+        self.assertEqual(first["verification"]["state"], "not_run")
+        self.assertEqual(first["merge"]["state"], "not_requested")
+        self.assertTrue(first["children"][0]["detail"]["dispatch"]["run_id"])
+        self.assertEqual(journal.read_bytes(), before)
+        self.assertEqual(len((journal.parent / "transcript.jsonl").read_text().splitlines()), 2)
+
     def test_installed_fixture_journey_plan_two_dependent_milestones_export_merge(self):
         state = self.root / "journey-state"
         command = [str(self.launcher), "--project", str(self.project), "--state-dir", str(state), "--fixture", "gate"]
@@ -406,7 +427,7 @@ class InstalledGateTests(unittest.TestCase):
                  "import terminal_planner; from terminal_planner import milestone; "
                  "data = resources.files('terminal_planner').joinpath('resources'); "
                  "names = [json.loads(data.joinpath(n).read_text())['name'] for n in ('package.json', 'package-lock.json')]; "
-                 "graph = milestone.milestone_graph(1); "
+                 "graph = milestone.milestone_graph(); "
                  "from terminal_planner import architect; text = architect.build_preamble(None); "
                  "print(json.dumps({'file': terminal_planner.__file__, 'names': names, 'root': sorted(graph), "
                  "'method': architect.method() in text and '## Brief' in text}))")

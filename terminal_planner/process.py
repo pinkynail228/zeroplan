@@ -815,9 +815,8 @@ def _record_ok(value, nested=False):
         return value["digest"] is None and value["snapshot"] is None
     if not (isinstance(value["digest"], str) and SHA.fullmatch(value["digest"])):
         return False
-    # "accepted" normally has no snapshot (the file is the source). A fixture session records the accepted
-    # snapshot here instead of writing the target's file (R-3), so an accepted record may carry one; "later"
-    # always does.
+    # "accepted" has no snapshot when the project's file is the source; a profile accepted or edited without a
+    # file records the snapshot here (and a fixture session always does, R-3); "later" always does.
     if state == "accepted":
         return value["snapshot"] is None or _snapshot_ok(value["snapshot"])
     return _snapshot_ok(value["snapshot"])
@@ -919,11 +918,13 @@ class Profile:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         atomic_state(self.directory / STATE_FILE, record)
 
-    def _accepted_record(self, resolved):
-        """The `accepted` record this session writes: a native one names the file's digest only (the project file
-        is the source), while a fixture session also carries the effective snapshot, so the accepted profile still
-        resolves after the project file is removed (R-3) instead of reading as deleted."""
-        return make_record("accepted", resolved.digest, snapshot_of(resolved) if self.fixture else None)
+    def _accepted_record(self, resolved, snapshot=True):
+        """The `accepted` record this session writes. A snapshot-sourced profile (accepted without a project file,
+        or edited later) carries the effective snapshot, so it resolves on a reopen and the project's file is never
+        written. A file-sourced one (`snapshot=False`) names the file's digest only: the file is the source, except
+        in a fixture session, which keeps the snapshot too (R-3) so the accepted profile survives the file's removal
+        instead of reading as deleted."""
+        return make_record("accepted", resolved.digest, snapshot_of(resolved) if snapshot or self.fixture else None)
 
     def _drop(self):
         if self.writable():
@@ -965,7 +966,7 @@ class Profile:
             if present:  # the file was written: finish the accept (an unreadable file is refused below)
                 # R-3: in a fixture session the finished accept keeps the effective snapshot too, so an accept
                 # interrupted between the file and the record still survives the file's removal.
-                record = (self._accepted_record(resolved) if self.fixture and resolved is not None
+                record = (self._accepted_record(resolved, False) if self.fixture and resolved is not None
                           else make_record("accepted", resolved.digest if resolved is not None else digest(None)))
                 if write:
                     self._write(record)
@@ -984,7 +985,7 @@ class Profile:
             if state == "later":
                 notice = "Found %s: the profile is accepted." % PROFILE_FILE
                 if write:
-                    self._write(self._accepted_record(resolved))
+                    self._write(self._accepted_record(resolved, False))
             elif state == "accepted" and write and resolved is not None:
                 if self.fixture and record["snapshot"] is None:
                     # R-3: an accepted record without a snapshot (an older or interrupted fixture accept) is
@@ -992,16 +993,16 @@ class Profile:
                     # file is later removed instead of reading as deleted.
                     self._write(self._accepted_record(resolved))
                 elif record["snapshot"] is not None and record["digest"] != resolved.digest:
-                    # R-3: a project file that changes is the source again; a fixture session keeps its snapshot
-                    # beside the new digest (a native record has none to keep), so the accepted profile still
-                    # resolves if that file is later removed. Written only when the file's digest moved.
+                    # R-3: a project file that changes is the source again; a snapshot-sourced record keeps its
+                    # snapshot beside the new digest, so the accepted profile still resolves if that file is later
+                    # removed. Written only when the file's digest moved.
                     self._write(self._accepted_record(resolved))
             return Status("accepted", resolved, True, notice=notice)
         if state == "accepted":
             snapshot = record["snapshot"]
-            if self.fixture and snapshot is not None:
-                # R-3: the demo records the accepted snapshot in the fixture state and never writes the target's
-                # file; a reopen resolves the accepted profile from that snapshot instead of reading as deleted.
+            if snapshot is not None:
+                # The accepted snapshot is recorded in the state and the target's file is never written; a reopen
+                # resolves the accepted profile from that snapshot instead of reading as deleted.
                 try:
                     return Status("accepted", from_snapshot(snapshot, self.project), False)
                 except Blocked as error:  # the project's rules changed under the snapshot: a file profile's refusal
@@ -1024,19 +1025,13 @@ class Profile:
     # Owner decisions -----------------------------------------------------------------------------------------
 
     def accept(self, changes=None):
-        """Accept the proposal: write zplan.process.json (never over an existing file) and record it. An existing
-        valid file is only recorded. Crash-safe: the intent is recorded first and finished on the next start.
+        """Accept the proposal: record "accepted" with the effective snapshot. The project's `zplan.process.json` is
+        never written or committed; an existing valid file is only recorded, as the source, and stays byte-identical.
 
-        `changes` (the owner's edits from the profile editor, see `apply_changes`) are set on the document that
-        would be written: the proposal, or for a "later" profile the document its snapshot stands for. They are
-        refused, before anything is written, for an existing file, which stays as it is.
-
-        In a fixture session (R-3) the project file of the target is never written: the accepted record carries the
-        effective snapshot (whether it came from the proposal or from an existing file), so a reopen resolves the
-        profile from the fixture state even when that file later appears, changes or goes away — an "accepted"
-        record with neither file nor snapshot would read as "missing". An existing file is still only recorded and
-        stays byte-identical. A "missing" fixture profile (the file is gone and the record kept no snapshot) is
-        re-decided from the proposal, exactly like a production `init`, and recorded in the fixture state only."""
+        `changes` (the owner's edits from the profile editor, see `apply_changes`) are set on the document the
+        snapshot stands for: the proposal, or for a "later" profile the document its snapshot stands for. They are
+        refused for an existing file, which stays as it is. A "missing" profile (the accepted file is gone and the
+        record kept no snapshot) is re-decided from the proposal and recorded as a snapshot."""
         status = self.status()
         if status.state == "accepted":
             return status
@@ -1045,38 +1040,18 @@ class Profile:
         if status.present:
             if changes:
                 raise Blocked("%s already exists; it stays as it is." % PROFILE_FILE, family="action.refused")
-            self._write(self._accepted_record(status.resolved))
+            self._write(self._accepted_record(status.resolved, False))
             return self.status()
         saved = saved_roles(self.roles_path)
-        if self.fixture:
-            resolved = status.resolved
-            if changes:
-                resolved = resolve(validate_profile(apply_changes(self._base_document(status), changes)), saved,
-                                   self.project, "proposal")
-            elif resolved is None:
-                # "missing": the accepted file is gone and the record carries no snapshot to fall back on. Like a
-                # production `profile init`, decide again from the proposal — but record it in the fixture state
-                # only; the target's file is never written (R-3).
-                proposal = status.proposal or propose(self.project, saved)
-                resolved = resolve(validate_profile(proposal), saved, self.project)
-            self._write(self._accepted_record(resolved))
-            return self.status()
-        previous = read_record(self.directory)
-        previous = (make_record(previous["state"], previous["digest"], previous["snapshot"])
-                    if previous is not None and previous["state"] != "accepting" else None)
-        proposal = apply_changes(self._base_document(status), changes) if changes else (
-            status.proposal or propose(self.project, saved))
-        text = json.dumps(proposal, ensure_ascii=False, indent=2) + "\n"
-        resolved = resolve(validate_profile(proposal), saved, self.project)
-        nested = None
-        if previous is not None:
-            nested = {"state": previous["state"], "digest": previous["digest"], "snapshot": previous["snapshot"]}
-        self._write(make_record("accepting", None, None, nested))
-        self._create(text)
-        self._write(make_record("accepted", resolved.digest))
-        status = self.status()
-        problem = self._commit_file()
-        return replace(status, notice=problem) if problem else status
+        resolved = status.resolved
+        if changes:
+            resolved = resolve(validate_profile(apply_changes(self._base_document(status), changes)), saved,
+                               self.project, "proposal")
+        elif resolved is None:
+            proposal = status.proposal or propose(self.project, saved)
+            resolved = resolve(validate_profile(proposal), saved, self.project)
+        self._write(self._accepted_record(resolved))
+        return self.status()
 
     def _base_document(self, status):
         """What an accept with edits starts from: the document a "later" snapshot stands for, else the proposal."""
@@ -1084,36 +1059,57 @@ class Profile:
             return document_of(status.resolved.config)
         return status.proposal or propose(self.project, saved_roles(self.roles_path))
 
-    def revise(self, changes):
-        """Change an accepted profile with the editor's `changes` (`apply_changes`): the file's own document is
-        read, only the changed values are set (other keys and sections stay as they were), the file is replaced
-        atomically, committed alone like `_commit_file`, and the new digest is recorded. Nothing is written when
-        a value is refused or nothing changes. A fixture session never writes the target's file: it records the
-        edited snapshot, and refuses when a file of the target is the source."""
+    def preview(self, changes):
+        """The resolved profile `revise(changes)` would record, written nowhere: the same checks (the profile is
+        accepted, the project's file is not the source, `apply_changes`, `validate_profile`, `resolve`) and the
+        same refusals."""
         status = self.status()
         if status.state != "accepted":
             raise Blocked("The profile is not accepted yet: accept it or postpone it.", family="action.refused")
+        if status.present:
+            raise Blocked("%s is the source: %s." % (PROFILE_FILE, "; ".join(
+                "set %s to %s there" % (key, json.dumps(value, ensure_ascii=False)) for key, value in changes.items())),
+                family="action.refused")
         saved = saved_roles(self.roles_path)
-        if self.fixture:
-            if status.present:
-                raise Blocked("In a --fixture session the project's %s is not changed." % PROFILE_FILE,
-                              family="action.refused")
-            resolved = resolve(validate_profile(apply_changes(document_of(status.resolved.config), changes)), saved,
-                               self.project, "proposal")
-            self._write(self._accepted_record(resolved))
-            return self.status()
-        try:
-            document = decode(self.file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, Blocked) as error:
-            raise invalid("(file)", "cannot be read", "Fix the file or delete it.") from error
-        edited = apply_changes(document, changes)
-        if edited == document:
-            return status
-        resolved = resolve(validate_profile(edited), saved, self.project)
-        self._replace(json.dumps(edited, ensure_ascii=False, indent=2) + "\n")
+        return resolve(validate_profile(apply_changes(document_of(status.resolved.config), changes)), saved,
+                       self.project, "proposal")
+
+    def revise(self, changes):
+        """Change an accepted profile with the editor's `changes` (`apply_changes`): only the changed values are set
+        on the snapshot (other keys and sections stay as they were) and the new digest is recorded. Nothing is
+        written to the project and nothing is committed; a running attempt keeps the profile it froze. Nothing is
+        recorded when a value is refused. When the project's file is the source, the change is refused and the file
+        stays as it is."""
+        self._write(self._accepted_record(self.preview(changes)))
+        return self.status()
+
+    def export(self):
+        """`zplan profile init`: write the effective profile (the proposal, or the snapshot of a postponed or
+        accepted profile) to the project's file, never over an existing one, commit it alone, and record the file as
+        the source from then on. Crash-safe: the intent is recorded first and finished on the next start. Never in a
+        fixture session (R-3): the target's file is not written there."""
+        status = self.status()
+        if status.state == "malformed":
+            raise Blocked(status.problem, family="process.invalid")
+        if self.fixture or status.present:
+            raise Blocked("%s is not written here." % PROFILE_FILE if self.fixture
+                          else "%s already exists; it is not overwritten." % PROFILE_FILE, family="action.refused")
+        saved = saved_roles(self.roles_path)
+        if status.state == "never" or status.resolved is None:
+            document = status.proposal or propose(self.project, saved)
+        else:
+            document = document_of(status.resolved.config)
+        text = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+        resolved = resolve(validate_profile(document), saved, self.project)
+        previous = read_record(self.directory)
+        nested = None
+        if previous is not None and previous["state"] != "accepting":
+            nested = {"state": previous["state"], "digest": previous["digest"], "snapshot": previous["snapshot"]}
+        self._write(make_record("accepting", None, None, nested))
+        self._create(text)
         self._write(make_record("accepted", resolved.digest))
         status = self.status()
-        problem = self._commit_file("changed")
+        problem = self._commit_file()
         return replace(status, notice=problem) if problem else status
 
     def _commit_file(self, done="created"):
@@ -1132,24 +1128,6 @@ class Profile:
         except (OSError, Blocked):
             pass
         return "%s %s, but not committed; run: %s" % (PROFILE_FILE, done, command)
-
-    def _replace(self, text):
-        """Replace the project file atomically (same directory, fsync, rename), keeping its permissions."""
-        mode = self.file.stat().st_mode & 0o777
-        fd, name = tempfile.mkstemp(dir=self.project, prefix=".zplan-process-")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(text)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.chmod(name, mode)
-            os.replace(name, self.file)
-        except BaseException:
-            try:
-                os.unlink(name)
-            except OSError:
-                pass
-            raise
 
     def _create(self, text):
         """Create the project file atomically and never over an existing one. The fsynced temp is published with a
@@ -1344,8 +1322,8 @@ def bootstrap_lines(status):
     if status.present:
         lines.append("  Accept - the file stays as it is; the decision is remembered outside the project.")
     else:
-        lines.append("  Accept - zplan creates %s in the project root and commits it in one commit '%s', touching nothing else."
-                     % (PROFILE_FILE, COMMIT_MESSAGE))
+        lines.append("  Accept - these values apply; the decision is remembered outside the project. zplan profile init writes %s."
+                     % PROFILE_FILE)
         lines.append("  Later - nothing is written to the project; these values apply, shown in the header: '%s'." % LATER_NOTE)
     return lines
 

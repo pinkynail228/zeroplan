@@ -247,3 +247,44 @@ One row per finished `ZS_RUNTIME=deepseek` run. Objective columns first; the orc
 | 2026-10-30 | r1 (split test subset) | merged, 2 min, 1 round | a test that pins a module's whole name list is whack-a-mole; assert the invariant |
 | 2026-10-30 | r23 (critic rel090 BLOCK 1-2, process.pending) | merged, 16 min, 2 rounds; r2 attempt 1 died on the Claude 5-hour limit at select_init | a release critic on the accumulated diff caught two real merge-policy holes |
 | 2026-10-30 | r4 (vet on the gated path) | merged, 13 min, 1 round | a repair for one path of a policy must name every path the policy covers (r2 named only the ungated one) |
+| 2026-10-30 | u1 (refused goal resumes, soak N2) | merged, 13 min, 2 rounds | reuse the existing readiness slice as the trigger; no new event |
+| 2026-10-30 | u4b (true notes N1, N6) | merged, 4 min, 1 round | two small truths in one task file were fine |
+| 2026-10-30 | u2 (merge receipt after an outside merge) | merged, 6 min, 1 round | reused the existing receipt and close_card |
+| 2026-10-30 | u3 (end-screen merge at once) | merged, 9 min, 1 round | listing every test that answers the confirm up front avoided the p094 conflicts |
+| 2026-10-30 | u5a (Plan tab after the planner ends) | merged, attempt 2, 12 min | attempt 1 passed its own final check with a failing DoD module; the gate caught it |
+| 2026-10-30 | u9a (/.zplan/ excluded at prepare) | merged, 7 min, 1 round | a one-line reuse of an existing helper closed a 25-minute rejection loop |
+| 2026-10-30 | u9f (in-process profile lock) | merged, 5 min, 1 round | a flock per open file description needs a process lock beside it |
+| 2026-10-30 | v1a (stopped attempt reason in zplan_status) | merged, 1 round | the reason the card shows reuses `Delivery.view` and the existing scrub; 60 lines |
+| 2026-10-30 | v1b (readiness and profile in zplan_status) | merged, 1 round | the first brief was 16 bytes over the cap; run.sh refused it before any model call |
+| 2026-10-30 | v1c (merge gate result in zplan_status) | merged, 1 round after two refusals by run.sh (criterion form; a branch left by my own cleanup of a refused start) | remove a refused worktree with git worktree remove, never rm |
+| 2026-10-30 | v2a (approval receipt, no start promise) | merged, 1 round | the first V2 slice carries the result ring itself; the start guess and its clearing rule went with it (-82 lines) |
+| 2026-10-30 | v2b (merge receipt, F4) | merged, 1 round | the owner-visible line for an architect action is one Controller hook, not a new note field |
+| 2026-10-30 | v2c (results across a reopen) | merged, 1 round | a file beside the store keeps planning.json closed and 0.9.0-readable |
+| 2026-10-30 | v2d (start receipt) | merged, 1 round | four entries of one operation share one result writer; the readiness lines now come from the result |
+| 2026-10-30 | v2e (stop receipt) | merged, 1 round | each operation grew its own _X_result helper: fold them once V2 ends |
+| 2026-10-30 | v2f (resume, new attempt, answer receipts) | merged, 1 round | 202 lines for three operations; the worker named the same uncaught-exception gap v2d left |
+| 2026-10-30 | v3a (named stop at once) | merged, 1 round, in parallel with v2g | the catalog help still says "after a confirmation" for stop and merge: one text task closes V3 |
+| 2026-10-30 | v2g (plan receipts) | merged, 1 round | a worker-shared `_tool_verdict` carries the tool verdict to the seam: fold it with the other result helpers |
+| 2026-10-30 | v3c (new attempt at once) | preflight_conflict | removing a catalog screen needs docs/REFERENCE.md (generated) in the write-set |
+| 2026-10-30 | v3c (new attempt at once) | preflight_conflict again | grep tests for the button and action names too, not only the helper names |
+| 2026-10-30 | v3c (new attempt at once) | merged on the third start, 1 round | two preflight conflicts were my write-set gaps (generated REFERENCE.md, tests pressing the form) |
+| 2026-10-30 | v3d (Drafts tab) | preflight_conflict | a new fixed tab is pinned by the tab-cycle tests: grep tests for the tab ids and `query(Tab)` |
+| 2026-10-30 | v2h (one result seam) | merged on the second start, 1 round | the preflight caught my contradictory criteria (tests "unchanged" vs a removed helper they call) |
+| 2026-10-30 | v3f (help texts) | merged, 1 round | text-only task; the plain CLI keeps its own asks |
+| 2026-10-30 | whole suite on main 588221a | 3 regressions + 1 flake | per-merge gates ran only write-set modules: v2c broke test_parallel_home (fake session), v2a/v6a a stub in test_feed_wiring, u9a a test git call; run the whole suite after every few merges, not only per candidate |
+| 2026-10-30 | whole suite after r6 | 1 regression | v3d test imported card_kinds (rich) at module top; test_toolchain belongs in every DoD that adds a TUI test import |
+| 2026-10-30 | v3b (decline goes) | merged, 1 round | a removal across 6 product files: -76/+37; one state text in the catalog still lists it |
+| 2026-10-30 | v3g (approved-plan projection) | merged, 1 round | the projection reads overview a second time per snapshot (a second refresh): reuse it when current is approved |
+| 2026-10-30 | v3e (draft card goes) | merged, 1 round | 13 test modules rewritten; product -47 lines net |
+| 2026-10-30 | v3h (Plan forward on start) | merged, 1 round | small and clean |
+| 2026-10-30 | v6b (owner-turn consent) | Astra BLOCK, 3 defects | the needs_owner exception sat inside the ask branch; refusals lost owner attribution; a pending request was not settled. Fix run v6c on top of the v6b branch (run.sh reuses an existing worktree) |
+| 2026-10-30 | v3i (Drafts/Plan split) | merged on the second start, 1 round | the preflight caught the u5a test pinning the tab move |
+| 2026-10-30 | whole suite after V3 (e4e2baa) | green, 2445 tests | |
+| 2026-10-30 | v3j (decline leftovers) | merged, 1 round | |
+| 2026-10-30 | v6b-v6d (owner-turn consent) | merged after two Astra rounds and two fix runs | fix runs on top of the blocked branch (run.sh reuses the worktree with ZS_ATTEMPT) keep the review diff small |
+| 2026-10-30 | v6e (zplan_plan) | merged, 1 round, Astra GO | the owner path factored into one worker function the tool reuses |
+| 2026-10-30 | v4a (profile snapshot) | review_conflict | `zplan profile init` calls accept: the CLI path and its test belong to the write-set when a service changes meaning |
+| 2026-10-30 | v4a, v4b | crashed at select_verify | the Claude lane hit its 5-hour limit with two runs in parallel; reran after the reset |
+| 2026-10-30 | v4a (profile snapshot) | merged on the third start | product -26 lines; `profile init` became an explicit export |
+| 2026-10-30 | v6f (zplan_settings) | merged, 1 round, Astra GO | the settings tool is a thin owner-turn wrapper over v4a revise |
+| 2026-10-30 | v4b (pending goal) | merged on the third start | the worker stopped correctly on the conflict rule (test_tui.py pinned the old refusal); the fix run continued on the same worktree |

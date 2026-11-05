@@ -58,22 +58,22 @@ def older():
 
 class SingleSourceTests(unittest.TestCase):
     def test_tool_dir_name_is_unchanged(self):
-        self.assertEqual(toolchain.current().tool_dir_name, "zeroshot-10.16.0-codex-0.162.1-runtime2")
-        self.assertEqual(setup.tools_root().name, "zeroshot-10.16.0-codex-0.162.1-runtime2")
+        self.assertEqual(toolchain.current().tool_dir_name, "zeroshot-11.0.0-codex-0.162.1-runtime2")
+        self.assertEqual(setup.tools_root().name, "zeroshot-11.0.0-codex-0.162.1-runtime2")
 
-    def test_the_default_toolchain_is_the_qualified_10_16_0(self):
-        """C4: this release's one default toolchain -- Zeroshot 10.16.0, Codex 0.162.1 and the three platform
-        archive SHA256 of the 10.16.0 release."""
+    def test_the_default_toolchain_is_the_qualified_release(self):
+        """C4: this release's one default toolchain -- Zeroshot 11.0.0, Codex 0.162.1 and the three platform
+        archive SHA256 of the 11.0.0 release (its SHA256SUMS)."""
         chain = toolchain.current()
-        self.assertEqual((chain.zeroshot, chain.codex, chain.runtime), ("10.16.0", "0.162.1", "runtime2"))
-        self.assertEqual(chain.tool_dir_name, "zeroshot-10.16.0-codex-0.162.1-runtime2")
+        self.assertEqual((chain.zeroshot, chain.codex, chain.runtime), ("11.0.0", "0.162.1", "runtime2"))
+        self.assertEqual(chain.tool_dir_name, "zeroshot-11.0.0-codex-0.162.1-runtime2")
         self.assertEqual(chain.releases, {
             ("Linux", "x86_64"): ("x86_64-unknown-linux-musl",
-                                  "2f1ad10956875eccb1aadf60b879fb4195db20fbffd9854a4537f0f1369c9a40"),
+                                  "8276d1a601975d8f21afa1cbe39744d2f3f6c206a195654fdf83519107e30c4c"),
             ("Linux", "aarch64"): ("aarch64-unknown-linux-musl",
-                                   "6f58bc709bbf9e5d1959834e6f03357f0fe195e4463a7065301bb8b50f794ef3"),
+                                   "dc663492b9ebccb902227057a61ab78b9a3e7e0a96cdf5746cfc4b34b3ad6465"),
             ("Darwin", "arm64"): ("aarch64-apple-darwin",
-                                  "d8da042239ea252b41ab39f3eba82892e51a7b01c3c0a63460d4f24bfe74e2ef"),
+                                  "f3e349870e58a0b1da366389bfdb7298d5f28b287c420632ed91a07f96cf1710"),
         })
 
     def test_no_version_or_archive_literal_outside_the_toolchain_module(self):
@@ -520,7 +520,7 @@ class CandidateScriptTests(runs_tests.RunsTest):
             for name in ("HOME", "XDG_DATA_HOME", "ZEROSHOT_STATE_DIR", "ZEROSHOT_CONFIG_DIR"):
                 self.assertTrue(self.scratch(env[name]), (name, env[name]))
             self.assertEqual(env["ZEROSHOT_TEST_BINARY"], str(root / "zeroshot"))
-        self.assertEqual(toolchain.current().zeroshot, "10.16.0")
+        self.assertEqual(toolchain.current().zeroshot, toolchain.DEFAULT.zeroshot)
         self.assertFalse(Path(home).exists(), "scratch is removed")
 
     def test_a_failing_step_fails_the_report_and_keeps_the_default(self):
@@ -532,7 +532,7 @@ class CandidateScriptTests(runs_tests.RunsTest):
                 self.assertIn("boom in " + step, report)
                 self.assertIn("RESULT: FAIL", report)
                 self.assertFalse(self.default_dir().exists())
-                self.assertEqual(toolchain.current().tool_dir_name, "zeroshot-10.16.0-codex-0.162.1-runtime2")
+                self.assertEqual(toolchain.current().tool_dir_name, toolchain.DEFAULT.tool_dir_name)
 
     def test_install_failure_fails_before_any_suite_runs(self):
         with patch.object(self.script.setup, "install_tools", side_effect=Blocked("checksum mismatch")):

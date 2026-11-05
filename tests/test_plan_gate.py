@@ -32,7 +32,7 @@ from test_terminal_planner import PLAN, ROLES, ScriptedTerminal, fixture_proposa
 # milestone driver's true mechanics, the critic's authority sentence) and once more for H5 (the final check once per milestone) and D1 (the final check's repairs and re-checks).
 V1_GOLDEN = {
     "graph": "cdd3fd38e5d5cda2c4b1a733d7ea6793215ef20270fa514c84c181ea44f75467",
-    "runtime": "fe363c5a5404df138de8289fd29ec38709a3c1b4513f8956ace867d7c4715014",
+    "runtime": "f85378415ae57ecfe122f47c51ed8dbd7b2713ebe0a090d32534bcf0a343b245",
     "input": "6267b3988046fa059819ecc62a2f83339e6f832b0eb4b66fdd12c26d49d1a1e3",
 }
 ERRORS = ["timeout", "crash", "malformed", "refusal"]

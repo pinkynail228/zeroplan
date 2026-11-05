@@ -1281,7 +1281,10 @@ class DisplayTests(ReaderScript, RunsTest):
             return delivery.Delivery(a, controller, None).end(record)
 
     def test_both_surfaces_show_the_cause_and_its_remedy_for_failed_and_failed_recoverable(self):
-        for recoverable, state in ((False, "failed"), (True, "failed_recoverable")):
+        # D4a: a first recoverable provider limit pauses the attempt (zplan resumes it once at the reset), so the
+        # recoverable case is `paused`; a later limit of the same attempt stays failed_recoverable
+        # (tests/test_limit_resume.py)
+        for recoverable, state in ((False, "failed"), (True, "paused")):
             with self.subTest(state):
                 self.setUp()
                 record, reads, stored = self.conclude_failed([envelope("v2:9", CLAUDE_LIMIT, execution="nv2-1")],
@@ -1289,9 +1292,13 @@ class DisplayTests(ReaderScript, RunsTest):
                 self.assertEqual(runs.run_state(stored), state)
                 line = delivery.Delivery.state_text({"state": state, "record": stored})
                 self.assertTrue(line.startswith(delivery.STATE_TEXT[state]), line)
-                self.assertIn("Recorded in one of the executions:", line)
-                self.assertIn("provider limit; resets: 3:10am (Europe/Moscow)", line)
-                self.assertIn("[code: run.limit]", line)
+                if state == "paused":
+                    self.assertIn("provider limit", line)
+                    self.assertIn("resumes", line)
+                else:
+                    self.assertIn("Recorded in one of the executions:", line)
+                    self.assertIn("provider limit; resets: 3:10am (Europe/Moscow)", line)
+                    self.assertIn("[code: run.limit]", line)
                 view = self.ended(stored)
                 self.assertEqual(view.state, state)
                 body = "\n".join(view.body)
@@ -1299,8 +1306,8 @@ class DisplayTests(ReaderScript, RunsTest):
                 self.assertIn("Recorded in one of the executions:", body)
                 self.assertIn("provider limit; resets: 3:10am (Europe/Moscow)", body)
                 self.assertIn("[code: run.limit]", body)
-                if state == "failed_recoverable":
-                    self.assertIn("[g] continue resumes the same attempt", body)
+                if state == "paused":
+                    self.assertIn("zplan continues it by itself at", body)
 
     def test_every_class_shows_its_own_remedy_and_only_the_reset(self):
         for cause, remedy in self.REMEDY.items():

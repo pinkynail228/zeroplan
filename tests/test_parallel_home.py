@@ -181,6 +181,55 @@ def run_record(milestone, attempt, run_id, status="running"):
             "outcome": None}
 
 
+class ApprovedPlanTests(ParallelRunsTest):
+    """v3g: the last approved plan and its progress stay readable in the snapshot while a newer revision is only
+    proposed (A1 kept while revising, A2 across a reopen, A3 none before the first approval, A4 the same as home
+    when current).
+
+    Interpretations: `approved` is `ApprovedPlan(version, lines)` -- "plain data" read as a frozen value of the
+    version and the plan lines of home (goal line, summary line, one line per milestone); A4 compares them with
+    `home.lines` without home's trailing "Next:" line, which is the focus's, not the plan's."""
+
+    def snapshot(self, authority, controller):
+        service = Delivery(authority, controller, planning.Planning(authority, controller, lambda *_: FixtureEngine()))
+        app = SimpleNamespace(controller=controller, delivery=service, plan=service.plan, roles={},
+                              planning=SimpleNamespace(view=lambda: None), profile=None)
+        return tui_controller.take_snapshot(app, "P"), service
+
+    def test_v3g_approved_survives_a_proposed_revision_and_a_reopen_and_equals_home_when_current(self):
+        with self.fixture_authority() as a:
+            self.begin(a)
+            self.propose(a)
+            snapshot, _ = self.snapshot(a, self.fixture_runs(a))
+            self.assertIsNone(snapshot.approved)  # A3: only r1 proposed
+            a.approve(1)
+            controller = self.fixture_runs(a)
+            record = controller.start("M1", 1, ROLES)
+            snapshot, service = self.snapshot(a, controller)
+            home = service.home()
+            self.assertEqual(snapshot.approved.version, 1)
+            self.assertEqual(snapshot.approved.lines, home.lines[:-1])  # A4: the plan part of home, minus "Next:"
+            self.assertTrue(home.lines[-1].startswith("Next:"))
+            self.assertRegex(snapshot.approved.lines[2], r"▶ M1 .*running")
+            reads = []
+            read = controller.overview
+            controller.overview = lambda *args, **kwargs: reads.append(kwargs.get("revision")) or read(*args, **kwargs)
+            self.snapshot(a, controller)
+            self.assertEqual(reads, [None])  # v3h A3: r1 approved and current -> home's one read serves both
+            del controller.overview
+            controller.finish(controller.observe(record))  # a revision waits for the attempt to end
+            a.begin("Second goal", ROLES, "fixture")
+            self.propose(a)
+            snapshot, _ = self.snapshot(a, controller)
+            self.assertEqual((snapshot.version, snapshot.status, snapshot.rows), (2, "proposed", ()))  # r2's, as before
+            self.assertEqual(snapshot.approved.version, 1)  # A1: r1 and M1's progress stay readable
+            self.assertRegex(snapshot.approved.lines[2], r"M1 .*waiting for merge")
+            kept = snapshot.approved
+        with self.fixture_authority() as a:  # A2: the same store, a new controller
+            snapshot, _ = self.snapshot(a, self.fixture_runs(a))
+            self.assertEqual(snapshot.approved, kept)
+
+
 class ObserveIdentityTests(unittest.TestCase):
     """C4 (the A9t repair): a queued watch slice belongs to one attempt, and `Controller.observe_run` checks that
     identity on the worker before it polls -- so a slice of an attempt the milestone has left behind ends without

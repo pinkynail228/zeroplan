@@ -58,12 +58,12 @@ def pinned_binary():
 # sha256 of the canonical documents captured on the base (6e23523), except the two graph goldens: C0a (the review
 # bar) adds the plan critic's bar to the v1 and v2 verifier text and A2a (the task brief) the brief fields to the
 # planner and verifier text and RC1 the milestone-isolation sentence to both and H3 the dod sentence to the planner and H2 turns the v2 planner into a verifier (kind, empty signals, diagnostic) and H4 removes the dev marker from the node texts, rewrites DRIVER_MECHANICS and the critic's authority sentence and H5 words the final check once per milestone and D1 (the final check's repairs and re-checks), so a newly built graph carries it while the stored
-# documents of already prepared, submitted or approved revisions keep their bytes. The runtime, input and the bare
-# configuration are still the base's bytes.
+# documents of already prepared, submitted or approved revisions keep their bytes. The input and the bare configuration
+# are still the base's bytes; the runtimes gained Zeroshot 11's Active Memory off (P1).
 BASE_GOLDEN = {
     "v2_graph_2": "5f9bc48d6b1ea11ab8055c4ba1e371e52a183f8f84f4966c538720e69125761b",
     "v2_graph_3": "aa17aedf731ad431ec1e3c314af22c32ada212a96808c7dcd0f69d5b5eefead7",
-    "v2_runtime": "0f579a7650f32d8ca355a4129f4417e036e0a3d91f59c6a6da0d89775c448d00",
+    "v2_runtime": "1fe46727db536410d3b939a1fba1ea5dd5cfc07248f56ef19777faee9a57a9a1",
     "v2_input": "6caa2a7c3b63a299280836de9776f0003dc4d8ac26a8bd47e2c065f3bee0b2a1",
     "config_digest": "4cd20d1393ccd81f56cc118262e2be210bf9ab71bd3b27edb10960e9a84e407f",
 }
@@ -76,8 +76,8 @@ def entry(graph, name):
 # A-1 ------------------------------------------------------------------------------------------------------------
 
 class BaseTests(unittest.TestCase):
-    """Off is identical: the plan runtime, input and the bare normalized configuration are the base's bytes (A-1); the
-    two plan graphs moved only for C0a's review bar (the runtime, the input and the configuration did not)."""
+    """Off is identical: the plan input and the bare normalized configuration are the base's bytes (A-1); the two plan
+    graphs moved for C0a's review bar and the runtimes for Zeroshot 11's Active Memory off (P1)."""
 
     def test_the_plan_documents_and_the_normalized_configuration_are_the_base_bytes(self):
         self.assertEqual(sha(planner_graph()), V1_GOLDEN["graph"])

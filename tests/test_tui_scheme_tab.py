@@ -1,6 +1,6 @@
 """I1b — the Scheme tab drawn by `terminal_planner/tui/scheme.py` (A1-A9) through `tests/tui_support.py`.
 
-The tab of a running attempt is the stage scheme `scheme.render(milestone.milestone_graph(1, rounds)["root"],
+The tab of a running attempt is the stage scheme `scheme.render(milestone.milestone_graph()["root"],
 scheme.observation_from_flow(snapshot.flow), width, height, limits=...)`, then one `scheme.legend()` line, then the
 same `live_status(True)` lines as before; below `FLOW_MIN_WIDTH` or without a flow it keeps today's `live_view()`
 (F2/A3). Every tab test drives the real shell (Textual Pilot over a real temporary repository and the fixture
@@ -16,17 +16,18 @@ Interpretations (the worker's summary does not reach the reviewers, so they are 
   plain fallback is the required behaviour there and A3's guard ("whenever the pane is at least FLOW_MIN_WIDTH
   wide") is exercised at the boundary: at 88x24 the pane settles at exactly 40 cells and the scheme is fitted:
   the guard and the size in the criterion cannot both hold for the 80x24 layout this app has.
-- A7's "the drawing is the same for `milestone_graph(1, r)` and `milestone_graph(3, r)` under the same `limits`" is
-  asserted on the rendered text of the two roots, never by comparing the graphs structurally; the task loop's bound
-  (`outer_iterations(tasks)`) differs between them, which is exactly what `limits` suppresses.
+- A7's "the drawing is the same under the same `limits`" is asserted on the rendered text of the one
+  `milestone_graph()` root; its loop ceilings are not facts of an attempt, which is exactly what `limits` suppresses.
 - A8 is asserted here (its evidence is `tests.test_tui_scheme` unchanged and green, per the criterion); A9 is this
   module's own structure — one test per criterion, checked by `test_a9_` itself.
 """
 
+import json
 import unittest
 from dataclasses import replace
 
-from terminal_planner import milestone
+from terminal_planner import live, milestone
+from terminal_planner.authority import Authority
 from test_tui_milestones import MilestoneShell
 from tui_support import HAVE_TEXTUAL, screen_text
 
@@ -58,8 +59,8 @@ def flow(worker="running", round=2, rounds=4, reviewers=None, final="waiting", a
 
 
 def scheme_root(rounds):
-    """The stage graph `app.py` builds for a flow's `rounds` (the default bound when the flow carries none)."""
-    return milestone.milestone_graph(1, rounds if isinstance(rounds, int) else milestone.TASK_ITERATIONS)["root"]
+    """The stage graph `app.py` builds: one document for every milestone (`rounds` only picks the drawn `limits`)."""
+    return milestone.milestone_graph()["root"]
 
 
 def scheme_lines(data, width, height):
@@ -82,6 +83,60 @@ class SchemeTabTests(MilestoneShell):
 
     def live(self):
         return self.app.query_one("#live")
+
+    async def test_the_snapshot_carries_the_attempts_frozen_graph_document(self):
+        self.approve(running=True)
+        state = self.stored()
+        run = state["runs"][0]
+        directory = Authority(self.state, self.project, fixture_id="test").directory
+        graph_path = directory / "runs" / run["worktree"].rsplit("/", 1)[-1] / "graph.json"
+        expected = json.loads(graph_path.read_text())["root"]
+        async with self.shell(size=(120, 40)) as pilot:
+            await self.loaded(pilot)
+            self.assertEqual(self.app.snapshot.graph, expected)
+
+    async def engine_nodes_on_canvas(self, size):
+        self.approve(running=True)
+        root = {"kind": "par", "children": [
+            {"kind": "step", "name": "repair"},
+            {"kind": "seq", "children": [{"kind": "verifier", "name": "empty_final_verify"},
+                                             {"kind": "step", "name": "custom_build"}]}]}
+        facts = live.new()
+        stamp = "2026-01-01T00:00:00Z"
+        live.stages(facts, {"activeExecutions": [
+            {"node": "generated/repair", "execution": "fix-1"},
+            {"node": "generated/empty_final_verify", "execution": "verify-1"},
+            {"node": "generated/custom_build", "execution": "build-1"}]}, stamp)
+        async with self.shell(size=size) as pilot:
+            await self.loaded(pilot)
+            await self.canvas(pilot)
+            # The snapshot accepts the same arbitrary graph document as the engine adapter.
+            # Frozen-file loading is covered separately; never mutate a frozen attempt.
+            self.app.snapshot = replace(self.app.snapshot, graph=root)
+            await self.inject(pilot, live.flow(facts, stamp, "2026-01-01T00:00:03Z"))
+            await self.drawn(pilot)
+            drawn = self.live().content.plain
+            for title in ("stage fix-up", "final check", "custom build"):
+                line = next(line for line in drawn.splitlines() if title in line)
+                self.assertIn("◐", line)
+                self.assertIn("running", line)
+            self.assertIn("parallel fork", drawn)
+            self.assertIn("join", drawn)
+            self.assertTrue(self.app.query_one("#input").display)
+            live.stages(facts, {"activeExecutions": []}, "2026-01-01T00:00:04Z")
+            await self.inject(pilot, live.flow(facts, stamp, "2026-01-01T00:00:05Z"))
+            departed = self.live().content.plain
+            for title in ("stage fix-up", "final check", "custom build"):
+                line = next(line for line in departed.splitlines() if title in line)
+                self.assertIn("?", line)
+                self.assertIn("unknown", line)  # departure alone is not proof of success
+                self.assertNotIn("waiting", line)
+
+    async def test_engine_live_nodes_reach_the_production_graph_at_80x24(self):
+        await self.engine_nodes_on_canvas((80, 24))
+
+    async def test_engine_live_nodes_reach_the_production_graph_at_wide_size(self):
+        await self.engine_nodes_on_canvas((140, 40))
 
     async def canvas(self, pilot):
         """I7: below 100 columns the screen is narrow — one pane at a time. These checks want the canvas, so leave
@@ -281,8 +336,8 @@ class SchemeTabTests(MilestoneShell):
 
     async def test_a7_loop_bounds_come_only_from_the_flow_and_never_from_the_graph(self):
         """A7: with `flow["rounds"]` = 4 the review loop shows its bound 4; with `rounds` None no loop bound is
-        shown and the task loop never shows a bound; and `milestone_graph(1, r)` and `milestone_graph(3, r)` render
-        the same text under the same `limits` (asserted on the rendered text of the two roots)."""
+        shown and the task loop never shows a bound; and the one `milestone_graph()` root renders the
+        same text for a flow's rounds under the same `limits`."""
         self.approve(running=True)
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
@@ -305,13 +360,11 @@ class SchemeTabTests(MilestoneShell):
             for rounds in (4, 5):
                 observation = scheme.observation_from_flow(flow(rounds=rounds))
                 limits = {"review_loop": rounds}
-                one = scheme.render(milestone.milestone_graph(1, rounds)["root"], observation, 76, 30,
-                                    limits=limits).plain
-                three = scheme.render(milestone.milestone_graph(3, rounds)["root"], observation, 76, 30,
-                                      limits=limits).plain
+                one = scheme.render(milestone.milestone_graph()["root"], observation, 76, 30, limits=limits).plain
+                again = scheme.render(milestone.milestone_graph()["root"], observation, 76, 30, limits=limits).plain
                 with self.subTest(rounds=rounds):
                     self.assertIn("review rounds · 2 of %s" % rounds, one)
-                    self.assertEqual(one, three)
+                    self.assertEqual(one, again)
             # The box mode takes the same `limits` decision: the round badge keeps the count without the bound.
             loop_graph = {"kind": "seq", "name": "g", "children": [
                 {"kind": "loop", "name": "review_loop", "maxIterations": 4,
@@ -466,18 +519,16 @@ class SchemeContractTests(unittest.TestCase):
         """A8: `scheme.render` without `limits` renders exactly as before — the same lines as `limits=None`, with
         the graph's own loop bounds (the behaviour `tests.test_tui_scheme`, unchanged, still asserts)."""
         observation = {"worker": {"state": "running"}, "review_loop": {"count": 2}}
-        for tasks in (1, 3):
-            for width, height in ((40, 10), (70, 30), (120, 40)):
-                root = milestone.milestone_graph(tasks)["root"]
-                before = scheme.render(root, observation, width, height)
-                with self.subTest(tasks=tasks, size=(width, height)):
-                    self.assertEqual(before.plain, scheme.render(root, observation, width, height, limits=None).plain)
-                    self.assertEqual([str(s.style) for s in before.spans],
-                                     [str(s.style) for s in
-                                      scheme.render(root, observation, width, height, limits=None).spans])
-        plain = scheme.render(milestone.milestone_graph(1)["root"], observation, 76, 30).plain
-        self.assertIn("review rounds · 2 of 4", plain)  # the graph's own review bound, as today
-        self.assertIn("up to 16 times", plain)  # and the graph's own task-loop bound, as today
+        root = milestone.milestone_graph()["root"]
+        for width, height in ((40, 10), (70, 30), (120, 40)):
+            before = scheme.render(root, observation, width, height)
+            with self.subTest(size=(width, height)):
+                self.assertEqual(before.plain, scheme.render(root, observation, width, height, limits=None).plain)
+                self.assertEqual([str(s.style) for s in before.spans],
+                                 [str(s.style) for s in scheme.render(root, observation, width, height, limits=None).spans])
+        plain = scheme.render(root, observation, 76, 30).plain
+        self.assertIn("review rounds · 2 of %s" % milestone.REVIEW_LOOP_CEILING, plain)  # the graph's own ceilings, as today
+        self.assertIn("up to %s times" % milestone.task_loop_ceiling(), plain)
 
     def test_a9_one_test_per_criterion_through_the_shell(self):
         """A9: this module keeps exactly one test per acceptance criterion A1-A8 (and this one for A9), each driving

@@ -250,8 +250,9 @@ class StartApp(App):
                 Binding("escape", "back", "back"), Binding("up", "move(-1)", show=False),
                 Binding("down", "move(1)", show=False), Binding("enter", "select", show=False)]
 
-    def __init__(self, start):
+    def __init__(self, start, origin=True):
         super().__init__(ansi_color=True, driver_class=theme.Driver)
+        self.origin = origin  # False: the session plans without an origin (a fixture), so no origin step
         self.start = Path(start).expanduser()
         self.stack = [("project", self.start)]
         self.info = inspect(self.start)
@@ -428,7 +429,7 @@ class StartApp(App):
 
     def open(self, root) -> None:
         """Leave with the project; one step first when its origin is not a GitHub URL."""
-        if needs_origin(root):
+        if self.origin and needs_origin(root):
             self.go(("origin", root))
         else:
             self.exit(root)
@@ -503,6 +504,6 @@ class StartApp(App):
             self.go(("project", path))
 
 
-def choose(start):
+def choose(start, origin=True):
     """The project root picked on the start screen, or None when the owner left."""
-    return StartApp(start).run()
+    return StartApp(start, origin).run()

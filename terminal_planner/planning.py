@@ -3,7 +3,7 @@
 Every rule that decides what may happen to a plan lives here: readiness is re-checked right before a submission,
 a goal is kept when the check fails, a stale unsubmitted revision is replaced by [n] or, on [g], renewed once
 readiness passes and sent in the same action, a revision with a receipt is observed and never resubmitted, an unconfirmed submission is shown and never resent, the planner is
-watched in bounded slices, and approval/revision/rejection go through Authority and MilestoneRuns. The UIs ask
+watched in bounded slices, and approval/revision go through Authority and MilestoneRuns. The UIs ask
 this module what to do next and only render the answer (`PlanView`) or call the named action.
 
 No terminal, no Textual: it renders nothing but plain lines."""
@@ -18,7 +18,7 @@ import time
 from typing import Optional, Tuple
 
 from . import catalog, live, runs
-from .authority import Blocked, canonical, check_bounds, validate_proposal
+from .authority import PARAPHRASE_LIMIT, Blocked, canonical, check_bounds, check_draft, validate_proposal
 from .engine import STALE, STALE_BINDING, ObservationDetached, SliceEnded, Stale, binding_identity, recorded_home
 
 PLANNER_SLICE = 15  # seconds per bounded planner watch: phases reach the owner while the planner runs
@@ -67,6 +67,11 @@ def local_clock(stamp):
         return stamp[11:16]
 
 
+def plan_worker(revision):
+    """What the owner calls whatever produces the plan of a revision: a Goldfish revision runs no planner."""
+    return "plan check" if (revision.get("frozen") or {}).get("review") == "goldfish" else "planner"
+
+
 def summary(value):
     """Bounded one-line projection of stored diagnostics or an error for display."""
     text = clean(value)
@@ -81,6 +86,36 @@ def one_line(text, limit=100):
     cut = text[:limit - 1]
     space = cut.rfind(" ")
     return (cut[:space] if space > limit // 2 else cut).rstrip(" ,;:—-") + "…"
+
+
+def reader_line(text, limit):
+    """The fresh reader's line of a Goldfish revision: the paraphrase, whitespace first (`clean` drops a newline
+    without a space), then cleaned of terminal control sequences, cut to one line of at most `limit`."""
+    return 'How a fresh reader understood it: "%s"' % one_line(clean(" ".join(str(text).split())), limit)
+
+
+BRIEF_TEXT = 400  # the same bound as the paraphrase
+
+
+def brief_text(value):
+    """A model value of a task's brief as one printable line: whitespace first (`clean` drops a newline without a
+    space), then cleaned of terminal control sequences, cut to `BRIEF_TEXT`."""
+    return one_line(clean(" ".join(str(value).split())), BRIEF_TEXT)
+
+
+def brief_lines(task):
+    """What the owner reads under a task's checks before approving: each criterion with its example, then each
+    non-goal; nothing for a task without a brief."""
+    brief = task.get("brief")
+    if not brief:
+        return []
+    lines = []
+    for criterion in brief["criteria"]:
+        lines.append("      Criterion %s: %s" % (brief_text(criterion["id"]), brief_text(criterion["text"])))
+        lines.append("        Example: " + brief_text(criterion["example"]))
+    for non_goal in brief["non_goals"]:
+        lines.append("      Non-goal: " + brief_text(non_goal))
+    return lines
 
 
 def goal_line(goal, limit, action_id):
@@ -336,6 +371,10 @@ class Planning:
         current = self.authority.current
         roles = status.resolved.roles() if status is not None else current["roles"]
         edit = draft if draft is not None else current.get("draft")
+        if draft is None and current.get("frozen", {}).get("review") == "goldfish":
+            return self.authority.begin(current["goal"], roles, current["engine"], feedback=current["feedback"],
+                                        draft=edit, review="goldfish", origin="renew", by="owner",
+                                        response=current.get("response", ""))  # an S1-era goldfish revision has none
         return self.authority.begin(current["goal"], roles, current["engine"],
                                     feedback="" if draft is not None else current["feedback"], draft=edit)
 
@@ -426,6 +465,43 @@ class Planning:
         result = self.submission(ready)
         return Submission(result.kind, result.items, renewed=True)
 
+    def plan_draft(self, goal, plan, request="", by="owner", ready=None, roles=None):
+        """The architect's plan for `goal` as a Goldfish revision (origin plan); `request` is the owner's words it
+        answers. Refused, with nothing written, unless `plan` passes `check_draft`."""
+        status = self.guard()
+        check_draft(plan)
+        a = self.authority
+        if status is not None:
+            roles = status.resolved.roles()
+        elif a.state and a.state["revisions"]:
+            roles = a.current["roles"]
+        elif roles is None:
+            raise Blocked("There is no accepted profile to plan with.", family="action.refused")
+        a.begin(goal, roles, "fixture" if a.fixture_id else "native", feedback=request, draft=plan,
+                review="goldfish", origin="plan", by=by)
+        result = self.submission(ready)
+        return Submission(result.kind, result.items, renewed=True)
+
+    def revise_draft(self, version, plan, response="", request="", by="architect", ready=None):
+        """The architect's edit of the current plan (proposal, else draft) as a new Goldfish revision (origin edit).
+        An unchanged plan is accepted only with a `response`, after the baseline moved, or when the current
+        revision has no evidence. The requests of the chain travel on: `request` joins the current feedback."""
+        a = self.authority
+        current = a.current
+        base = current["proposal"] if current["proposal"] is not None else current.get("draft")
+        if current["version"] != version or base is None:
+            raise Blocked("Only the current revision with a plan can be edited.", family="action.refused")
+        check_draft(plan)
+        if (canonical(plan) == canonical(base) and not response and a.fresh() and current["evidence"] is not None):
+            raise Blocked("The edit does not change the plan.", family="action.refused")
+        status = self.guard()
+        roles = status.resolved.roles() if status is not None else current["roles"]
+        feedback = "\n\n".join(text for text in (current["feedback"], request) if text)
+        a.begin(current["goal"], roles, current["engine"], feedback=feedback, draft=plan, review="goldfish",
+                origin="edit", by=by, response=response)
+        result = self.submission(ready)
+        return Submission(result.kind, result.items, renewed=True)
+
     def approve(self, version):
         """The approval of the current plan; a gate argued under another configuration than the live one is stale.
         The live digest is Authority's own (the session-bound profile): no caller supplies or can disable it."""
@@ -435,12 +511,6 @@ class Planning:
         """The owner approves a plan the critic rejected, with a typed reason; the same live-configuration check as
         `approve`, likewise read from Authority's bound profile. Every UI path comes here; the rule is Authority's."""
         self.authority.override(version, reason)
-
-    def reject(self, version):
-        """Declining changes nothing: the proposal stays as it is, nothing is started."""
-        current = self.authority.current
-        if current["status"] != "proposed" or current["version"] != version:
-            raise Blocked("Only the current proposed plan can be declined.", family="action.refused")
 
     # Observation -------------------------------------------------------------
 
@@ -558,13 +628,13 @@ class Planning:
                             ("start", "details"))
         if status == "submission_unknown":
             return PlanView("unknown", version, status, (
-                "", "Plan r%s: the planner submission is unconfirmed — it is unknown whether Zeroshot took it.%s"
-                % (version, catalog.tag("submission.unknown")),
+                "", ("Plan r%s: the planner submission is unconfirmed — it is unknown whether Zeroshot took it.%s"
+                     % (version, catalog.tag("submission.unknown"))).replace("planner", plan_worker(current), 1),
                 "[g] sends the same documents again with the same key: Zeroshot recognises it and will not start "
                 "planning twice. The commands to check are under [i].",
                 goal), ("start", "details"), family="submission.unknown")
         if status in OBSERVING or status == "planning":
-            lines = ["", "Plan r%s · the planner is working." % version, goal]
+            lines = ["", "Plan r%s · the %s is working." % (version, plan_worker(current)), goal]
             if status == "observation_blocked":
                 lines.append("Watching stopped: " + summary(current["diagnostic"]))
             return PlanView("observing", version, status, tuple(lines),
@@ -591,7 +661,8 @@ class Planning:
         actions = ["retry", "revise"]
         if status == "proposal_invalid":
             family = "plan.invalid_proposal"
-            lines.append("The planner returned a plan that zplan did not accept: " + summary(current["diagnostic"])
+            lines.append("The %s returned a plan that zplan did not accept: " % plan_worker(current)
+                         + summary(current["diagnostic"])
                          + catalog.tag(family))
             lines.append("Next: [r] revise the goal or [g] start again.")
         elif cause == "auth":
@@ -611,7 +682,8 @@ class Planning:
             family = PLANNER_FAMILY[None]
             stage = {"planner_failed": " at the plan drafting step",
                      "plan_verifier_failed": " at the plan check step",
-                     "critic_failed": " at the plan check step"}.get(current["diagnostic"], "")
+                     "critic_failed": " at the plan check step",
+                     "comprehension_failed": " at the plan reading step"}.get(current["diagnostic"], "")
             lines.append("Planning stopped%s; the cause is unknown — the available logs do not show it.%s"
                          % (stage, catalog.tag(family)))
             lines.append("Next: [i] Zeroshot diagnostic commands, then [g] start again.")
@@ -644,6 +716,12 @@ class Planning:
         if len(requests) > REVISION_LINES:
             lines.append("(%d earlier)" % (len(requests) - REVISION_LINES))
         lines.extend("Revision: " + one_line(part, 200) for part in requests[-REVISION_LINES:])
+        if current.get("frozen", {}).get("review") == "goldfish":
+            paraphrase = (current.get("evidence") or {}).get("paraphrase")
+            if paraphrase:
+                lines.append(reader_line(paraphrase, 400))
+            if current.get("response"):
+                lines.append('Architect\'s answer: "%s"' % one_line(current["response"], 400))
         for m in milestones:
             lines.append("  %s %s  (after: %s)" % (m["id"], one_line(m["title"], 80), ", ".join(m["depends_on"]) or "—"))
             for s in m["slices"]:
@@ -660,7 +738,7 @@ class Planning:
                          + catalog.tag("plan.stale"))
             family = "plan.stale"
         # a stale proposal cannot be approved: revise (which re-plans) is the way on
-        proposed = ("revise", "reject", "requirements") if family else ("approve", "revise", "reject", "requirements")
+        proposed = ("revise", "requirements") if family else ("approve", "revise", "requirements")
         actions = {"proposed": proposed,
                    "review_exhausted": ("revise", "restart", "requirements"),
                    "approved": ("revise", "requirements")}[status]
@@ -684,6 +762,7 @@ class Planning:
                     lines.append("    %s %s" % (t["id"], t["title"]))
                     for check in t["checks"]:
                         lines.append("      — " + check)
+                    lines.extend(brief_lines(t))
         return lines + Planning.gate_lines(current.get("evidence"), current.get("override"))
 
     @staticmethod
@@ -700,14 +779,18 @@ class Planning:
         lines = ["Plan check: %s · rounds %s of %s · configuration %s" % (
             verdict.get(evidence["critic_verdict"], evidence["critic_verdict"]), evidence["rounds_used"],
             evidence["rounds_limit"], evidence["resolved_config_digest"][:12])]
+        if evidence.get("paraphrase"):
+            lines.append("  " + reader_line(evidence["paraphrase"], PARAPHRASE_LIMIT))
         if override:
             lines.append('  Approved despite the check: "%s"' % override["reason"])
         elif evidence["critic_verdict"] != "accepted" and evidence["rounds_used"] >= evidence["rounds_limit"]:
-            lines.append("  Rounds exhausted without agreement: [r] revise or approve anyway with a reason.")
+            lines.append("  The check rejected the plan: the architect revises it within its budget, or approve anyway with a reason."
+                         if "paraphrase" in evidence else
+                         "  Rounds exhausted without agreement: [r] revise or approve anyway with a reason.")
         for item in evidence["discussion"]["rounds"]:
             lines.append("  Round %s · %s: %s" % (item["round"], verdict.get(item["verdict"], item["verdict"]),
                                                   item["findings"]))
-            lines.append("    Planner reply: " + item["response"])
+            lines.append(("    Architect reply: " if "paraphrase" in evidence else "    Planner reply: ") + item["response"])
         return lines
 
     @staticmethod
@@ -720,7 +803,7 @@ class Planning:
         root = Path(binding["state_root"])
         prefix = "ZEROSHOT_STATE_DIR=%s ZEROSHOT_CONFIG_DIR=%s %s" % (
             shlex.quote(str(root / "runs")), shlex.quote(str(root / "config")), shlex.quote(binding["executable"]))
-        return ["  Zeroshot diagnostics (planner):"] + [
+        return ["  Zeroshot diagnostics (%s):" % plan_worker(current)] + [
             "    %s %s %s" % (prefix, verb, shlex.quote(current["run_id"])) for verb in ("status", "logs")]
 
     @staticmethod

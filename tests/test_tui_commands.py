@@ -5,7 +5,7 @@ Four checks, each mapped to one acceptance criterion:
 * A1+A2 (one whole-app test, `CommandPaletteTests.test_a1_a2_...`): typing `/` in the chat input shows the palette
   straight above it, with only the commands the current state allows, at 120x40 and 80x24; `/st` narrows it and
   deleting the `/` hides it; a plain line still goes to the chat (the chat tests keep that path green). Then the
-  wired commands act: `/help` opens the help, `/stop` while a stage runs reaches the existing stop confirmation,
+  wired commands act: `/help` opens the help, `/stop` while a stage runs is allowed (v3a: it acts at once),
   `/stop` while idle and the out-of-state `/plan` show the not-now note and change nothing else, and Esc with the
   palette open only hides it.
 * A3 (one whole-app test, `CommandPaletteTests.test_a3_...`): the bottom row of the main screen is the `Bar` —
@@ -13,8 +13,7 @@ Four checks, each mapped to one acceptance criterion:
   is unknown, and all four key hints at 120 columns (the Bar's own clipping is allowed at 80); a modal's bar is
   unchanged, and it survives a resize (the HelpScreen leg resizes to 80x24 and re-reads the last row).
 * A4 (unit level, `SlashStateTests`): `slash_state` maps the three fixture situations to idle, plan_ready and
-  running (a running stage beats an unrelated error line); `/stop` targets the running row while another row is
-  selected.
+  running (a running stage beats an unrelated error line); `/stop` names or finds the one running row (v3a).
 
 The whole-app tests run through `tui_support`/Textual Pilot; the unit tests need neither a project nor an engine.
 
@@ -24,9 +23,9 @@ Interpretations recorded here (the worker's summary never reaches the reviewers)
   facts the screen already holds (rows, the plan revision and status, the draft), so the three situations mirror
   the fixtures (no plan -> idle; a proposed revision -> plan_ready; one running row -> running) without a store.
 * `/stop` targeting is unit-tested through the real `MainScreen.stop_running_row` with a stand-in screen/app that
-  exposes only what the method touches (`rows()`, `selected`, `action_stop_milestone`) — the whole-app walk is
-  avoided as the criterion asks, and the method's own contract (pick the running row, restore the owner's
-  selection) is what the assertion pins.
+  exposes only what the method touches (`rows()`, `stop_milestone`) — the whole-app walk is
+  avoided as the criterion asks, and the method's own contract (which row it stops, or what it says) is what the
+  assertion pins.
 * A3's `—` case: the fixture flow always carries a known `elapsed`, so the snapshot's flow is replaced with one
   whose `elapsed` is None (the unknown-clock case `activity` draws `—` for); the bar is still fed through the real
   `MainScreen.show_keys`, no widget is stubbed.
@@ -186,7 +185,7 @@ class CommandPaletteTests(LiveShell):
             self.assertEqual(self.palette().display, False)
             await pilot.press("escape")
             await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
-        # A2: /stop reaches the running stage's own stop confirmation (a running fixture row, nothing to follow)
+        # A2: /stop acts at once on the one running stage (v3a: no confirmation; the stop request is pending)
         self.approve(running=True)
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
@@ -194,10 +193,8 @@ class CommandPaletteTests(LiveShell):
             await self.type_slash(pilot, "stop")
             self.assertIn("/stop", screen_text(self.app))  # allowed while a stage runs
             await pilot.press("enter")
-            # the confirm text is runs.py's (T1's): wait for the modal itself, not for its wording
-            await self.until(pilot, lambda: type(self.app.screen).__name__ == "ConfirmScreen")
-            await pilot.press("escape")
-            await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
+            self.assertEqual(type(self.app.screen).__name__, "MainScreen")  # no confirmation screen
+            await self.until(pilot, lambda: self.driver.stopped != [])
 
     async def test_a3_the_bottom_row_is_the_bar_with_the_project_branch_clock_and_keys(self):
         """A3: the main screen's bottom row is the `Bar` — project and branch (the fields the old `#header` also
@@ -280,60 +277,54 @@ class SlashStateTests(unittest.TestCase):
         live = replace(failed, rows=(Row(id="M1", title="M1", state="running", text="идёт"),))
         self.assertEqual(ui.slash_state(live), "running")
 
-    def test_a4_stop_targets_the_running_row_while_another_row_is_selected(self):
-        """A4: `/stop` (through `running_row` and `MainScreen.stop_running_row`) targets the one running row, not
-        the owner's own selection, and puts the selection back. Interpretation: the method is exercised with a
-        stand-in screen/app exposing only what it touches, per the criterion's "unit-level tests, not a whole-app
-        walk"."""
-        rows = (Row(id="M1", title="M1", state="running", text="идёт"),
-                Row(id="M2", title="M2", state="waiting", text="ждёт"))
-        self.assertEqual(ui.running_row(rows).id, "M1")
-        self.assertIsNone(ui.running_row((rows[1],)))
+    def test_a4_stop_acts_at_once_on_the_named_run_and_asks_which_when_a_bare_stop_is_ambiguous(self):
+        """v3a A1-A4: `/stop M2` stops M2 only (the selection is not consulted); a bare `/stop` stops the one running
+        stage and, with several, stops nothing and names `/stop M1, /stop M2`; an id that is not running answers the
+        "not running" line; with none running a bare `/stop` is the planner's stop (planning) or nothing. Interpretation:
+        the method is exercised with a stand-in screen/app exposing only what it touches, not a whole-app walk."""
+        def row(id, state):
+            return Row(id=id, title=id, state=state, text=state)
 
         class FakeApp:
             def __init__(self, rows):
-                self._rows, self.selected, self.stopped = rows, "M2", []
+                self._rows, self.selected, self.stopped = rows, "M1", []
 
             def rows(self):
                 return self._rows
 
-            def action_stop_milestone(self):
-                self.stopped.append(self.selected)
+            def stop_milestone(self, row):
+                self.stopped.append(row.id)
 
         class FakeScreen:
             def __init__(self, app):
-                self.app = app
+                self.app, self.notes, self.planner = app, [], 0
 
-        app = FakeApp(rows)
-        ui.MainScreen.stop_running_row(FakeScreen(app))
-        self.assertEqual(app.stopped, ["M1"])  # the running row, not the selected M2
-        self.assertEqual(app.selected, "M2")  # the owner's own selection is untouched
+            def status_note(self, line):
+                self.notes.append(line)
 
-    def test_a4_stop_targets_the_selected_row_when_it_is_running_too(self):
-        """K1a regression: `x` stopped the selected row; with parallel slots `/stop` follows the selection among the
-        running rows and falls back to the first running row only when the selection is not running."""
-        rows = (Row(id="M1", title="M1", state="running", text="идёт"),
-                Row(id="M2", title="M2", state="running", text="идёт"))
+            def stop_planning(self):
+                self.planner += 1
 
-        class FakeApp:
-            def __init__(self, selected):
-                self.selected, self.stopped = selected, []
+        def stop(rows, argument=""):
+            screen = FakeScreen(FakeApp(rows))
+            with mock.patch.object(ui, "screen_slash_state", return_value="planning"):
+                ui.MainScreen.stop_running_row(screen, argument)
+            return screen
 
-            def rows(self):
-                return rows
-
-            def action_stop_milestone(self):
-                self.stopped.append(self.selected)
-
-        class FakeScreen:
-            def __init__(self, app):
-                self.app = app
-
-        for selected, stopped in (("M2", "M2"), ("M1", "M1"), ("M3", "M1")):
-            app = FakeApp(selected)
-            ui.MainScreen.stop_running_row(FakeScreen(app))
-            self.assertEqual(app.stopped, [stopped], selected)
-            self.assertEqual(app.selected, selected)
+        two = (row("M1", "running"), row("M2", "running"), row("M3", "done"))
+        screen = stop(two, "M2")  # A1
+        self.assertEqual((screen.app.stopped, screen.notes, screen.planner), (["M2"], [], 0))
+        screen = stop(two)  # A2
+        self.assertEqual((screen.app.stopped, screen.planner), ([], 0))
+        self.assertEqual(screen.notes, ["Several runs: /stop M1, /stop M2"])
+        screen = stop((row("M1", "waiting"), row("M2", "running")))  # A3
+        self.assertEqual((screen.app.stopped, screen.notes), (["M2"], []))
+        screen = stop(two, "M3")  # A4
+        self.assertEqual((screen.app.stopped, screen.notes), ([], ["M3 is not running; nothing to stop."]))
+        screen = stop((row("M1", "stopping"),), "M1")  # a stop already requested is not a running attempt
+        self.assertEqual((screen.app.stopped, screen.notes), ([], ["M1 is not running; nothing to stop."]))
+        screen = stop((row("M1", "done"),))  # none running: the planner's stop
+        self.assertEqual((screen.app.stopped, screen.planner), ([], 1))
 
 
 class _Recorder:

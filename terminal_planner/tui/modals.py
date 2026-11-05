@@ -404,7 +404,7 @@ class FinishingScreen(ModalScreen):
 class NoteScreen(Modal):
     """Free text for the plan revision, an answer or a new-attempt note: sent only by the send button after the
     field (Tab reaches it, Enter presses it); Escape closes it unchanged. `answer` selects the answer/note key bar instead of the plan-revision one; `bar`
-    names another catalog screen (the new-attempt form names its confirm key), `label` the field.
+    names another catalog screen, `label` the field.
 
     `text` prefills the field and `note` shows a short message above it: an answer draft opens the same form with
     the draft's text, and a refusal (or an empty send) is shown in it again with that text kept, so the draft stays

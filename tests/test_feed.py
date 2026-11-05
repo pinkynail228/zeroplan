@@ -129,8 +129,8 @@ class FeedShapeTests(RunsTest):
         bad = [
             None, [], {"seq": 0},  # not a dict / wrong key set
             dict(good, seq=-1), dict(good, handled=5), dict(good, handled=-1),
-            dict(good, last={"1/M1/1/-": "paused"}), dict(good, verdicts={"1/M1/1/-": ["x"] * 33}),
-            dict(good, events=[dict(state_event(1), state="paused")]),
+            dict(good, last={"1/M1/1/-": "dozing"}), dict(good, verdicts={"1/M1/1/-": ["x"] * 33}),
+            dict(good, events=[dict(state_event(1), state="dozing")]),
             dict(good, events=[dict(state_event(1), kind="other")]),
             dict(good, events=[dict(state_event(1), wake=True)]),  # running is not a wake state
             dict(good, events=[state_event(2)]),  # event seq beyond the counter
@@ -284,8 +284,8 @@ class FeedPlanTests(RunsTest):
 
     def test_c1_c2_c3_every_save_captures_the_plan_transition_once_and_every_approval_path_goes_through_it(self):
         """C1/C2/C3: each status change of the current revision is one event (`approve` and `override` both end in
-        `Authority.save`); an `auto` session wakes on `proposed` and `approved` with one line each, `observing` rides
-        along; a save with no change gives none; a new revision is an event, planning rides along.
+        `Authority.save`); an `auto` session wakes on `approved` only (the first revision's `proposed` waits for the
+        owner, P4a), `observing` and `proposed` ride along; a save with no change gives none; a new revision is an event, planning rides along.
 
         Interpretation: the level is patched at `autonomy.level` (the profile fixture of these tests is unprofiled,
         which reads as manual)."""
@@ -298,13 +298,12 @@ class FeedPlanTests(RunsTest):
             a.approve(1)
             events = self.plan_events(a)
             self.assertEqual([(e["previous"], e["status"], e["wake"]) for e in events],  # observing rides along
-                             [("planning", "observing", False), ("observing", "proposed", True),
+                             [("planning", "observing", False), ("observing", "proposed", False),
                               ("proposed", "approved", True)])
             self.assertEqual({e["plan_revision"] for e in events}, {1})
             self.assertEqual(set(events[0]), feed.PLAN_EVENT_KEYS)
-            self.assertEqual(feed.summary(events, 0).splitlines()[1:4],
-                             ["plan r1: observing -> proposed", "plan r1: proposed -> approved",
-                              "Intermediate states without action: 1."])
+            self.assertEqual(feed.summary(events, 0).splitlines()[1:3],
+                             ["plan r1: proposed -> approved", "Intermediate states without action: 2."])
             self.assertEqual(a.state["feed"]["plan"], {"revision": 1, "status": "approved"})
             self.begin(a)
             event = self.plan_events(a)[-1]
@@ -343,9 +342,10 @@ class FeedPlanTests(RunsTest):
             self.assertEqual([feed.architect_made(a, v) for v in (1, 2, 3)], [False, True, False])
 
     def test_c1_the_plan_event_wakes_by_the_autonomy_level(self):
-        """C1: the same transitions wake by level: auto wakes on proposed (approve) and approved (start), supervised
-        only on approved (approve is the owner's), manual (no profile) on none; the event itself is always there."""
-        for level, woke in (("auto", [True, True]), ("supervised", [False, True]), ("manual", [False, False])):
+        """C1: the same transitions wake by level: the first revision's proposed (approve) wakes at none (P4a), auto
+        and supervised wake on approved (start), manual (no profile) on none; a later proposed revision of an approved
+        chain wakes at auto and supervised only; the event itself is always there."""
+        for level, woke in (("auto", [False, True]), ("supervised", [False, True]), ("manual", [False, False])):
             with self.subTest(level=level):
                 planner.shutil.rmtree(self.state, ignore_errors=True)  # a fresh store per level
                 with patch("terminal_planner.autonomy.level", return_value=level), self.fixture_authority() as a:
@@ -360,6 +360,10 @@ class FeedPlanTests(RunsTest):
         with self.fixture_authority() as a:  # unprofiled: the real `autonomy.level` answers manual
             self.assertEqual(a.profile, None)
             self.assertEqual(feed._plan_wakes(a, "proposed"), False)
+        for level, later in (("auto", True), ("supervised", True), ("manual", False)):
+            with self.subTest(level=level, chain="approved"), patch("terminal_planner.autonomy.level", return_value=level), \
+                    patch("terminal_planner.feed.chain_approved", return_value=True), self.fixture_authority() as a:
+                self.assertEqual(feed._plan_wakes(a, "proposed"), later)
 
     def test_c4_a_store_without_a_plan_entry_loads_and_records_silently_then_captures(self):
         """C4: a feed written before RS5 (approved r1, no `plan`) loads; its first save raises no event for the old

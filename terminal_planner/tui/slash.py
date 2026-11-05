@@ -70,7 +70,7 @@ class Command:
 COMMANDS = (
     Command("/plan", "cmd.plan", frozenset(("idle", "draft", "error")), Arg("goal")),
     Command("/approve", "cmd.approve", frozenset(("plan_ready", "question", "error"))),
-    Command("/decline", "cmd.decline", frozenset(("draft", "plan_ready", "question"))),
+    Command("/decline", "cmd.decline", frozenset(("plan_ready", "question"))),
     Command("/run", "cmd.run", STATES),
     Command("/merge", "cmd.merge", frozenset(("merge",))),
     Command("/diff", "cmd.diff", frozenset(("merge", "idle"))),

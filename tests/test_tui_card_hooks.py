@@ -13,26 +13,33 @@ from test_tui_draft_card import MISSING_REASON, _main_method, _Screen
 try:
     from terminal_planner.tui import app as ui
     from terminal_planner.tui import cards
-    from terminal_planner.tui import modals
+    from terminal_planner.tui import modals, strings
 except ImportError:  # pragma: no cover - the bare import scan of tests.test_toolchain covers this path
-    ui = cards = modals = None
+    ui = cards = modals = strings = None
+
+
+def spec(key, at):
+    """Any open card will do for a hook probe: a plan card's builder."""
+    return cards.plan_card(key, at, "2 stages", "3 tasks")
 
 
 class _HookScreen(_Screen):
     render_card_sources = _main_method("render_card_sources")
-    action_decline = _main_method("action_decline")
 
 
 @unittest.skipIf(ui is None, MISSING_REASON)
 class CardHookTests(unittest.TestCase):
     def test_a_typed_shared_command_acts_on_the_newest_open_card_of_a_routed_kind(self):
         screen = _HookScreen()
-        older, newer = cards.draft_card("draft:a", at="21:00"), cards.draft_card("draft:b", at="21:05")
-        for spec in (older, newer):
-            screen.show_card(spec)
-            screen.draft_cards[spec.key] = object()
-        ui.COMMAND_ACTIONS["/decline"](screen, "", None)
-        self.assertEqual(list(screen.card_specs), ["draft:a"])  # the newest one was declined
+        older, newer = spec("x:a", "21:00"), spec("x:b", "21:05")
+        for card in (older, newer):
+            screen.show_card(card)
+        with mock.patch.dict(ui.CARD_ROUTES, {("/decline", "x"): lambda screen, argument, key: screen.drop_card(key)}):
+            ui.COMMAND_ACTIONS["/decline"](screen, "", None)
+        self.assertEqual(list(screen.card_specs), ["x:a"])  # the newest one was declined
+        ui.COMMAND_ACTIONS["/decline"](screen, "", None)  # v3e: no card of a routed kind: `note.not_now`
+        self.assertEqual(list(screen.card_specs), ["x:a"])
+        self.assertEqual(screen.app.chat_note, strings.text("note.not_now", name="/decline"))
         opened = []
         screen.app.action_open_plan = lambda: opened.append(True)
         ui.COMMAND_ACTIONS["/approve"](screen, "", None)  # no card routes /approve yet: the fallback runs
@@ -40,7 +47,7 @@ class CardHookTests(unittest.TestCase):
 
     def test_card_sources_show_and_take_off_cards_and_never_bring_a_dropped_one_back(self):
         screen = _HookScreen()
-        returned = [cards.draft_card("x:1", at="10:00")]
+        returned = [spec("x:1", "10:00")]
         # `clear=True`: the stand-in app is no real screen, so the *registered* run sources are taken off for this
         # probe — each of them reads app state (`checks`, a draft) the double does not carry.
         with mock.patch.dict(ui.CARD_SOURCES, {"x": lambda s: list(returned)}, clear=True):
@@ -52,9 +59,9 @@ class CardHookTests(unittest.TestCase):
             returned.clear()
             screen.render_card_sources()  # the state is gone: the stale card leaves
             self.assertEqual(screen.card_specs, {})
-            screen.show_card(cards.draft_card("x:2", at="10:01"))
+            screen.show_card(spec("x:2", "10:01"))
             screen.drop_card("x:2")
-            returned.append(cards.draft_card("x:2", at="10:01"))
+            returned.append(spec("x:2", "10:01"))
             screen.render_card_sources()  # dropped by the owner: stays gone
             self.assertEqual(screen.card_specs, {})
 

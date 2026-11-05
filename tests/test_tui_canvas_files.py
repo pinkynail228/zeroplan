@@ -126,7 +126,7 @@ class CanvasFileTabTests(CanvasShell):
                         self.assertEqual(self.tab(), ui.TAB_PLAN)  # nothing runs: the canvas opens on «Plan»
                         main.open_file_tab("README.md")  # from the chat: the canvas appears with the file tab
                         await self.shows(pilot, "1 # Title")
-                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                         self.assertEqual(self.tab(), VIEW1)
                         shown = screen_text(self.app)
                         self.assertIn("README.md", shown)
@@ -135,11 +135,11 @@ class CanvasFileTabTests(CanvasShell):
                         # A1: both refusals open no tab; the viewer's own text lands on the status line.
                         main.open_file_tab("../x")
                         await self.chat_status(pilot, strings.text("note.view_outside", name="../x"))
-                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                         self.assertIn(strings.text("note.view_outside", name="../x"), self.flat())
                         main.open_file_tab("missing-name")
                         await self.chat_status(pilot, strings.text("note.view_missing", name="missing-name"))
-                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                         self.assertIn(strings.text("note.view_missing", name="missing-name"), self.flat())
                         # Regression (A1): a binary file is refused by the render, the same refusal path.
                         (self.project / "binary.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01")
@@ -147,12 +147,12 @@ class CanvasFileTabTests(CanvasShell):
                         await pilot.pause()
                         main.open_file_tab("binary.png")
                         await self.chat_status(pilot, strings.text("note.view_binary", name="binary.png"))
-                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                         self.assertIn(strings.text("note.view_binary", name="binary.png"), self.flat())
                         # A4: esc closes the shown file tab and returns to «Plan», the tab active before it.
                         await pilot.press("escape")
                         await pilot.pause()
-                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN])
+                        self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS])
                         self.assertEqual(self.tab(), ui.TAB_PLAN)
                         # I7: the cycle puts «Conversation» in front of the canvas tabs (chat -> Scheme -> Plan -> …).
                         for key, expected in (("right", ui.TAB_LIVE), ("right", ui.TAB_PLAN),
@@ -165,7 +165,7 @@ class CanvasFileTabTests(CanvasShell):
                     # A1: the file is a third tab, active, with the first lines numbered.
                     main.open_file_tab("README.md")
                     await self.shows(pilot, "1 # Title")  # the pane's own render, once its tab is laid out
-                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                     self.assertEqual(self.tab(), VIEW1)
                     shown = screen_text(self.app)
                     self.assertIn("README.md", shown)  # the tab title
@@ -174,11 +174,11 @@ class CanvasFileTabTests(CanvasShell):
                     # A1: both refusals open no tab; the viewer's own text lands on the status line.
                     main.open_file_tab("../x")
                     await self.shows(pilot, strings.text("note.view_outside", name="../x"))
-                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                     self.assertIn(strings.text("note.view_outside", name="../x"), self.flat())
                     main.open_file_tab("missing-name")
                     await self.shows(pilot, strings.text("note.view_missing", name="missing-name"))
-                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                     self.assertIn(strings.text("note.view_missing", name="missing-name"), self.flat())
                     # Regression (A1): a binary project file is refused by the *render* (`viewer.file_view`
                     # raises `ViewError('note.view_binary')`), not by `resolve`; it must take the same refusal
@@ -188,12 +188,12 @@ class CanvasFileTabTests(CanvasShell):
                     await pilot.pause()
                     main.open_file_tab("binary.png")
                     await self.shows(pilot, strings.text("note.view_binary", name="binary.png"))
-                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, VIEW1])
+                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, VIEW1])
                     self.assertIn(strings.text("note.view_binary", name="binary.png"), self.flat())
                     # A4: esc closes the shown file tab and returns to «Plan», the tab active before it.
                     await pilot.press("escape")
                     await pilot.pause()
-                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN])
+                    self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS])
                     self.assertEqual(self.tab(), ui.TAB_PLAN)
                     # Regression (A4, base fallback): open a.txt, switch to «Scheme», then open b.txt from
                     # there; Esc returns to «Scheme» — the tab shown before b.txt — not to a.txt (the removal's
@@ -219,7 +219,7 @@ class CanvasFileTabTests(CanvasShell):
                     self.assertEqual(self.file_tabs(), ["tab-view-2", "tab-view-4"])
                     self.assertEqual(self.tab(), "tab-view-4")
                     for key, expected in (("right", ui.TAB_LIVE), ("right", ui.TAB_PLAN),
-                                          ("right", "tab-view-2"), ("right", "tab-view-4"),
+                                          ("right", ui.TAB_DRAFTS), ("right", "tab-view-2"), ("right", "tab-view-4"),
                                           ("left", "tab-view-2")):
                         await pilot.press(key)
                         await pilot.pause()
@@ -263,7 +263,7 @@ class CanvasDiffTabTests(CanvasShell):
             # A2: nothing finished selected (no attempt at all) -> no tab, the status line says why.
             main.open_diff_tab()
             await self.shows(pilot, strings.text("note.not_now", name="/diff"))
-            self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN])
+            self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS])
             self.assertIn(strings.text("note.not_now", name="/diff"), self.flat())
             # A3: start the stage and hold its watch slice, so it really runs.
             await self.begin_run(pilot)
@@ -305,7 +305,7 @@ class CanvasDiffTabTests(CanvasShell):
             main.open_diff_tab()
             await self.shows(pilot, "+Fixture driver change for milestone M1")
             await pilot.pause()
-            self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DIFF])
+            self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, ui.TAB_DIFF])
             self.assertEqual(self.tab(), ui.TAB_DIFF)
             # Regression (A3): the controller answers asynchronously, so work may start while the request is in
             # flight; a delivered success must recheck activity and then keep the canvas — no tab opens and the
@@ -316,7 +316,7 @@ class CanvasDiffTabTests(CanvasShell):
                 await pilot.pause()
                 main.diff_opened("M1", type("Outcome", (), {"kind": "diff", "lines": ["+late change"]})(), None)
                 await self.shows(pilot, strings.text("note.not_now", name="/diff"))
-                self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DIFF])
+                self.assertEqual(self.tabs(), [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS, ui.TAB_DIFF])
                 self.assertIn(strings.text("note.not_now", name="/diff"), self.flat())
                 self.assertNotIn("+late change", screen_text(self.app))
             finally:

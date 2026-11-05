@@ -91,6 +91,22 @@ class OriginNoticeOrderTests(unittest.TestCase):
                 self.assertEqual([COMMAND in note for note in after], [False, bool(fix), False])
 
 
+class OriginNoticeFollowTests(unittest.TestCase):
+    def test_u4b_a1_the_notice_goes_when_a_slice_or_a_refresh_finds_the_origin_fixed(self):
+        """A1: with the notice on screen, `origin_settled` (called by a readiness slice and by a refresh) keeps it
+        while `origin_fix` is non-empty and drops it once the origin is fixed; a second call changes nothing."""
+        fix = [COMMAND]
+        app = SimpleNamespace(origin_note="Planning needs a GitHub origin. " + COMMAND,
+                              controller=SimpleNamespace(origin_fix=lambda: fix[0]))
+        ZplanApp.origin_settled(app)
+        self.assertIn(COMMAND, app.origin_note)
+        fix[0] = ""
+        ZplanApp.origin_settled(app)
+        self.assertEqual(app.origin_note, "")
+        ZplanApp.origin_settled(app)
+        self.assertEqual(app.origin_note, "")
+
+
 class OriginNoticeTests(ChatShell):
     def told(self):
         """The status area holds the notice with the readiness item's command (the pane wraps it: spaces ignored)."""
@@ -119,6 +135,41 @@ class OriginNoticeTests(ChatShell):
                     await self.chat_done(pilot)
                     self.assertEqual(self.app.chat.state.entries[-1].role, "architect")
                     self.assertEqual(self.told(), not origin)
+                    await self.say(pilot, "and another")
+                    await self.chat_done(pilot)
+                    self.assertFalse(self.told())
+
+
+class UncommittedNoticeTests(ChatShell):
+    """F17 (owner's PenPot, 2026-11-04): every project file was uncommitted and nothing told the owner that zplan and
+    its workers see only committed files."""
+
+    def told(self):
+        return "Filesnotcommitted:" in "".join(self.status_text().split())
+
+    async def test_the_first_message_on_a_project_with_uncommitted_files_leaves_one_notice_with_their_count(self):
+        """The first accepted message of a session shows one notice with the count, also while the turn runs, and the
+        architect answers; the next message clears it. A clean project shows none."""
+        for dirty in (False, True):
+            with self.subTest(dirty=dirty):
+                if dirty:
+                    (self.project / "notes.md").write_text("x\n")
+                    (self.project / "drafts").mkdir()
+                    (self.project / "drafts" / "a.md").write_text("y\n")
+                self.fixture.script([{"lines": OPENING + [{"type": "item.completed", "item": {
+                    "id": "i1", "type": "agent_message", "text": "Reading the project"}},
+                    {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}], "hang": 2}])
+                async with self.shell() as pilot:
+                    await self.loaded(pilot)
+                    await self.chat_ready(pilot)
+                    await self.say(pilot, "get to know the project")
+                    await self.until(pilot, lambda: "Reading the project" in self.status_text(), 10.0)
+                    self.assertEqual(self.told(), dirty)
+                    if dirty:
+                        self.assertIn("Filesnotcommitted:2", "".join(self.status_text().split()))
+                    await self.chat_done(pilot)
+                    self.assertEqual(self.app.chat.state.entries[-1].role, "architect")
+                    self.assertEqual(self.told(), dirty)
                     await self.say(pilot, "and another")
                     await self.chat_done(pilot)
                     self.assertFalse(self.told())

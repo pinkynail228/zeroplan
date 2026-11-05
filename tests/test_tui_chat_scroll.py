@@ -462,40 +462,39 @@ class InlineCardRefreshTests(ChatScroll):
 
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
 class OptimisticTailTests(ChatScroll):
-    """An optimistic owner line that never persisted (the repair's code finding 2): a send the architect refused
-    before it reserved the turn leaves the stored transcript untouched, so the reload takes the line away again —
-    and the entries around it, and the inline cards beside them, must keep their place.
+    """Accepted input and a failed provider reservation are durable outcomes. Reload must
+    preserve them and the earlier entries/receipt, in their original relative order."""
 
-    Interpretation: the refusal is driven deterministically by making `Architect.begin` answer its own `Blocked`
-    (the same class a busy architect raises), which is the reviewer's "refused before persistence" — the line is
-    shown, the store never took it, and `chat._sync` reloads the unchanged transcript. A `cancel` racing the launch
-    is the other reachable path and is not needed to show the reorder."""
-
-    async def test_an_optimistic_line_that_vanishes_leaves_the_receipt_and_entries_in_place(self):
-        """Two entries, the draft card shown and closed to a receipt at the conversation's end; the owner sends a
-        question, its optimistic line mounts below the receipt, and the architect's refusal makes the reload drop it.
-        The surviving entries keep their widgets and their slots, so the receipt stays the newest child — the
-        history is not rewritten around it."""
+    async def test_a_refused_turn_keeps_its_owner_and_failure_after_the_receipt(self):
+        """The service persists input before Architect.begin. A busy refusal adds a linked
+        failure; it no longer removes an optimistic row. Earlier widgets retain their slots."""
         store = self.seed_history(2)
         async with self.shell(size=(120, 40), store=store) as pilot:
             await self.start(pilot, 2)
             main = self.main()
-            main.show_card(cards.draft_card("draft:receipt", at="21:05"))
+            main.show_card(cards.plan_card("receipt:1", "21:05", "2 stages", "3 tasks"))
             await pilot.pause(0.3)
-            main.close_card("draft:receipt", "✓ отправлен планировщику 21:05")
+            main.close_card("receipt:1", "✓ отправлен планировщику 21:05")
             await pilot.pause(0.3)
-            receipt = main.card_widgets["draft:receipt"]
+            receipt = main.card_widgets["receipt:1"]
             scroll = main.query_one("#chat")
             surviving = list(main.chat_entry_widgets)
             self.assertEqual(list(scroll.children)[-1], receipt)  # the receipt is the newest child
             with patch.object(Architect, "begin", side_effect=Blocked("занято", family="architect.busy")):
                 await self.say(pilot, "вопрос после квитанции")
                 await self.chat_done(pilot)
-            await self.until(pilot, lambda: len(main.chat_entry_widgets) == 2, 10.0)
+            await self.until(pilot, lambda: len(main.chat_entry_widgets) == 4, 10.0)
             await pilot.pause(0.3)
-            self.assertEqual(main.chat_entry_widgets, surviving)    # the two entries are the same widgets
-            self.assertIs(main.card_widgets["draft:receipt"], receipt)
-            self.assertEqual(list(scroll.children)[-1], receipt)    # the receipt did not move below them
+            self.assertEqual(main.chat_entry_widgets[:2], surviving)
+            self.assertIs(main.card_widgets["receipt:1"], receipt)
+            self.assertEqual(list(scroll.children), [*surviving, receipt, *main.chat_entry_widgets[2:]])
+            owner, failure = store.transcript()[-2:]
+            self.assertEqual((owner["role"], owner["text"]), ("owner", "вопрос после квитанции"))
+            self.assertEqual((failure["role"], failure["status"], failure["turn_id"]),
+                             ("error", "failed", owner["turn_id"]))
+            self.assertIn("architect.busy", failure["text"])
+            self.assertIn(owner["text"], screen_text(self.app))
+            self.assertIn("architect.busy", screen_text(self.app))
 
 
 if __name__ == "__main__":

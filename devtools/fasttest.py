@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Run unittest modules in parallel, one process and one short TMPDIR per module.
 
-Usage: python3 devtools/fasttest.py [-j N] [--durations K] [MODULE ...]
+Usage: python3 devtools/fasttest.py [-j N] [--lane default|full] [--durations K] [MODULE ...]
   MODULE: tests.test_x (default: every tests/test_*.py); each module runs as one process per top-level test class,
   so a big module does not set the wall time. Exit 0 only when every part passed.
   --durations K: print the K slowest tests across all modules.
+  --lane: default skips the tests listed in tests/full_lane.txt, full runs everything (env ZPLAN_TEST_LANE, else default).
+  Units start longest-known first, from seconds kept in $ZPLAN_FASTTEST_TIMES or ~/.cache/zplan-fasttest/times.json.
 Same environment as devtools/mac-test.sh (PYTHONPATH=.:tests, wheelhouse, python3.13), but no clean-tree check:
 the merge-gate evidence stays mac-test.sh / linux-test.sh; this is the fast loop for workers and the orchestrator.
 """
@@ -24,6 +26,35 @@ from concurrent.futures import ThreadPoolExecutor
 # The checkout under test is the current directory's (a worktree may run the main checkout's runner).
 REPO = pathlib.Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
                     or pathlib.Path(__file__).resolve().parent.parent)
+
+
+def full_lane_ids():
+    """The unittest ids in tests/full_lane.txt; a missing or unreadable file lists nothing."""
+    try:
+        lines = (REPO / "tests" / "full_lane.txt").read_text().splitlines()
+    except OSError:
+        return set()
+    return {ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")}
+
+
+def flatten(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from flatten(item)
+        else:
+            yield item
+
+
+def times_path():
+    return pathlib.Path(os.environ.get("ZPLAN_FASTTEST_TIMES") or os.path.expanduser("~/.cache/zplan-fasttest/times.json"))
+
+
+def known_times():
+    try:
+        data = json.loads(times_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: float(v) for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
 
 
 def run_one(module, out_json):
@@ -47,6 +78,9 @@ def run_one(module, out_json):
             pathlib.Path(out_json).write_text(json.dumps({"tests": 0, "times": []}))
             return 0
     suite = unittest.defaultTestLoader.loadTestsFromName(module)
+    if os.environ.get("ZPLAN_TEST_LANE", "default") != "full":
+        skip = full_lane_ids()
+        suite = unittest.TestSuite(t for t in flatten(suite) if t.id() not in skip)
     result = unittest.TextTestRunner(resultclass=Timed, verbosity=1).run(suite)
     pathlib.Path(out_json).write_text(json.dumps({
         "tests": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
@@ -63,6 +97,7 @@ def main():
     cpus = os.cpu_count() or 2
     ap.add_argument("-j", type=int, default=max(2, min(cpus - 2, cpus - int(os.getloadavg()[0]))))
     ap.add_argument("--durations", type=int, default=0)
+    ap.add_argument("--lane", choices=("default", "full"), default=os.environ.get("ZPLAN_TEST_LANE") or "default")
     ap.add_argument("modules", nargs="*")
     args = ap.parse_args()
     modules = args.modules or sorted("tests." + p.stem for p in (REPO / "tests").glob("test_*.py"))
@@ -76,10 +111,17 @@ def main():
         path = REPO / (module.replace(".", "/") + ".py")
         classes = re.findall(r"^class (\w+)\(", path.read_text(), re.M) if path.exists() else []
         units += [module + "." + c for c in classes] or [module]
+    known = known_times()
+    units.sort(key=lambda u: -known.get(u, float("inf")))  # stable: unknown first, ties keep today's order
 
     def job(module):
         tmp = tempfile.mkdtemp(prefix="zs-", dir="/tmp")  # short: macOS socket paths < 104 bytes
-        env = dict(os.environ, TMPDIR=tmp, PYTHONPATH=".:tests", ZPLAN_TEST_WHEELHOUSE=wheels)
+        home = pathlib.Path(tmp) / "home"
+        home.mkdir()
+        env = dict(os.environ, TMPDIR=tmp, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"),
+                   XDG_CACHE_HOME=str(home / ".cache"), XDG_DATA_HOME=str(home / ".local" / "share"),
+                   TERM="xterm-256color", PYTHONPATH=".:tests", ZPLAN_TEST_WHEELHOUSE=wheels, ZPLAN_TEST_LANE=args.lane)
+        env.pop("NO_COLOR", None)  # host terminal policy must not change a behavior suite's verdict
         out = logs / (module + ".json")
         t0 = time.monotonic()
         with open(logs / (module + ".log"), "w") as log:
@@ -90,10 +132,20 @@ def main():
         return module, rc, time.monotonic() - t0, data
 
     t0 = time.monotonic()
-    # Longest-known modules first would be better; alphabetical keeps output stable.
     with ThreadPoolExecutor(args.j) as pool:
         results = list(pool.map(job, units))
     wall = time.monotonic() - t0
+    try:
+        known = known_times()
+        known.update({r[0]: round(r[2], 2) for r in results})
+        path = times_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(known, indent=0, sort_keys=True))
+    except OSError:
+        pass
+    not_run = 0
+    if args.lane != "full":
+        not_run = sum(1 for i in full_lane_ids() if any(i.startswith(u + ".") for u in units))
     failed = [r for r in results if r[1] != 0]
     for module, rc, secs, data in sorted(results, key=lambda r: -r[2])[:10]:
         print("%-70s %4d tests %6.1fs %s" % (module, data["tests"], secs, "ok" if rc == 0 else "FAIL rc=%d" % rc))
@@ -106,8 +158,8 @@ def main():
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=REPO, capture_output=True, text=True).stdout.strip()
     print("fasttest: tree %s %s" % (head, "dirty" if dirty else "clean"))
-    print("fasttest: %d modules in %d parts, %d tests, wall %.0fs, -j %d, %s; logs %s" % (
-        len(modules), len(results), total, wall, args.j, "FAILED %d" % len(failed) if failed else "OK", logs))
+    print("fasttest: %d modules in %d parts, %d tests, lane %s (%d listed not run), wall %.0fs, -j %d, %s; logs %s" % (
+        len(modules), len(results), total, args.lane, not_run, wall, args.j, "FAILED %d" % len(failed) if failed else "OK", logs))
     for module, *_ in failed:
         print("--- %s (tail)" % module)
         print("\n".join((logs / (module + ".log")).read_text().splitlines()[-25:]))

@@ -30,7 +30,7 @@ EVERYWHERE = frozenset(STATES)  # the eight states; every command named "all sta
 EXPECTED = (
     ("/plan", "cmd.plan", frozenset(("idle", "draft", "error")), Arg("goal")),
     ("/approve", "cmd.approve", frozenset(("plan_ready", "question", "error")), None),
-    ("/decline", "cmd.decline", frozenset(("draft", "plan_ready", "question")), None),
+    ("/decline", "cmd.decline", frozenset(("plan_ready", "question")), None),
     ("/run", "cmd.run", STATES, None),
     ("/merge", "cmd.merge", frozenset(("merge",)), None),
     ("/diff", "cmd.diff", frozenset(("merge", "idle")), None),
@@ -57,7 +57,7 @@ EXPECTED = (
 ACTING = {
     "/plan": {"idle", "draft", "error"},
     "/approve": {"plan_ready", "question", "error"},
-    "/decline": {"draft", "plan_ready", "question"},
+    "/decline": {"plan_ready", "question"},
     "/view": set(STATES),
     "/run": set(STATES),
     "/attempt": set(STATES),

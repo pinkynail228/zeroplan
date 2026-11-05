@@ -25,25 +25,28 @@ def decide(level, action, gate=None, tier=None):
     every level: it only proposes a new revision, and the approval that lets it run stays gated, so a proposal is
     never an unreviewed action. start asks at every level while `AUTOMATIC` is off; with it on, auto and supervised
     allow and manual asks. resume and rebrief follow start (they open a new attempt, from an unchanged brief).
-    approve asks at every level while `AUTOMATIC` is off; with it on only auto allows it, so supervised and manual
-    plan approvals stay the owner's. merge follows the level and the candidate's risk `tier` (low, medium or high,
-    from `process.risk_of`): auto allows it, supervised allows it below high and asks on high or on a tier it does
-    not know, manual asks. The merge gate (`gate`, `gates.merge`) only decides whether checks and the critic run
-    before the merge; it does not change who merges. An unknown level is manual and asks; an unknown action asks
-    (fail closed)."""
+    approve asks at every level: the first revision of a chain is the owner's (`approves_alone` says when a later
+    revision of an approved chain is the architect's). Merge first requires `gate == "required"`; without it every architect-originated
+    merge asks the owner, who may explicitly choose an unverified merge. With a gate, auto allows, supervised allows
+    below high and asks on high or an unknown tier, and manual asks. An unknown level or action asks (fail closed)."""
     if action == "stop" or action == "edit":
         return "allow"
     if action == "merge":
+        # An owner may explicitly choose an unverified merge; the architect may never perform one autonomously.
+        if gate != "required":
+            return "ask"
         return "allow" if level == "auto" or (level == "supervised" and tier in ("low", "medium")) else "ask"
     if action in ("start", "resume", "rebrief"):
         if not AUTOMATIC:
             return "ask"
         return "allow" if level in ("auto", "supervised") else "ask"
-    if action == "approve":
-        if not AUTOMATIC:
-            return "ask"
-        return "allow" if level == "auto" else "ask"
-    return "ask"
+    return "ask"  # approve: the first revision of every chain is the owner's at every level (`approves_alone`)
+
+
+def approves_alone(level, chain_approved):
+    """Whether the architect approves a revision itself: only a later revision of a chain the owner approved, at auto
+    or supervised. The first revision of every chain waits for the owner's yes at every level."""
+    return AUTOMATIC and level in ("auto", "supervised") and bool(chain_approved)
 
 
 def merge_gate(status):

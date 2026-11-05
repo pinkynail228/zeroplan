@@ -13,3 +13,6 @@ upstream/
 # run.sh copies the agent settings into each run worktree; Claude Code writes its own locks here
 /.claude/settings.local.json
 /.claude/scheduled_tasks.lock
+# local evidence, run folders and scratch; never committed
+/.local/
+/.worktrees/

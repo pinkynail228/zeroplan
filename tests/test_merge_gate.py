@@ -19,6 +19,7 @@ import contextlib
 import copy
 import io
 import json
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -87,9 +88,10 @@ class MergeGateTests(tpr.ProfileTest):
         self.git("commit", "-qm", "owner " + name)
         return self.head()
 
-    def merge(self):
+    def merge(self, **options):
+        options.setdefault("allow_unverified", True)  # these journeys drive the explicit owner action
         with self.app() as app:
-            return app.delivery.merge(app.delivery.latest("M1"))
+            return app.delivery.merge(app.delivery.latest("M1"), **options)
 
     def parents(self, commit):
         return self.git("rev-list", "--parents", "-n", "1", commit).decode().split()[1:]
@@ -138,6 +140,11 @@ class MergeGateTests(tpr.ProfileTest):
         self.assertEqual((stored["gate"]["evidence"]["outcome"], stored["gate"]["head"]), ("failed", head))
         self.assertEqual(self.git("status", "--porcelain"), b"")
         runs.validate_gate(stored)
+        legacy = copy.deepcopy(stored)
+        legacy["gate"]["evidence"]["checks"] = [
+            {key: value for key, value in evidence.items() if key in runs.CHECK_EVIDENCE_LEGACY}
+            for evidence in legacy["gate"]["evidence"]["checks"]]
+        runs.validate_gate(legacy)  # stores written before rich evidence remain readable
         other = self.git("rev-parse", "HEAD^{tree}").decode().strip()
 
         def corrupt(edit):
@@ -154,6 +161,42 @@ class MergeGateTests(tpr.ProfileTest):
         for name, edit in cases.items():
             with self.subTest(name), self.assertRaises(Blocked):
                 runs.validate_gate(corrupt(edit))
+
+    def test_a_check_that_fixes_its_checkout_cannot_verify_or_merge_the_original_candidate(self):
+        self.gated(argv=(sys.executable, "-c",
+                        "from pathlib import Path; p=Path('ZPLAN_FIXTURE.md'); p.write_text('fixed'); "
+                        "assert p.read_text() == 'fixed'"))
+        head = self.head()
+        result = self.merge()
+        self.assertEqual((result.kind, result.family), ("refused", "merge.checks_failed"))
+        self.assertEqual(self.head(), head)
+        stored = self.stored()["runs"][0]
+        self.assertEqual(stored["delivery"], "awaiting_merge")
+        evidence = stored["gate"]["evidence"]
+        self.assertEqual(evidence["outcome"], "failed")
+        self.assertEqual((evidence["checks"][0]["status"], evidence["checks"][0]["exit_code"]),
+                         ("candidate_changed", 0))
+        runs.validate_gate(stored)  # failed evidence remains readable on reopen
+        self.assertEqual(self.merge().family, "merge.checks_failed")
+        self.assertEqual(self.head(), head)
+
+    def test_index_flags_cannot_hide_a_changed_candidate_from_the_merge_gate(self):
+        self.gated(argv=(sys.executable, "-c",
+                        "import subprocess; from pathlib import Path; p=Path('ZPLAN_FIXTURE.md'); "
+                        "subprocess.run(['git', 'update-index', '--assume-unchanged', str(p)], check=True); "
+                        "p.write_text('fixed'); assert p.read_text() == 'fixed'"))
+        head = self.head()
+        result = self.merge(allow_unverified=False)
+        self.assertEqual((result.kind, result.family), ("refused", "merge.checks_failed"))
+        self.assertEqual(self.head(), head)
+        stored = self.stored()["runs"][0]
+        self.assertEqual(stored["delivery"], "awaiting_merge")
+        evidence = stored["gate"]["evidence"]
+        self.assertEqual(evidence["outcome"], "failed")
+        self.assertEqual((evidence["checks"][0]["status"], evidence["checks"][0]["exit_code"]),
+                         ("candidate_changed", 0))
+        self.assertEqual(self.git("status", "--porcelain"), b"")
+        runs.validate_gate(stored)
 
     def test_c2_a_conflicting_candidate_is_recorded_and_the_tree_is_untouched(self):
         self.gated()
@@ -218,7 +261,18 @@ class MergeGateTests(tpr.ProfileTest):
         self.assertEqual(refused.kind, "refused")
         self.assertIn("process.changed", refused.line)
         self.assertEqual((self.head(), self.stored()["runs"][0]["delivery"]), (head, "awaiting_merge"))
-        self.assertEqual(self.merge().kind, "integrated")
+        merged = self.merge()
+        self.assertEqual(merged.kind, "integrated")
+        self.assertIn("Unverified merge: no project checks or merge critic ran.", merged.line)
+
+    def test_the_service_refuses_an_unverified_merge_by_default(self):
+        self.awaiting_merge()
+        self.write({"gates": {"merge": "off"}})
+        head, before = self.head(), self.stored()
+        with self.app() as app:
+            result = app.delivery.merge(app.delivery.latest("M1"))  # no opt-in: the default must fail closed
+        self.assertEqual((result.kind, result.family), ("refused", "merge.no_checks"))
+        self.assertEqual((self.head(), self.stored()), (head, before))
 
 
 class MergeCriticWiringTests(tpr.ProfileTest):
@@ -285,7 +339,7 @@ class MergeCriticWiringTests(tpr.ProfileTest):
 
     def merge(self, engine):
         with self.critic_app(engine) as app:
-            return app.delivery.merge(app.delivery.latest("M1"))
+            return app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True)
 
     def record(self, index=0):
         return self.stored()["critics"][index]
@@ -332,14 +386,14 @@ class MergeCriticWiringTests(tpr.ProfileTest):
         self.owner_commit()
         engine = CriticEngine(["pending", {}])
         with self.critic_app(engine) as app:
-            self.assertEqual(app.delivery.merge(app.delivery.latest("M1")).kind, "refused")
+            self.assertEqual(app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True).kind, "refused")
         with tpr.RealAuthority(self.state, self.project, fixture_id="test") as authority:
             gate = authority.state["runs"][0]["gate"]
             gate.pop("critic")                                # the shape a store written before A7b2 has
             authority.save()
             runs.validate_gate(authority.state["runs"][0])
         with self.critic_app(engine) as app:                  # reopened: the legacy gate loads and is reused
-            self.assertEqual(app.delivery.merge(app.delivery.latest("M1")).kind, "integrated")
+            self.assertEqual(app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True).kind, "integrated")
         self.assertEqual((len(self.stored()["critics"]), engine.dispatches), (1, 1))
 
     def test_c2_the_identity_binds_the_pinned_gate_the_engine_and_the_role(self):
@@ -456,6 +510,17 @@ class MergeCriticWiringTests(tpr.ProfileTest):
         self.assertIn("submission.unknown", second.line)
         self.assertEqual((self.head(), self.stored()["runs"][0]["delivery"]), (head, "awaiting_merge"))
         self.assertEqual((len(self.stored()["critics"]), len(engine.steps)), (1, 1))
+
+    def test_a_semantic_go_cannot_override_a_failed_deterministic_check(self):
+        self.gated(argv=("false",))
+        head = self.owner_commit()
+        engine = CriticEngine([{}])
+        result = self.merge(engine)
+        self.assertEqual(result.kind, "refused")
+        self.assertIn("merge.checks_failed", result.line)
+        self.assertEqual(engine.dispatches, 0)
+        self.assertEqual(self.head(), head)
+        self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
 
     def test_c4_a_block_refuses_with_the_first_three_findings_and_lands_nothing(self):
         """C4: a `block` names the first three findings and neither lands nor changes the attempt."""

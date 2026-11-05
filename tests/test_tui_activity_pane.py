@@ -128,7 +128,7 @@ class ActivityPaneTests(MilestoneShell):
                         await pilot.pause()
                     # A1: exactly the two canvas tabs, no Journal tab and no Journal pane body (I7 adds the narrow
                     # strip's «Conversation» label in front of them)
-                    labels = ["Scheme", "Plan"]
+                    labels = ["Scheme", "Plan", "Drafts"]
                     if self.main().narrow:
                         labels = [strings.text("pane.chat")] + labels
                     self.assertEqual(self.labels(), labels)
@@ -184,21 +184,21 @@ class ActivityPaneTests(MilestoneShell):
             await self.loaded(pilot)
             pane = self.pane()
             self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # a live attempt opens «Scheme»
-            # A5: ←→ cycle the two tabs, from the chat input and from the plan pane
-            for key, shown in (("right", self.ui.TAB_PLAN), ("right", self.ui.TAB_LIVE),
+            # A5: ←→ cycle the three tabs (v3d), from the chat input and from the plan pane
+            for key, shown in (("right", self.ui.TAB_PLAN), ("right", self.ui.TAB_DRAFTS),
                                ("left", self.ui.TAB_PLAN), ("left", self.ui.TAB_LIVE)):
                 await pilot.press(key)
                 await pilot.pause()
                 self.assertEqual(self.tab(), shown, key)
-                self.assertIn(self.tab(), (self.ui.TAB_LIVE, self.ui.TAB_PLAN))
+                self.assertIn(self.tab(), (self.ui.TAB_LIVE, self.ui.TAB_PLAN, self.ui.TAB_DRAFTS))
             # A5: no key reaches a Journal tab; the old function / alt keys stay unbound
             for key in ("f2", "f3", "f4", "alt+1", "alt+2", "alt+3"):
                 self.assertNotIn(key, self.app.active_bindings, key)
                 await pilot.press(key)
                 await pilot.pause()
-                self.assertIn(self.tab(), (self.ui.TAB_LIVE, self.ui.TAB_PLAN))
+                self.assertIn(self.tab(), (self.ui.TAB_LIVE, self.ui.TAB_PLAN, self.ui.TAB_DRAFTS))
             from textual.widgets._tabs import Tab
-            self.assertEqual(len(list(self.app.query(Tab))), 2)  # nothing to click but the two labels
+            self.assertEqual(len(list(self.app.query(Tab))), 3)  # nothing to click but the three labels
             self.assertFalse(any(name.startswith("action_") and "journal" in name.lower()
                                  for name in dir(self.main())))
             # A5: the key bar and the main help carry the arrow segment and no Journal

@@ -74,8 +74,9 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual([t["name"] for t in tools],
                          ["zplan_list_files", "zplan_read_file", "zplan_search", "zplan_state", "zplan_state_update",
                           "zplan_status", "zplan_start",
-                          "zplan_stop", "zplan_approve_plan", "zplan_resume", "zplan_rebrief", "zplan_edit_plan",
-                          "zplan_revise_plan", "zplan_merge", "zplan_propose_commit"])
+                          "zplan_stop", "zplan_approve_plan", "zplan_resume", "zplan_rebrief", "zplan_plan",
+                          "zplan_edit_plan",
+                          "zplan_merge", "zplan_propose_commit", "zplan_settings"])
         for tool in tools:
             self.assertEqual(tool["inputSchema"]["type"], "object")
         result = self.call("zplan_read_file", {"path": "a.py"})["result"]
@@ -141,10 +142,12 @@ class ActionToolsTest(unittest.TestCase):
         self.proc = None
         self.next_id = 0
 
-    def server(self, controller):
+    def server(self, controller, turn=None):
         argv = [sys.executable, "-I", "-c", CODE, "--project", str(self.project)]
         if controller is not None:
             argv += ["--controller", controller]
+            if turn is not None:
+                argv += ["--turn", turn]
         self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.close)
         return self.proc
@@ -199,6 +202,26 @@ class ActionToolsTest(unittest.TestCase):
         self.assertEqual(self.seen[-1], {"id": payload["id"], "tool": "zplan_start",
                                          "args": {"milestone": "M1", "revision": 2}})
 
+    def test_v6a_the_turn_token_travels_in_the_envelope_and_never_from_the_model(self):
+        """V6a: a server started with `--turn` adds `"turn"` to every action request's envelope; one started without
+        sends none. An argument named `turn` stays in `args`, so the model cannot supply the token."""
+        self.server(self.path, "tok-123")
+        payload, _ = self.action("zplan_start", {"milestone": "M1", "revision": 2, "turn": "forged"})
+        self.assertEqual(self.seen[-1], {"id": payload["id"], "tool": "zplan_start", "turn": "tok-123",
+                                         "args": {"milestone": "M1", "revision": 2, "turn": "forged"}})
+        self.close()
+        self.server(self.path)
+        payload, _ = self.action("zplan_status", {})
+        self.assertNotIn("turn", self.seen[-1])
+
+    def test_v6a_a_turn_needs_a_controller_and_a_value(self):
+        for extra in (["--turn", "t"], ["--controller", self.path, "--turn"], ["--controller", self.path, "--turn", ""],
+                      ["--controller", self.path, "--other", "t"]):
+            with self.subTest(extra=extra):
+                done = subprocess.run([sys.executable, "-I", "-c", CODE, "--project", str(self.project), *extra],
+                                      stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
+                self.assertEqual(done.returncode, 2)
+
     def test_a5t2a_the_approve_resume_and_rebrief_tools_reach_the_controller_with_the_id(self):
         """A5t2a/A5t2b C2: approve, resume, rebrief, edit_plan and merge are action tools like start and stop; each
         whole request (token and the full plan included) travels to the Controller and its result names the request
@@ -210,6 +233,7 @@ class ActionToolsTest(unittest.TestCase):
         for name, arguments in (("zplan_approve_plan", {"revision": 1}),
                                 ("zplan_resume", {"milestone": "M1", "token": token}),
                                 ("zplan_rebrief", {"milestone": "M1", "token": token, "note": "use the fixture path"}),
+                                ("zplan_plan", {"goal": "Add a changelog", "plan": proposal}),
                                 ("zplan_edit_plan", {"revision": 1, "plan": proposal}),
                                 ("zplan_merge", {"milestone": "M1", "token": token})):
             with self.subTest(tool=name):
@@ -261,6 +285,100 @@ class ActionToolsTest(unittest.TestCase):
         second = replies.get(timeout=10)
         self.assertEqual(second["id"], start_id)
         self.assertIn("result", second)
+
+
+def schema_problem(schema, value, path="plan"):
+    """The first way `value` breaks `schema` (the JSON Schema subset a tool schema uses), or None."""
+    kind = schema.get("type")
+    kinds = kind if isinstance(kind, list) else [kind] if kind else []
+    checks = {"object": lambda v: isinstance(v, dict), "array": lambda v: isinstance(v, list),
+              "string": lambda v: isinstance(v, str), "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+              "null": lambda v: v is None}
+    if kinds and not any(checks[k](value) for k in kinds):
+        return path + ": type"
+    if "enum" in schema and value not in schema["enum"]:
+        return path + ": enum"
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", 1 << 30):
+            return path + ": length"
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", 1 << 30):
+            return path + ": items"
+        for index, item in enumerate(value):
+            problem = schema_problem(schema.get("items", {}), item, "%s[%d]" % (path, index))
+            if problem:
+                return problem
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            if key not in value:
+                return "%s: missing %s" % (path, key)
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False and set(value) - set(properties):
+            return "%s: unexpected %s" % (path, sorted(set(value) - set(properties)))
+        for key, item in value.items():
+            if key in properties:
+                problem = schema_problem(properties[key], item, path + "." + key)
+                if problem:
+                    return problem
+    return None
+
+
+class PlanSchemaTests(unittest.TestCase):
+    """A0 S2a (docs/designs/2026-11-04-a0-architect.md 3.5): the plan tools declare the whole plan type, so the model
+    sees it instead of an untyped object, and the declared type agrees with the validator: every plan the validator
+    takes fits the schema, and every structural breakage the schema names is one the validator refuses too."""
+
+    def plan_schemas(self):
+        from terminal_planner import architect_tools
+        tools = {tool["name"]: tool for tool in architect_tools.TOOLS}
+        return [tools[name]["inputSchema"]["properties"]["plan"] for name in ("zplan_plan", "zplan_edit_plan")]
+
+    def test_the_plan_tools_declare_the_whole_plan_type(self):
+        from terminal_planner import authority
+        for schema in self.plan_schemas():
+            self.assertEqual(schema["type"], "object")
+            self.assertEqual(sorted(schema["required"]), ["milestones", "requirements"])
+            self.assertIs(schema["additionalProperties"], False)
+            milestone = schema["properties"]["milestones"]["items"]
+            task = milestone["properties"]["slices"]["items"]["properties"]["tasks"]["items"]
+            brief = task["properties"]["brief"]
+            self.assertEqual(sorted(brief["required"]), sorted(authority.BRIEF_KEYS))
+            self.assertEqual(brief["properties"]["risk"]["enum"], list(authority.BRIEF_RISKS))
+            self.assertIn("brief", task["required"])
+
+    def test_the_schema_and_the_validator_agree_on_sample_plans(self):
+        import copy
+        from terminal_planner import authority, engine
+        good = engine.fixture_draft()
+        task = lambda plan: plan["milestones"][0]["slices"][0]["tasks"][0]
+
+        def mutated(change):
+            plan = copy.deepcopy(good)
+            change(plan)
+            return plan
+        broken = [
+            mutated(lambda p: p.pop("requirements")),
+            mutated(lambda p: p.update(extra=1)),
+            mutated(lambda p: p["milestones"][0].pop("slices")),
+            mutated(lambda p: p["milestones"][0].update(brief={})),
+            mutated(lambda p: task(p).pop("checks")),
+            mutated(lambda p: task(p).update(write_set=["a.py"])),
+            mutated(lambda p: task(p)["brief"].pop("dod")),
+            mutated(lambda p: task(p)["brief"].update(risk="huge")),
+            mutated(lambda p: task(p)["brief"].update(write_set=[])),
+            mutated(lambda p: task(p)["brief"].update(criteria=[])),
+            mutated(lambda p: task(p)["brief"]["criteria"][0].pop("example")),
+            mutated(lambda p: task(p).pop("brief")),
+            "a markdown plan",
+        ]
+        for schema in self.plan_schemas():
+            self.assertIsNone(schema_problem(schema, good))
+            authority.check_draft(copy.deepcopy(good))
+            for plan in broken:
+                with self.subTest(plan=str(plan)[:60]):
+                    self.assertIsNotNone(schema_problem(schema, plan))
+                    with self.assertRaises(Exception):
+                        authority.check_draft(plan)
 
 
 if __name__ == "__main__":

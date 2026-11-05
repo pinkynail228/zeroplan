@@ -13,6 +13,36 @@ Contents: [How the pieces fit](#how-the-pieces-fit) · [Lifecycle](#lifecycle) �
 Help is available offline and without a project: `zplan --help`, `zplan help <command>`, `zplan <command> --help`,
 and `?` on any screen lists that screen's keys. None of them needs tools, a login, a Git project or a model.
 
+## Send-only automation
+
+```sh
+zplan exec --goal GOAL.md --operation-id change-42 [--project PATH]
+zplan exec --goal GOAL.md --operation-id demo-1 --fixture demo --state-dir /tmp/zplan-demo
+```
+
+`exec` reads a nonempty UTF-8 file (at most 1 MiB) and sends one owner message through the same Application
+Service and initial dispatch as the TUI. It is **not** continuous goal-to-merge automation. Plain `zplan`
+still opens the interactive UI. Fixture mode uses isolated deterministic architect/engine transport and
+never checks production provider auth; for `exec`, both fixture id and state directory are required together.
+
+Reuse the same operation id (1–128 characters) and identical text to retrieve the durable outcome and original
+message/conversation/turn identities, even after reopening. Idempotency is scoped to the concrete checkout;
+it does not share history across worktrees. A changed goal with the same id is a conflict. Existing accepted,
+running or interrupted submissions are **not resent**; inspect them before choosing a new id. The TUI retains
+its explicit continuation path for freshly accepted input.
+
+Stdout is one scrubbed JSON object with identity fields, `replayed`, `model.status`, optional response/failure
+text, linked `children`, aggregate `outcome` and `exit_code`. Text and child detail are bounded; at most 32 child
+results are shown (`children_omitted` counts the rest), but **all** linked children determine the exit code.
+Oversized child evidence is marked `truncated`. Diagnostics use stderr; invalid input, conflicts and store
+failures do not print a misleading completed result.
+
+Exit precedence: **3** for any running/indeterminate parent, child or dispatched graph; otherwise **4** for a
+child awaiting its owner; otherwise **1** for a failed/refused child or non-completed parent; otherwise **0**.
+CLI usage errors are **2**, before admission. `model.status` remains factual even when a child determines a
+nonzero exit. For this send-only operation, `verification.state` is always `not_run` and `merge.state` is always
+`not_requested`: model completion is not verification, merge approval or delivery.
+
 ## How the pieces fit
 
 | Piece | What it is | Who owns the truth |
@@ -92,6 +122,20 @@ refused (`plan.gate_stale`, «the check is out of date») when the live resolved
 the profile, roles or a rules file changed after the critic accepted. Nothing is written by the refusal; `[r]` plans
 again under the current configuration. The rules reach the planner and the critic in the listed order, with lower
 priority than the task and graph mechanics.
+
+**Plans the architect writes (Goldfish review).** In the chat the architect writes the plan itself
+(`zplan_plan {goal, plan, request?}`; every task carries a brief, the plan is at most 256 KB) and edits it with
+`zplan_edit_plan {revision, plan, response?, request?}`; there is no planner on this path. The revision is a draft
+revision with `frozen.review = "goldfish"` and records `origin` (plan, edit, renew), `by` (owner, architect) and the
+architect's `response`. Its graph runs two read-only nodes side by side, once: the plan reader (`comprehension`) sees
+only the goal, the owner's requests and the plan and writes a paraphrase of at most 3000 characters (clipped, never
+refused); the `critic` judges the plan as the plan critic does, in one round, and accepts a dispute only when it
+cites the owner's words or a fact in the checkout. The evidence is the plan gate's plus `paraphrase`; `[a]` and the
+override work as above. The owner's requests travel with the chain (`request` joins the feedback), and a revision
+sees only its own chain's earlier review. In one chain the architect may create at most `plan_rounds` revisions on
+its own; then an edit in an event turn is refused (the owner decides), while each owner message may still produce
+one revision. The method follows the Elephant-Goldfish Model (<https://github.com/google/elephant-goldfish-model>);
+zplan ships its own wording. The owner's own `p`, `r` and `/plan` still use the planner graph.
 
 A `review_exhausted` revision of execution version 2 can be approved by the owner anyway (`[o]`,
 `plan.override` / `tui_plan.override`; no CLI command) with a typed reason: the stripped text, one printable line,
@@ -209,6 +253,7 @@ goal ──[g]──▶ planning ──▶ observing ──▶ proposed ──[a
         submission_unknown / detached                   running ──▶ awaiting_merge ──[m]──▶ integrated
         / observation_blocked ──[g]/[w]──▶ observing        │              │ conflict
                                                             ├─▶ needs_owner / blocked ──[t]──▶ new attempt
+                                                            ├─▶ paused ──(at the reset)──▶ same attempt, once
                                                             ├─▶ failed_recoverable ──[g]──▶ same attempt
                                                             ├─▶ failed / stopped ──[t]──▶ new attempt
                                                             └─▶ unknown / stopping ──[g]──▶ reconciled
@@ -223,6 +268,7 @@ its runs have a native status, an outcome and a delivery state. All of them are 
 | Command | Usage | Purpose (as in `--help`) | Meaning |
 | --- | --- | --- | --- |
 | `zplan` | `zplan [--plain] [--project PATH]` | open the plan and milestones of the current Git project | Opens the plan and milestones of the Git project in the working directory (full-screen on a terminal, line-oriented otherwise). |
+| `zplan exec` | `zplan exec --goal GOAL.md --operation-id ID [--project PATH]` | send one owner goal through the shared Application Service and print JSON | Sends one owner message, returning JSON and durable replay by operation id; does not verify or merge. |
 | `zplan status` | `zplan status [--project PATH]` | show the home screen once, without prompts | Prints the home screen once (no prompts, no escape codes, nothing dispatched). |
 | `zplan setup` | `zplan setup` | install the pinned Zeroshot and Codex into zplan's data directory | Installs the pinned Zeroshot bundle and Codex into zplan's data directory (checksums verified, no model call). |
 | `zplan doctor` | `zplan doctor [--project PATH]` | check readiness: tools, login, Git, project | Prints the Toolchain line (versions, tool directory), then one line per readiness check; exit status 0 only when everything is ready. |
@@ -234,12 +280,14 @@ its runs have a native status, an outcome and a delivery state. All of them are 
 
 | Flag | Commands | Purpose (as in `--help`) | Meaning |
 | --- | --- | --- | --- |
+| `--goal GOAL.md` | exec | exec: UTF-8 file containing one owner goal (required) | Goal text, unchanged on replay; at most 1 MiB. |
+| `--operation-id ID` | exec | exec: stable submission key, 1-128 characters (required) | Same id and different goal is a conflict; replay creates no new turn or effect. |
 | `--plain` | (none) | line-oriented mode without the full-screen interface (also when the output is not a terminal) | Forces the line-oriented UI. |
-| `--project PATH` | (none), status, doctor, roles, profile | Git project (default: the current directory) | Selects the Git project instead of the working directory. |
-| `--state-dir DIR` | (none), status, profile | fixture only: root of the isolated state | Fixture state root; production overrides are rejected. |
-| `--fixture ID` | (none), status, profile | isolated demo without a model; native runs are forbidden | Runs against the deterministic fixture engine in an isolated authority. |
-| `--native-binary PATH` | (none), status | explicit isolated Zeroshot executable (development) | Explicit Zeroshot executable instead of the pinned private tools. |
-| `--native-state-dir DIR` | (none), status, doctor | durable Zeroshot history; a short path for Unix sockets | Durable native state root (short path: Unix socket limit). |
+| `--project PATH` | (none), status, doctor, roles, profile, exec | Git project (default: the current directory) | Selects the Git project instead of the working directory. |
+| `--state-dir DIR` | (none), status, profile, exec | fixture only: root of the isolated state | Fixture state root; production overrides are rejected. |
+| `--fixture ID` | (none), status, profile, exec | isolated demo without a model; native runs are forbidden | Runs against the deterministic fixture engine in an isolated authority. |
+| `--native-binary PATH` | (none), status, exec | explicit isolated Zeroshot executable (development) | Explicit Zeroshot executable instead of the pinned private tools. |
+| `--native-state-dir DIR` | (none), status, doctor, exec | durable Zeroshot history; a short path for Unix sockets | Durable native state root (short path: Unix socket limit). |
 | `--check` | update | only show the versions, change nothing (for update) | Reports the installed and the newest release without changing anything. |
 | `--version` | all | show the version | Prints the version. |
 | `-h, --help` | all | show help | Prints help for the command. |
@@ -274,7 +322,6 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_run` | Full-screen mode: run result | TUI end-of-run modal of one milestone attempt. |
 | `tui_diff` | Full-screen mode: changes | TUI scrollable diff of an exported result. |
 | `tui_details` | Full-screen mode: details | TUI scrollable plan record and diagnostics. |
-| `tui_attempt` | Full-screen mode: new attempt | TUI form of a new attempt of a stopped or failed milestone. |
 | `tui_answer` | Full-screen mode: answer or note | TUI text editor for an answer, a new-attempt note or a plan change request. |
 | `tui_confirm` | Full-screen mode: confirmation | TUI confirmation of a plan or milestone decision. |
 | `tui_confirm_run` | Full-screen mode: run confirmation | TUI confirmation of a run start: “yes” is focused at once. |
@@ -320,7 +367,6 @@ UI lists exactly the keys its menu offers at that moment.
 | `plan` | `s` | `plan.stop` | stop planning | stop the running planner | Stop the running planner; the run is never resubmitted. |
 | `plan` | `a` | `plan.approve` | approve | approve the plan; no implementation is started | Approve this revision (starts nothing). |
 | `plan` | `r` | `plan.revise` | revise | write what to change and re-plan | Request a revision. |
-| `plan` | `x` | `plan.reject` | decline | do not approve the proposal | Decline the proposal. |
 | `plan` | `i` | `plan.requirements` | requirements and checks | the full plan: requirements, tasks, checks | Full plan with requirements and checks. |
 | `plan` | `o` | `plan.override` | approve despite the check | approve a plan the check rejected; a reason is required | Approve a plan the critic rejected, with a typed reason (starts nothing). |
 | `plan` | `g` | `plan.restart` | start the planner again | a new revision of the same goal | Run the planner again. |
@@ -367,11 +413,11 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_panel` | `tab` | `tui_panel.input` | input | return to the input line | Focus the input line. |
 | `tui_panel` | `/view` | `tui_panel.plan` | plan | open the plan: goal, progress, proposal (with no plan — /plan <goal>) | Open the plan screen; with no plan, a note names `/plan <goal>`. |
 | `tui_panel` | `/answer` | `tui_panel.answer_draft` | answer draft | open the newest answer draft of a milestone in the answer form | Open the newest actionable answer draft of the selected milestone in the answer form; nothing is submitted. A malformed identity, a still-running attempt and an end that offers no answer are refused as `draft.malformed`, `draft.active` and `draft.unavailable`, and a moved-on draft as `draft.stale`. |
-| `tui_panel` | `/run` | `tui_panel.run` | start | start the selected ready milestone | Start the selected ready milestone after a confirmation. |
-| `tui_panel` | `/run` | `tui_panel.resume` | continue | continue the same attempt in its worktree | Resume the failed attempt after a confirmation. |
-| `tui_panel` | `/run` | `tui_panel.attempt` | new attempt | a new attempt of a stopped or failed milestone | Open the new-attempt form of a stopped or failed milestone. |
+| `tui_panel` | `/run` | `tui_panel.run` | start | start the selected ready milestone | Start the selected ready milestone. |
+| `tui_panel` | `/run` | `tui_panel.resume` | continue | continue the same attempt in its worktree | Resume the failed attempt in its worktree. |
+| `tui_panel` | `/run` | `tui_panel.attempt` | new attempt | a new attempt of a stopped or failed milestone | Start a new attempt of a stopped or failed milestone at once, without a note. |
 | `tui_panel` | `/run` | `tui_panel.check` | check | reconcile an unconfirmed submission or stop with Zeroshot | Reconcile an unconfirmed submission or stop; nothing is sent again. |
-| `tui_panel` | `/stop` | `tui_panel.stop` | stop | stop the running run | Stop the running attempt after a confirmation. |
+| `tui_panel` | `/stop` | `tui_panel.stop` | stop | stop the running run | Stop the running attempt. |
 | `tui_panel` | `/attempt` | `tui_panel.open` | open | the end result of a milestone run; a running run is watched again | Open the end-of-run view of the selected milestone; a running attempt is observed again. |
 | `tui_panel` | `/details` | `tui_panel.details` | details | result, plan, diagnostics | Outcome first, then the plan, diagnostics last. |
 | `tui_panel` | `/log` | `tui_panel.tail` | log | the last lines of the Zeroshot log (on request) | Show the tail of the run log. |
@@ -383,11 +429,11 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_panel` | `ctrl+q` | `tui_panel.quit` | quit | quit | Quit. |
 | `tui_run` | `tab` | `tui_run.move` | to button | move to the next button (Tab, ←/→ switch buttons) | Move to the next button (Tab, Left/Right switch buttons). |
 | `tui_run` | `enter` | `tui_run.press` | press | press the focused button; ↑↓ PgUp PgDn scroll the result | Press the focused button; arrows and PgUp/PgDn scroll the end screen. |
-| `tui_run` | `enter` | `tui_run.merge` | merge | merge the result into the destination branch | Merge the exported result after a confirmation. |
+| `tui_run` | `enter` | `tui_run.merge` | merge | merge the result into the destination branch | Merge the exported result into the destination branch. |
 | `tui_run` | `enter` | `tui_run.diff` | changes | show the result's changes | Show the result's diff. |
 | `tui_run` | `enter` | `tui_run.accept` | accept | accept the steward's proposal | Accept the steward's proposal. |
 | `tui_run` | `enter` | `tui_run.answer` | answer | answer in a note: a new attempt with it | Answer in a note; a new attempt starts with it. |
-| `tui_run` | `enter` | `tui_run.attempt` | new attempt | note optional | A new attempt from the destination HEAD. |
+| `tui_run` | `enter` | `tui_run.attempt` | new attempt | starts at once, no note | A new attempt from the destination HEAD, started at once; new instructions go through the chat. |
 | `tui_run` | `enter` | `tui_run.plan` | to plan | the request goes to plan revision | Route a scope change back to plan revision. |
 | `tui_run` | `enter` | `tui_run.resume` | continue | continue the same attempt in its worktree | Resume the same attempt. |
 | `tui_run` | `enter` | `tui_run.check` | check | reconcile with Zeroshot, no resubmit | Reconcile an unconfirmed submission or stop; never resubmits. |
@@ -402,9 +448,6 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_answer` | `tab` | `tui_answer.button` | to button | from the text field move to the “send” button | Move from the text field to the send button. |
 | `tui_answer` | `enter` | `tui_answer.send` | send | Enter on the “send” button: send the text (an empty answer starts nothing) | Press the send button: send the text. |
 | `tui_answer` | `esc` | `tui_answer.back` | back | close without changes | Close without changes. |
-| `tui_attempt` | `tab` | `tui_attempt.button` | to button | from the text field move to the “start attempt” button | Move from the text field to the start button. |
-| `tui_attempt` | `enter` | `tui_attempt.send` | start attempt | Enter on the “start attempt” button: start a new attempt (the note is optional) | Press the start button: start the new attempt with the note (may be empty). |
-| `tui_attempt` | `esc` | `tui_attempt.back` | back | close without changes: the attempt does not start | Close; nothing starts. |
 | `tui_plan` | `tab` | `tui_plan.move` | to button | move to the next button (Tab, ←/→ switch buttons) | Move to the next button (Tab, Left/Right switch buttons). |
 | `tui_plan` | `enter` | `tui_plan.press` | press | press the focused button; ↑↓ PgUp PgDn scroll the plan | Press the focused button; arrows and PgUp/PgDn scroll the plan. |
 | `tui_plan` | `enter` | `tui_plan.run` | start the planner | check readiness and submit the goal; a stale unsent plan is first rebuilt on the current project; an unconfirmed submission is sent again unchanged | Check readiness, then submit the unsent or failed revision; a stale unsent one is first rebuilt on the current project. |
@@ -415,7 +458,6 @@ UI lists exactly the keys its menu offers at that moment.
 | `tui_plan` | `enter` | `tui_plan.approve` | approve | approve the plan; no implementation is started | Approve (starts nothing). |
 | `tui_plan` | `enter` | `tui_plan.override` | approve despite the check | approve a plan the check rejected; a reason is required | Approve a plan the critic rejected, with a typed reason (starts nothing). |
 | `tui_plan` | `enter` | `tui_plan.revise` | revise | write what to change and re-plan | Request a revision. |
-| `tui_plan` | `enter` | `tui_plan.reject` | decline | do not approve the proposal | Decline the proposal. |
 | `tui_plan` | `enter` | `tui_plan.info` | details | requirements and checks; for a failure, diagnostics | Full requirements and checks, or the diagnostics of a failure. |
 | `tui_plan` | `esc` | `tui_plan.back` | back | return to the home screen | Back to the main screen. |
 | `tui_plan` | `ctrl+q` | `tui_plan.quit` | quit | quit | Quit. |
@@ -462,7 +504,7 @@ Persisted on each plan revision in `planning.json`.
 | `run_failed` | The planner run ended without a plan. | A provider, network, quota or authorization failure. | The plan screen names the cause; [g] restarts after readiness, [r] revises the goal. |
 | `proposal_invalid` | The planner returned a plan zplan did not accept. | The plan broke the roadmap contract. | [r] revise the goal, or [g] run the planner again. |
 | `review_exhausted` | The critic did not accept the plan within the revision's plan rounds; it cannot be approved in the usual way. | The goal is too broad or ambiguous, or the critic and the planner could not agree. | [i] shows every round; [r] revise, [g] run the planner again, or [o] approve it over the rejection with a typed reason. |
-| `proposed` | A reviewed plan waits for the owner. | The planner and verifier finished. | [a] approve, [r] revise, [x] decline. |
+| `proposed` | A reviewed plan waits for the owner. | The planner and verifier finished. | [a] approve, [r] revise. |
 | `approved` | The owner approved this revision; milestones may run. A plan approved over a rejected plan check carries the owner's reason and is shown as approved despite the check. | [a] on the proposed plan, or [o] on a plan the critic rejected. | [g] start a milestone on the home screen; [r] to change the plan. |
 <!-- END GENERATED: plan_status -->
 
@@ -477,6 +519,7 @@ What the home screen shows for each milestone of the approved plan.
 | `ready` | Dependencies are merged; the milestone can start. | Nothing was started for it in this plan revision. | [g] start it (a preview with worktree, branches and limits asks for confirmation). |
 | `running` | An attempt is executing. | Started by [g]. | [w] watch; k + Enter while watching stops it. |
 | `unknown` | The attempt's submission or an interrupted run is not confirmed. | zplan or the engine stopped between submission and acknowledgement. | [g] reconciles with Zeroshot without resubmitting. |
+| `paused` | A provider limit paused the attempt; it continues by itself once, at the reset. | A provider limit or quota. | Nothing; [o] shows the time. To continue earlier, ask in the chat. |
 | `needs_owner` | The steward needs an answer or an accepted proposal. | The task list could not proceed alone. | [o] then [t] answer or [a] accept. |
 | `blocked` | The attempt reported it cannot proceed. | A missing fact, access or contradiction. | [o], then [t] answer and restart, or [p] revise the plan. |
 | `failed_recoverable` | The attempt failed and can continue in its worktree. | A provider or tool error. | [g] resumes the same attempt (or [o], then [g]). |
@@ -534,6 +577,10 @@ shown only as a bounded detail next to the code; a failure without a family show
 <!-- BEGIN GENERATED: error -->
 | ID | Meaning | Likely cause | Owner remedy |
 | --- | --- | --- | --- |
+| `operation.invalid_request` | The message operation request is invalid. | Missing identifiers, a wrong request type or a snapshot that cannot be serialized. | Send a valid typed message request with nonempty identifiers and a serializable snapshot. |
+| `operation.project_mismatch` | The message belongs to another project; it was not sent. | The request's project id differs from the selected architect's project. | Open the intended project and create a request for that project. |
+| `operation.conflict` | This operation id already names a different request; nothing was resent. | The text, snapshot or message identities changed while reusing an idempotency key. | Replay the original request unchanged, or use a new operation id for a distinct owner decision. |
+| `operation.store_invalid` | The operation journal is damaged or has an incomplete final record. | An interrupted append, corruption or a hand edit; completed records before a torn tail remain replayable. | Preserve the journal and inspect the interrupted operation before repairing storage. Do not resend an indeterminate operation automatically; new appends are blocked until recovery. |
 | `readiness.socket` | The Zeroshot socket path is too long. | The native state directory path is long. | Use a shorter --native-state-dir or ZPLAN data path. |
 | `readiness.tools` | Pinned Zeroshot is missing or damaged. | Setup was not run or files changed. | [u] or `zplan setup`. |
 | `readiness.codex` | The pinned Codex binary is missing. | Setup was not run or files changed. | [u] or `zplan setup`. |
@@ -620,7 +667,8 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `architect.foreign_tools` | Codex would start an MCP server besides zplan's in the architect's turn, or the server list could not be checked. | A server or plugin of your Codex config that the turn could not turn off. | Remove the server named in the message from your Codex config, or fix `codex mcp list`; no turn was started. |
 | `architect.empty_message` | The message is empty. | Nothing was typed. | Type a message. |
 | `architect.locked` | Another zplan process talks to this project's architect. | A second session. | Close the other session. |
-| `read.outside_project` | The path or root is outside the selected project and its worktrees. | A `..` or absolute path, a link leading out, an untracked file, or a foreign root. | Name a tracked file inside the project. |
+| `read.outside_project` | The path or root is outside the selected project and its worktrees. | A `..` or absolute path, a link leading out, an ignored file, or a foreign root. | Name a tracked file inside the project. |
+| `read.uncommitted` | The file is not committed; zplan reads only the last commit. | A new or untracked file the last commit lacks. | Commit it (the architect can offer it), then ask again. |
 | `read.credential` | The file looks like a credential file and is never read. | Its name matches a credential pattern, or it lies under `.git/` or `.zplan/`. | Nothing to fix: by design. |
 | `read.binary` | The file is binary. | A NUL byte in its first 8 KB. | Read a text file. |
 | `architect.cancelled` | The owner cancelled the turn. | Cancel key. | Send a new message. |

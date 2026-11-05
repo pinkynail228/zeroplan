@@ -1,10 +1,10 @@
 """The architect's tools as a stdio MCP server (newline-delimited JSON-RPC 2.0).
 
-Codex runs it as `python -I -c <code> --project ABS_DIR [--controller SOCKET]` (see `architect.build_argv`). The
+Codex runs it as `python -I -c <code> --project ABS_DIR [--controller SOCKET [--turn TOKEN]]` (see `architect.build_argv`). The
 process lives outside the Codex sandbox, so this module is the boundary. It exposes the read functions of
 `project_read` and the action tools (`zplan_status`, `zplan_start`, `zplan_stop`, `zplan_approve_plan`,
-`zplan_resume`, `zplan_rebrief`, `zplan_edit_plan`, `zplan_merge`, `zplan_propose_commit`) that reach the live
-Controller over its socket (`--controller`); it turns every `Blocked` into a tool error, never into a crash. The one file it writes is the project
+`zplan_resume`, `zplan_rebrief`, `zplan_plan`, `zplan_edit_plan`, `zplan_merge`, `zplan_propose_commit`, `zplan_settings`) that reach the live
+Controller over its socket (`--controller`, and the owner turn's token `--turn`, sent in the envelope and never by the model); it turns every `Blocked` into a tool error, never into a crash. The one file it writes is the project
 STATE (`zplan_state_update`, see `project_state`: four sections, at most 6 KB, scrubbed, hidden from git); it needs no
 Controller. There are no other file-writing tools: an action only asks the Controller, whose gates and autonomy
 policy decide. Every action result, error and timeout names the request id it
@@ -18,7 +18,8 @@ import threading
 import uuid
 
 from . import __version__, bridge, catalog, project_read, project_state
-from .authority import Blocked, PersistenceError
+from .authority import BRIEF_KEYS, BRIEF_RISKS, MAX_MILESTONE_TASKS, PLAN_EXAMPLE, Blocked, PersistenceError, canonical
+from .engine import PLAN_FORMAT
 
 MAX_LINE = 1 << 20           # one request line
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603
@@ -39,8 +40,34 @@ def _schema(properties, required=()):
     return {"type": "object", "properties": properties, "required": list(required), "additionalProperties": False}
 
 
+_TEXT = {"type": "string", "minLength": 1, "maxLength": 8192}
+
+
+def _list(items, most, least=1):
+    return {"type": "array", "items": items, "minItems": least, "maxItems": most}
+
+
+# The plan tools declare the whole plan type: Codex renders a tool's input schema as its declaration, and a bare
+# `plan: object` made the model learn the shape from refusals (101 in 14 plan-writing turns on the rig). This mirrors
+# the validator in authority.py (the brief keys, risks and the per-milestone task cap are imported from it, one
+# source); the rules a schema cannot say (unique ids, coverage, an acyclic order) stay in PLAN_FORMAT.
+_BRIEF = _schema({"goal": _TEXT, "why": _TEXT, "reuse": {"type": "string", "maxLength": 8192},
+                  "write_set": _list(_TEXT, 32),
+                  "criteria": _list(_schema({"id": _TEXT, "text": _TEXT, "example": _TEXT}, ["id", "text", "example"]), 5),
+                  "non_goals": _list(_TEXT, 16, 0),
+                  "risk": {"type": "string", "enum": list(BRIEF_RISKS)}, "dod": _TEXT}, BRIEF_KEYS)
+_TASK = _schema({"id": _TEXT, "title": _TEXT, "checks": _list(_TEXT, 32), "brief": _BRIEF},
+                ["id", "title", "checks", "brief"])
+_SLICE = _schema({"id": _TEXT, "title": _TEXT, "requirements": _list(_TEXT, 64),
+                  "tasks": _list(_TASK, MAX_MILESTONE_TASKS)}, ["id", "title", "requirements", "tasks"])
+_MILESTONE = _schema({"id": _TEXT, "title": _TEXT, "depends_on": _list(_TEXT, 32, 0), "slices": _list(_SLICE, 32)},
+                     ["id", "title", "depends_on", "slices"])
+PLAN_SCHEMA = _schema({"requirements": _list(_schema({"id": _TEXT, "text": _TEXT}, ["id", "text"]), 64),
+                       "milestones": _list(_MILESTONE, 32)}, ["requirements", "milestones"])
+
+
 TOOLS = [
-    {"name": "zplan_list_files", "description": "List the project's files that git knows (no credential files).",
+    {"name": "zplan_list_files", "description": "List the files of the project's last commit (no credential files); `note` names uncommitted paths.",
      "inputSchema": _schema({"prefix": {"type": "string", "description": "Only paths starting with this."},
                              "root": _ROOT})},
     {"name": "zplan_read_file", "description": "Read lines of one project file.",
@@ -86,20 +113,28 @@ TOOLS = [
                     "autonomy policy: it may refuse or ask the owner.",
      "inputSchema": _schema({"milestone": {"type": "string"}, "token": _TOKEN, "note": {"type": "string"}},
                             ["milestone", "token", "note"])},
+    {"name": "zplan_plan",
+     "description": "Ask the live Controller to save the plan you wrote for a goal as a new revision, only in a turn "
+                    "the owner started: `goal` is the owner's words or your "
+                    "restatement of them; `plan` is the full plan, with a brief on every task; `request` quotes the "
+                    "owner's words it answers. There is no planner: the plan is validated and a fresh reader checks "
+                    "it (it retells the plan, a critic judges it); events turns are refused. The plan's approval is "
+                    "a separate, gated action (zplan_approve_plan). The plan format: " + PLAN_FORMAT
+                    # A0 S2b: the model guessed the shape from refusals (6.3 per plan turn): show one valid plan first.
+                    + " A minimal valid plan, to copy the shape from: " + canonical(PLAN_EXAMPLE),
+     "inputSchema": _schema({"goal": {"type": "string"}, "plan": PLAN_SCHEMA, "request": {"type": "string"}},
+                            ["goal", "plan"])},
     {"name": "zplan_edit_plan",
-     "description": "Ask the live Controller to save an edited proposal as a new revision: `plan` is the full "
-                    "edited proposal (the current revision's `proposal`, changed). The Controller refuses when "
-                    "`revision` is not current, the proposal is invalid, or the edit changes nothing; otherwise the "
-                    "new revision goes to the planner; its approval is a separate, gated action (zplan_approve_plan).",
-     "inputSchema": _schema({"revision": {"type": "integer", "minimum": 1}, "plan": {"type": "object"}},
+     "description": "Ask the live Controller to save an edited plan as a new revision of the current one: `plan` is "
+                    "the full edited plan (the current revision's plan, changed). The Controller refuses when "
+                    "`revision` is not current, the plan is invalid, or the edit changes nothing; otherwise the new "
+                    "revision gets the same review as a first plan; its approval is a separate, gated action "
+                    "(zplan_approve_plan). `response` answers each finding of the earlier review in one line, "
+                    "fixed: how / disputed: why; `request` quotes the owner's words this revision answers. "
+                    "The plan format: " + PLAN_FORMAT,
+     "inputSchema": _schema({"revision": {"type": "integer", "minimum": 1}, "plan": PLAN_SCHEMA,
+                             "response": {"type": "string"}, "request": {"type": "string"}},
                             ["revision", "plan"])},
-    {"name": "zplan_revise_plan",
-     "description": "Ask the live Controller for a new plan revision from written `feedback` (name the findings of "
-                    "a rejected check from zplan_status `plan.findings`). The Controller refuses when `revision` is "
-                    "not current or `feedback` is empty; otherwise the planner revises the plan from it, and the "
-                    "new revision's approval is a separate, gated action (zplan_approve_plan).",
-     "inputSchema": _schema({"revision": {"type": "integer", "minimum": 1}, "feedback": {"type": "string"}},
-                            ["revision", "feedback"])},
     {"name": "zplan_merge",
      "description": "Ask the live Controller to merge the attempt named by its status row's token into the "
                     "milestone's destination. The Controller re-checks freshness and the autonomy policy: it may "
@@ -114,12 +149,24 @@ TOOLS = [
                     "answer under `commit`.",
      "inputSchema": _schema({"paths": {"type": "array", "items": {"type": "string"}, "minItems": 1},
                              "message": {"type": "string"}}, ["paths", "message"])},
+    {"name": "zplan_settings",
+     "description": "Ask the live Controller to change the process profile, only in a turn the owner started (their "
+                    "message asks for the change): `level`, `max_runs` (parallel runs), `merge` (the merge gate) and "
+                    "`roles` ({name: {model, effort}}), at least one, exactly what the owner asked. Events turns are "
+                    "refused. The change waits for the owner's yes on a card: the call answers awaiting_owner and "
+                    "nothing changes until he answers. A profile in the project's own file is refused with the proposed change. Running "
+                    "attempts keep their profile: the change applies to what starts next.",
+     "inputSchema": _schema({"level": {"type": "string"}, "max_runs": {"type": "integer"}, "merge": {"type": "string"},
+                             "roles": {"type": "object",
+                                       "additionalProperties": _schema({"model": {"type": "string"},
+                                                                        "effort": {"type": "string"}})}})},
 ]
 
 # The tools that act through the live Controller: their whole call travels over the socket, and every result, error
 # and timeout names the bridge request id so the architect can follow it in `zplan_status`.
 ACTION_TOOLS = ("zplan_status", "zplan_start", "zplan_stop", "zplan_approve_plan", "zplan_resume",
-                "zplan_rebrief", "zplan_edit_plan", "zplan_revise_plan", "zplan_merge", "zplan_propose_commit")
+                "zplan_rebrief", "zplan_plan", "zplan_edit_plan", "zplan_merge",
+                "zplan_propose_commit", "zplan_settings")
 CLIENT_TIMEOUT = bridge.CLIENT_TIMEOUT  # the socket client waits past the server's own action bound
 
 
@@ -176,14 +223,19 @@ def _bounded(error):
     return text[:256] + ("…" if len(text) > 256 else "")
 
 
-def _action(controller, name, arguments):
+def _action(controller, name, arguments, turn=None):
     """(payload, is_error) of one action tool call: the payload always names the bridge request id it used.
+    `turn` is the owner-turn token this server was started with (`--turn`): the envelope carries it, never the
+    model's arguments.
 
     The id is this process's own; it travels to the Controller and back, and `zplan_status` later reports the same
     id with its state, so a timeout is not the end of the request."""
     rid = uuid.uuid4().hex
     try:
-        reply = bridge.call(controller, {"id": rid, "tool": name, "args": arguments}, timeout=CLIENT_TIMEOUT)
+        request = {"id": rid, "tool": name, "args": arguments}
+        if turn:
+            request["turn"] = turn
+        reply = bridge.call(controller, request, timeout=CLIENT_TIMEOUT)
     except Blocked as error:
         return {"id": rid, "tool": name, "error": {"family": catalog.family(error), "message": _bounded(error)}}, True
     except (OSError, ValueError) as error:
@@ -196,7 +248,7 @@ def _action(controller, name, arguments):
     return {"id": ident, "tool": name, "ok": reply.get("ok")}, False
 
 
-def handle(project, message, controller=None):
+def handle(project, message, controller=None, turn=None):
     """(result, error) of one request object; error is a (code, text) pair."""
     method, params = message.get("method"), message.get("params")
     params = params if isinstance(params, dict) else {}
@@ -214,7 +266,7 @@ def handle(project, message, controller=None):
             return None, (INVALID_PARAMS, "tools/call needs a tool name and an arguments object.")
         try:
             if params["name"] in ACTION_TOOLS:
-                payload, broken = _action(controller, params["name"], arguments)
+                payload, broken = _action(controller, params["name"], arguments, turn)
                 return _tool_result(json.dumps(payload, ensure_ascii=False), error=broken), None
             value = _call(project, params["name"], arguments)
             return _tool_result(value if isinstance(value, str) else json.dumps(value)), None
@@ -258,12 +310,12 @@ def _is_action(message):
             and params.get("name") in ACTION_TOOLS)
 
 
-def serve(project, stdin, stdout, controller=None):
+def serve(project, stdin, stdout, controller=None, turn=None):
     out_lock = threading.Lock()  # the action threads and the read loop share one stdout
 
     def dispatch(message):
         try:
-            result, error = handle(project, message, controller)
+            result, error = handle(project, message, controller, turn)
         except Exception as exc:  # the loop must go on whatever one call did
             result, error = None, (INTERNAL_ERROR, "Internal error: %s" % type(exc).__name__)
         with out_lock:  # whole lines, never interleaved
@@ -299,15 +351,20 @@ def serve(project, stdin, stdout, controller=None):
 
 
 def main(argv):
-    usage = "usage: architect_tools --project ABS_DIR [--controller SOCKET]\n"
-    if len(argv) not in (2, 4) or argv[0] != "--project" or not os.path.isabs(argv[1]) or not os.path.isdir(argv[1]):
+    usage = "usage: architect_tools --project ABS_DIR [--controller SOCKET [--turn TOKEN]]\n"
+    if len(argv) not in (2, 4, 6) or argv[0] != "--project" or not os.path.isabs(argv[1]) or not os.path.isdir(argv[1]):
         sys.stderr.write(usage)
         return 2
-    controller = None
-    if len(argv) == 4:
+    controller = turn = None
+    if len(argv) >= 4:
         if argv[2] != "--controller" or not os.path.isabs(argv[3]):
             sys.stderr.write(usage)
             return 2
         controller = argv[3]
-    serve(argv[1], sys.stdin.buffer, sys.stdout.buffer, controller)
+    if len(argv) == 6:
+        if argv[4] != "--turn" or not argv[5]:
+            sys.stderr.write(usage)
+            return 2
+        turn = argv[5]
+    serve(argv[1], sys.stdin.buffer, sys.stdout.buffer, controller, turn)
     return 0

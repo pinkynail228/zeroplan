@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1077,6 +1078,14 @@ class NativeTests(ProjectTest):
                     self.assertEqual(authority.current, saved)
                 self.assertEqual(len(calls), 2)
 
+    def test_a_finished_status_may_carry_a_delivery_receipt(self):
+        """P1: Zeroshot 11 adds an optional `metadata.deliveryReceipt` to a finished status; any other unknown
+        metadata key is still refused (test_malformed_observations_block_without_guessed_outcomes)."""
+        value = self.terminal()
+        value["status"]["metadata"] = {"tokenUsage": {"inputTokens": 1, "outputTokens": 2, "complete": True},
+                                       "deliveryReceipt": {"status": "none"}}
+        self.assertEqual(validate_projection(value, "fixture-native-run")["phase"], "finished")
+
     def test_malformed_observations_block_without_guessed_outcomes(self):
         """Interpretation: the engine has four branches for a malformed observation -- a line that does not decode, a
         non-record (only `validate_projection` stops it from being used), and a record `validate_projection` refuses
@@ -1714,7 +1723,7 @@ class TerminalTests(ProjectTest):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--version"], cwd=ROOT,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "zplan 0.9.0")
+        self.assertEqual(result.stdout.strip(), "zplan 0.11.0")
 
     def test_fixture_cli_journey(self):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--project", str(self.project),
@@ -1775,6 +1784,17 @@ class TerminalTests(ProjectTest):
         return b"".join(chunks).decode(errors="replace")
 
     def test_real_pty_ctrl_c_detaches_status_shows_running_and_w_reattaches(self):
+        self.pty_ctrl_c_journey()
+
+    def test_real_pty_ctrl_c_with_parent_ignoring_sigint(self):
+        # Non-interactive shells can launch background test runners with SIGINT ignored.
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            self.pty_ctrl_c_journey()
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def pty_ctrl_c_journey(self):
         import fcntl
         import termios
 
@@ -1782,6 +1802,9 @@ class TerminalTests(ProjectTest):
             # Ctrl-C must travel the real path: the PTY line discipline signals the foreground process group.
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            # A background launcher may ignore SIGINT; exec preserves SIG_IGN, and Popen's
+            # restore_signals does not reset it. Give this interactive child normal Ctrl-C semantics.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
 
         command = [sys.executable, "-m", "terminal_planner", "--plain", "--project", str(self.project),
                    "--state-dir", str(self.state), "--fixture", "test"]
@@ -1789,7 +1812,13 @@ class TerminalTests(ProjectTest):
         process = subprocess.Popen(command, cwd=ROOT, stdin=slave, stdout=slave, stderr=slave, preexec_fn=controlling_terminal)
         os.close(slave)
         self.addCleanup(os.close, master)
-        self.addCleanup(lambda: process.kill() if process.poll() is None else None)
+
+        def reap():
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+
+        self.addCleanup(reap)
         chunks = []
         for typed, marker in (("l\np\nGoal from PTY\n\ng\na\n", "Next: [g] start M1"), ("g\n", "Start M1?"),
                               ("y\n", "T1 · implementation")):
@@ -1797,7 +1826,12 @@ class TerminalTests(ProjectTest):
             self.assertIn(marker, self.read_pty(master, process, marker, 20, chunks))
         os.write(master, b"\x03")
         output = self.read_pty(master, process, None, 20, chunks)
-        self.assertEqual(process.wait(timeout=5), 0)
+        try:
+            code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.fail("CLI did not exit after PTY Ctrl-C: pid=%s, pgid=%s, foreground=%s\nPTY output:\n%s"
+                      % (process.pid, os.getpgid(process.pid), os.tcgetpgrp(master), output))
+        self.assertEqual(code, 0, output)
         self.assertIn("Detached; the run continues. Come back with: zplan", output)
         status = subprocess.run(command[:3] + ["status"] + command[3:], cwd=ROOT, stdin=subprocess.DEVNULL,
                                 capture_output=True, text=True, timeout=30)

@@ -6,8 +6,8 @@ and the display helpers); only C4 drives the whole app, at 80x24.
 Interpretations (the worker's summary never reaches the reviewers, so they are recorded here):
 
 - C1: "draft wins only when nothing else is active" is read as: running, error, question, merge and planning
-  rank ahead of `draft`; `plan_ready` and the plan screen's own failed planning run (`run_failed`, the card's
-  `/plan` retry — pinned by test_tui_draft_card) stay behind it (the i3a rule is kept for those two).
+  rank ahead of `draft`; `plan_ready` and the plan screen's own failed planning run (`run_failed`, the sendable
+  draft's `/plan` retry — pinned by test_tui_draft_card) stay behind it (the i3a rule is kept for those two).
 - C2: "the slash state stays error" — the milestone row state `stopped` is still an `error` row for `slash_state`;
   the bar job is `stopped` (`bar.stopped_owner`, «M1 stopped by you» — without the `/status` hint the error text
   carries), the canvas title and the card title read as a stop too. The card reason comes from `Delivery.reason`,

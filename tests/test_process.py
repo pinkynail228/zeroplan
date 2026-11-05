@@ -102,15 +102,14 @@ class ProfileTest(tp.ProjectTest):
             authority.approve(1)
 
     def accept_file(self, document=None):
-        """An accepted profile *file* (the owner's own document, or the proposal) through a production-mode Profile.
+        """An accepted profile *file* (the owner's own document, or the proposal as the owner's file) through a
+        production-mode Profile.
 
-        It is deliberately a production-mode Profile over the store: a fixture session keeps its accepted snapshot
-        in the fixture state and never writes `zplan.process.json` (R-3), so a test that wants the file writes it
-        the way a production accept does. Any fixture record is dropped first, so the store ends up holding a
-        native `accepted` record (no snapshot) beside the file — the state of a project whose real, committed
-        `zplan.process.json` is its source."""
-        if document is not None:
-            self.write(document)
+        `accept` never writes `zplan.process.json` (v4a), so a test that wants the file writes it as the owner does.
+        Any earlier record is dropped first, so the store ends up holding a native `accepted` record (no snapshot)
+        beside the file: the state of a project whose own `zplan.process.json` is its source."""
+        if document is not None or not self.file.exists():
+            self.write(process.propose(self.project, {}) if document is None else document)
         with RealAuthority(self.state, self.project, fixture_id="test") as authority:
             (authority.directory / process.STATE_FILE).unlink(missing_ok=True)
             Profile(self.project, authority.directory, authority).accept()
@@ -760,69 +759,95 @@ class RiskPresetTests(ProfileTest):
         self.assertEqual(process.risk_of(status.resolved.config, ["src/a.py"])["tier"], "low")
 
 
-class ProfileCommitTests(ProfileTest):
-    """O2b C2: accepting the proposal that writes `zplan.process.json` also commits that file alone.
+class ProfileSnapshotTests(ProfileTest):
+    """v4a: accepting or changing the process profile keeps a snapshot in zplan's own state; the project's
+    `zplan.process.json` is never written or committed, and a file the owner writes is the source.
 
     Worker interpretations (the reviewers never see the worker's summary):
 
-    - The commit is `git add -- zplan.process.json` then `git commit -m "zplan profile" -- zplan.process.json`: a new
-      file is untracked, and `commit -- <path>` alone would not find it. Other changes, staged or not, stay as they were.
-    - A failed commit (here a pre-commit hook that refuses) is not an error of the accept: the file and the accepted
-      record stay, `Status.notice` names the command, and the readiness «clean» item is the profile item as before.
-    - The commit is part of `Profile.accept`, which the line UI and the full-screen modal both call (neither
-      caller is in this task's write-set); the line UI therefore commits too and still prints its old advice line.
-    - The base class keeps the profile file in `info/exclude` to keep the tree clean; this class lifts that, as a real
-      project has the file visible.
+    - A native (non-fixture) session is modelled by a production-mode `Profile` over the fixture store, as
+      `accept_file` does.
+    - "The attempt keeps its frozen digest" is read at a frozen plan revision (the freeze an attempt reads too);
+      `revise` never touches a stored revision, and the next one freezes the new digest.
+    - The refusal names the key and the proposed value as JSON (`max_runs` to `2`).
+    - The base class keeps the profile file in `info/exclude`; this class lifts that, as a real project has the file
+      visible, so a written file would show in `git status`.
     """
 
     def setUp(self):
         super().setUp()
         (self.project / ".git" / "info" / "exclude").write_text("", encoding="utf-8")
 
-    def accept(self, fixture=False):
-        """A production-mode accept over the fixture store (as `accept_file`), or the fixture session's own."""
+    def production(self, authority):
+        return Profile(self.project, authority.directory, authority)
+
+    def accept(self, changes=None):
         with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            if fixture:
-                return Profile.of(authority).accept()
-            return Profile(self.project, authority.directory, authority).accept()
+            return self.production(authority).accept(changes)
 
-    def head(self):
-        return self.git("log", "-1", "--format=%s").decode().strip(), self.git("show", "--name-only", "--format=", "HEAD").decode().split()
+    def revise(self, changes):
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            return self.production(authority).revise(changes)
 
-    def test_accept_commits_the_file_alone_and_leaves_other_changes_as_they_are(self):
-        (self.project / "notes.txt").write_text("draft\n")
-        (self.project / "source.txt").write_text("changed\n")
-        self.git("add", "source.txt")
-        before = self.git("rev-parse", "HEAD")
+    def test_a1_a2_accept_and_revise_keep_a_snapshot_and_touch_neither_the_tree_nor_head(self):
+        """A1 a fresh repo: accept -> accepted, no file, no new commit, a reopen resolves the same digest. A2
+        revise {"level": "manual"} -> level manual, a new digest, the tree and HEAD unchanged."""
+        head, tree = self.git("rev-parse", "HEAD"), self.git("status", "--porcelain")
         status = self.accept()
-        self.assertEqual(status.state, "accepted")
-        self.assertEqual(status.notice, "")
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
-        self.assertEqual(self.git("rev-parse", "HEAD~1"), before)
-        self.assertEqual(self.git("status", "--porcelain").decode().splitlines(), ["M  source.txt", "?? notes.txt"])
-        self.git("reset", "-q", "--hard")
-        self.assertTrue(self.file.is_file())
-
-    def test_accept_in_a_clean_repo_leaves_it_clean(self):
-        self.accept()
-        self.assertEqual(self.head()[0], "zplan profile")
-        self.assertEqual(self.git("status", "--porcelain"), b"")
+        self.assertEqual((status.state, status.present, status.notice), ("accepted", False, ""))
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.peek().status().digest, status.digest)  # a reopen
+        self.assertEqual(autonomy.level(self.peek()), "auto")
+        revised = self.revise({"level": "manual"})
+        self.assertEqual(autonomy.level(self.peek()), "manual")
+        self.assertNotEqual(revised.digest, status.digest)
+        self.assertEqual(self.peek().status().digest, revised.digest)
+        self.assertFalse(self.file.exists())
+        self.assertEqual((self.git("rev-parse", "HEAD"), self.git("status", "--porcelain")), (head, tree))
         self.assertTrue(all(i["ok"] for i in setup.check_target(self.project)))
+        with self.assertRaises(Blocked) as raised:  # a refused value changes nothing
+            self.revise({"level": "bogus"})
+        self.assertEqual(raised.exception.family, "process.invalid")
+        self.assertEqual(self.peek().status().digest, revised.digest)
 
-    def test_a_failed_commit_keeps_the_file_the_accept_and_the_readiness_item_and_names_the_command(self):
-        hook = self.project / ".git" / "hooks" / "pre-commit"
-        hook.parent.mkdir(exist_ok=True)
-        hook.write_text("#!/bin/sh\nexit 1\n")
-        hook.chmod(0o755)
-        before = self.git("rev-parse", "HEAD")
-        status = self.accept()
-        self.assertEqual(status.state, "accepted")
-        self.assertIn('git add %s && git commit -m "zplan profile" -- %s' % ((process.PROFILE_FILE,) * 2), status.notice)
-        self.assertTrue(self.file.is_file())
-        self.assertEqual(self.git("rev-parse", "HEAD"), before)
-        clean = next(i for i in setup.check_target(self.project) if i["id"] == "clean")
-        self.assertTrue(clean["ok"])  # D4a: informational, never a block; the uncommitted profile is named
-        self.assertIn(process.PROFILE_FILE, clean["line"])
+    def test_a3_the_owners_file_is_the_source_and_a_revise_is_refused_naming_the_change(self):
+        document = {"roles": {"worker": WORKER}}
+        self.accept_file(document)
+        before, head = self.file.read_bytes(), self.git("rev-parse", "HEAD")
+        digest = self.peek().status().digest
+        with self.assertRaises(Blocked) as raised:
+            self.revise({"max_runs": 2})
+        self.assertEqual(raised.exception.family, "action.refused")
+        self.assertIn(process.PROFILE_FILE, str(raised.exception))
+        self.assertIn("set max_runs to 2", str(raised.exception))
+        self.assertEqual(self.file.read_bytes(), before)
+        self.assertEqual((self.git("rev-parse", "HEAD"), self.peek().status().digest), (head, digest))
+        # a file that appears over a snapshot becomes the source: the same refusal
+        self.file.unlink()
+        self.sidecar().unlink()
+        self.accept()
+        self.write(document)
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            self.assertEqual(self.production(authority).status().present, True)
+            with self.assertRaisesRegex(Blocked, "set max_runs to 2"):
+                self.production(authority).revise({"max_runs": 2})
+        self.assertEqual(json.loads(self.file.read_text(encoding="utf-8")), document)
+
+    def test_a4_a_revise_leaves_the_frozen_revision_as_it_was(self):
+        self.accept()
+        with self.app() as app:
+            app.planning.begin("First goal", app.roles)
+            frozen = app.authority.state["revisions"][0]["frozen"]["config_digest"]
+            planner = app.authority.state["revisions"][0]["roles"]["planner"]
+            self.assertEqual(frozen, app.profile.status().digest)
+            changed = app.profile.revise({"level": "manual", "roles": {"planner": WORKER}})
+            self.assertNotEqual(changed.digest, frozen)
+            self.assertEqual(app.authority.state["revisions"][0]["frozen"]["config_digest"], frozen)
+            self.assertEqual(app.authority.state["revisions"][0]["roles"]["planner"], planner)
+            app.planning.begin("Second goal", ROLES)
+            self.assertEqual(app.authority.state["revisions"][-1]["frozen"]["config_digest"], changed.digest)
+            self.assertEqual(app.authority.state["revisions"][-1]["roles"]["planner"], WORKER)
+            self.assertEqual(app.authority.state["revisions"][0]["frozen"]["config_digest"], frozen)
 
     def test_an_existing_file_commits_nothing(self):
         before = self.git("rev-parse", "HEAD")
@@ -830,95 +855,6 @@ class ProfileCommitTests(ProfileTest):
         self.accept()
         self.assertEqual(self.git("rev-parse", "HEAD"), before)
         self.assertEqual(self.git("status", "--porcelain").decode().split(), ["??", process.PROFILE_FILE])
-
-    def test_a_fixture_session_commits_nothing(self):
-        before = self.git("rev-parse", "HEAD")
-        self.accept(fixture=True)
-        self.assertEqual(self.git("rev-parse", "HEAD"), before)
-        self.assertFalse(self.file.exists())
-
-    def test_the_modal_text_says_the_file_is_committed(self):
-        lines = process.bootstrap_lines(process.Status("never", process.resolve(process.propose(self.project, {}), {},
-                                                                              self.project), False))
-        text = "\n".join(lines)
-        self.assertIn("zplan profile", text)
-        self.assertNotIn("commit it", text)
-
-
-class CreateWithoutLinkTests(ProfileTest):
-    """P1: the profile file is published with a hard link, or, on a drive without links (exFAT, ENOTSUP), with
-    `renamex_np(RENAME_EXCL)` and then a rename after the name was seen absent; never over an existing file.
-
-    Worker interpretations (the reviewers never see the worker's summary):
-
-    - Other OS errors (ENOSPC, EACCES, a failed temp write) raise `Blocked` in the existing `store.write_failed` family,
-      the message naming the file and the error's strerror; the temp is removed.
-    - A fake link failure stands for exFAT; the real `renamex_np` runs where the platform has it, else it is unavailable.
-    """
-
-    def create(self, text="new\n"):
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            Profile(self.project, authority.directory, authority)._create(text)
-
-    def no_link(self, code=errno.ENOTSUP):
-        return patch("os.link", side_effect=OSError(code, os.strerror(code)))
-
-    def temps(self):
-        return list(self.project.glob(".zplan-process-*"))
-
-    def test_without_hard_links_the_file_is_published_by_exclusive_rename_or_plain_rename(self):
-        for unavailable in (None, False):  # the real call (macOS: works) / unavailable (renamed after the check)
-            for code in (errno.ENOTSUP, errno.EOPNOTSUPP):
-                with self.subTest(unavailable=unavailable, code=code):
-                    patched = patch.object(process, "_rename_excl", return_value=False) if unavailable is False \
-                        else contextlib.nullcontext()
-                    with self.no_link(code), patched:
-                        self.create()
-                    self.assertEqual(self.file.read_text(encoding="utf-8"), "new\n")
-                    self.assertEqual(self.temps(), [])
-                    self.file.unlink()
-
-    def test_an_existing_file_is_never_overwritten_on_any_path(self):
-        self.file.write_text("mine\n", encoding="utf-8")
-        paths = [(patch("os.link"), contextlib.nullcontext()),  # the link refuses (EEXIST)
-                 (self.no_link(), patch.object(process, "_rename_excl", side_effect=FileExistsError)),
-                 (self.no_link(), contextlib.nullcontext()),  # the real exclusive rename
-                 (self.no_link(), patch.object(process, "_rename_excl", return_value=False))]  # name seen present
-        for index, (first, second) in enumerate(paths):
-            with self.subTest(path=index), first as link, second, patch("os.rename") as rename:
-                if index == 0:
-                    link.side_effect = FileExistsError
-                with self.assertRaisesRegex(Blocked, "already exists; it is not overwritten") as raised:
-                    self.create()
-                rename.assert_not_called()
-                self.assertEqual(raised.exception.family, "action.refused")
-                self.assertEqual(self.file.read_text(encoding="utf-8"), "mine\n")
-                self.assertEqual(self.temps(), [])
-
-    def test_other_os_errors_are_plain_blocked_refusals_and_leave_no_temp(self):
-        for code in (errno.ENOSPC, errno.EACCES):
-            with self.subTest(code=code), self.no_link(code):
-                with self.assertRaises(Blocked) as raised:
-                    self.create()
-                self.assertIn(process.PROFILE_FILE, str(raised.exception))
-                self.assertIn(os.strerror(code), str(raised.exception))
-                self.assertEqual(raised.exception.family, "store.write_failed")
-                self.assertFalse(self.file.exists())
-                self.assertEqual(self.temps(), [])
-        with patch("os.fsync", side_effect=OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))):
-            with self.assertRaisesRegex(Blocked, "No space left"):
-                self.create()
-        self.assertEqual(self.temps(), [])
-
-    def test_where_links_work_the_file_is_published_by_one_link_and_no_rename(self):
-        with patch("os.link", wraps=os.link) as link, patch("os.rename") as rename, \
-                patch.object(process, "_rename_excl") as exclusive:
-            self.create()
-        link.assert_called_once()
-        rename.assert_not_called()
-        exclusive.assert_not_called()
-        self.assertEqual(self.file.read_text(encoding="utf-8"), "new\n")
-        self.assertEqual(self.temps(), [])
 
 
 class GlobMatchTests(unittest.TestCase):
@@ -1141,52 +1077,6 @@ class StateTests(ProfileTest):
                 "state": "later", "digest": record["digest"], "snapshot": record["snapshot"]}))
             self.assertEqual(profile.status().state, "later")
             self.assertEqual(later.digest, profile.status().digest)
-
-    def crash_in(self, name, failing):
-        """Run the real accept() in a session where the `name` step raises when `failing(*args)`: returns after the
-        'crash' (the session is closed, its lock released)."""
-        real = getattr(Profile, name)
-
-        def crashing(profile, *args):
-            if failing(*args):
-                raise OSError("simulated crash in " + name)
-            return real(profile, *args)
-        with patch.object(Profile, name, crashing):
-            with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-                with self.assertRaises(OSError):
-                    # the crash recovery under test is the file-writing production accept, not the fixture one (R-3)
-                    Profile(self.project, authority.directory, authority).accept()
-
-    def test_crash_after_the_file_was_created_is_finished_at_the_next_start(self):
-        self.crash_in("_write", lambda record: record["state"] == "accepted")
-        self.assertTrue(self.file.exists())
-        directory = self.sidecar().parent
-        self.assertEqual(process.read_record(directory)["state"], "accepting")  # the intent is all the sidecar has
-        self.assertEqual(self.peek().status().state, "accepted")  # a reader without the lock sees the file as accepted
-        self.assertEqual(process.read_record(directory)["state"], "accepting")  # and writes nothing
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            self.assertEqual(Profile.of(authority).status().state, "accepted")
-            self.assertEqual(process.read_record(authority.directory)["state"], "accepted")
-            Profile.of(authority).guard("plan")
-        self.assertEqual(self.peek().status().state, "accepted")
-
-    def test_crash_before_the_file_was_created_returns_to_what_it_was(self):
-        self.crash_in("_create", lambda text: True)
-        self.assertFalse(self.file.exists())
-        self.assertEqual(process.read_record(self.sidecar().parent)["state"], "accepting")
-        self.assertEqual(self.peek().status().state, "never")
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            self.assertEqual(Profile.of(authority).status().state, "never")
-            self.assertFalse((authority.directory / process.STATE_FILE).exists())
-
-    def test_crash_before_the_file_after_later_returns_to_later(self):
-        later = self.defer()
-        self.crash_in("_create", lambda text: True)
-        self.assertEqual(process.read_record(self.sidecar().parent)["state"], "accepting")
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            status = Profile.of(authority).status()
-            self.assertEqual((status.state, status.digest), ("later", later.digest))
-            self.assertEqual(process.read_record(authority.directory)["state"], "later")
 
     def test_profile_init_while_another_session_holds_the_lock_is_refused_quickly_and_writes_nothing(self):
         with RealAuthority(self.state, self.project, fixture_id="test") as authority:
@@ -1417,7 +1307,7 @@ class GuardTests(ProfileTest):
         self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
         self.write({"gates": {"merge": "off"}})
         with self.app() as app:
-            self.assertEqual(app.delivery.merge(app.delivery.latest("M1")).kind, "integrated")
+            self.assertEqual(app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True).kind, "integrated")
 
     def test_profile_changed_between_preview_and_confirm_is_refused_and_shown_again(self):
         self.accept_file({"roles": {"worker": WORKER}})
@@ -1999,8 +1889,6 @@ class GateTuiTests(ProfileTest, tt.ShellTest):
             await self.command(pilot, "/attempt")
             await self.run_button(pilot, "merge")
             await self.press_button(pilot, "merge")
-            await self.until(pilot, lambda: "Merge the result of M1 into main?" in screen_text(self.app))
-            await self.press_button(pilot, "yes")
             await self.refusal(pilot, family, text)
             self.assertNotIn("Merged:", screen_text(self.app))
         self.assertEqual((self.head(), self.stored()), (head, state))

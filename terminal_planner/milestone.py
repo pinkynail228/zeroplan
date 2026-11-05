@@ -12,8 +12,8 @@ import copy
 from pathlib import Path
 import sys
 
-from .authority import MAX_MILESTONE_TASKS, Blocked, brief_problem, canonical, decode, validate_proposal
-from .engine import record, state_binding
+from .authority import MAX_MILESTONE_TASKS, TASK_ROUNDS_MAX, Blocked, brief_problem, canonical, decode, validate_proposal
+from .engine import memory_off, record, state_binding
 
 
 MAX_INITIAL_TASKS = MAX_MILESTONE_TASKS
@@ -35,7 +35,13 @@ REVIEW_BAR = ("A review rejects only when a check or the title of input.task fai
 VERIFY_RULE = ("Verify the change the project's own way and in proportion to it: in a project with a test setup, a "
                "behaviour change (a new feature included) that existing tests do not cover gets a relevant test (extend an "
                "existing test first), and a test the task asks for (a project's first included) is written; a change "
-               "to docs, copy or config files alone gets no new test, only the project's existing checks.")
+               "to docs, copy or config files alone gets no new test, only the project's existing checks. A test is "
+               "the smallest one that proves its criterion.")
+# Workers never commit; zplan records the candidate after the final check. A brief sentence such as "nothing is left
+# uncommitted, the files are in Git" is a fact from planning, so no verifier may turn it into a completion rule (diagnostic run
+# 2026-11-05: three repairs could not satisfy it).
+UNCOMMITTED = ("The workspace changes stay uncommitted by design (zplan records them after the milestone passes): never "
+               "require a commit, a checkout without local changes or tracked files.")
 MANIFEST = ".zplan/milestone.json"
 BASELINE = ".zplan/baseline.json"
 BEFORE = ".zplan/milestone.before.json"
@@ -72,6 +78,14 @@ def text(value, limit=8192):
 def outer_iterations(initial_tasks):
     """Every task may need a work pass and a steward re-plan; +2 covers the last decision."""
     return 2 * (initial_tasks + MAX_ADDITIONS) + 2
+
+
+BOUNDS = ("taskLoopBound", "reviewLoopBound")  # input fields: each run's loop bounds (the graph holds only ceilings)
+REVIEW_LOOP_CEILING = 1 + TASK_ROUNDS_MAX
+
+
+def task_loop_ceiling():
+    return outer_iterations(MAX_INITIAL_TASKS)
 
 
 def review_iterations(task_rounds):
@@ -310,6 +324,8 @@ def milestone_state():
         else:
             values = ["pending", "accepted", "rejected"] + (["conflict"] if name in REVIEW_VERDICTS else [])
         state["fields"][name] = {"type": {"kind": "enum", "values": values}, "required": True}
+    for name in BOUNDS:
+        state["fields"][name] = {"type": {"kind": "integer"}, "required": True}
     for name in OUTCOMES:
         # Graph bindings have no literals; outcome labels come from validated input constants.
         state["fields"][name] = {"type": {"kind": "enum", "values": list(SIGNALS)}, "required": True}
@@ -330,12 +346,10 @@ def instructions(body, tool=TOOL):
     return "%s\n%s" % (commands, body)
 
 
-def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
-    """Driver graph for one milestone; bounds are fixed when the graph is built. `rounds` is the review loop's
-    bound: `1 + the frozen limits.task_rounds` of the plan revision's process profile, or `TASK_ITERATIONS` when
-    the milestone has no frozen profile (see `review_iterations`)."""
-    if not 0 <= initial_tasks <= MAX_INITIAL_TASKS:
-        raise Blocked("A milestone may start with at most %s tasks." % MAX_INITIAL_TASKS, family="milestone.too_many_tasks")
+def milestone_graph(tool=TOOL):
+    """The driver graph, one document for every milestone (a fixed Zeroshot profile). Its loops carry the ceilings of
+    the largest milestone as `maxIterations` and read each run's bound from the input (`maxIterationsInput`:
+    `taskLoopBound`, `reviewLoopBound`, set by `milestone_input`), so no task count or round count shapes the graph."""
     state = milestone_state()
 
     def guard(name, source, labels, field=None):
@@ -406,7 +420,7 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
             "hold; verdict=rejected with actionable findings in diagnostic.message only for a defect you saw; "
             "verdict=incomplete when a required check could not run to the end (a missing tool, a "
             "timeout, evidence you could not gather), naming that check in diagnostic.message. A non-empty "
-            "finalFindings holds the previous verdict's findings.")
+            "finalFindings holds the previous verdict's findings. " + UNCOMMITTED)
         # The milestone's own final reviewers re-run the milestone checks, so they get the worker's budget; both
         # the normal and the no-open-task ("empty_" prefix) stage do (a resumed attempt with every task done takes
         # just as long).
@@ -434,8 +448,10 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
             final_inputs, writes=[write("repairReport", n("repair"), "out", "report")], timeout=WORKER_TIMEOUT)
         scope = verifier(n("scope_verify"), read_only + (
             "Check that the last repair (repairReport and the workspace diff) stayed inside the frozen milestone scope: "
-            "the validation command passes, nothing under .zplan/ changed, and every change serves a frozen requirement "
-            "or check. verdict=accepted or rejected with findings in diagnostic.message."),
+            "the validation command passes and every change to a product file serves a frozen requirement or check. "
+            ".zplan/ is zplan's: its manifest already records the task's result, so it differs from the select "
+            "snapshot by design; never judge it. " + UNCOMMITTED + " verdict=accepted or rejected with findings in "
+            "diagnostic.message."),
             context + ["finalFindings", "repairReport"], "verdict", ["accepted", "rejected"], "scopeVerdict", "scopeFindings")
         repair_loop = {"kind": "loop", "name": n("repair_loop"), "state": state,
                        "body": seq(n("repair_iteration"), [repair, guarded(n("repair"), seq(n("verify_stage"), [
@@ -523,7 +539,8 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
                                                        {"kind": "all", "guards": [
                        guard("acceptance_review", "signal", ["accepted"], "verdict"),
                        guard("code_review", "signal", ["accepted"], "verdict")]}]},
-                   "maxIterations": rounds, "promotedStatePaths": [[p] for p in TASK_STATE]}
+                   "maxIterations": REVIEW_LOOP_CEILING, "maxIterationsInput": ["reviewLoopBound"],
+                   "promotedStatePaths": [[p] for p in TASK_STATE]}
     steward_apply = executable("step", "steward_apply", (
         "Record the result of input.task in the manifest. You may change only: tasks[].status, tasks[].notes, "
         "tasks[].title (with a reword amendment), the order of tasks (with a reorder amendment), appended tasks "
@@ -570,7 +587,8 @@ def milestone_graph(initial_tasks, rounds=TASK_ITERATIONS, tool=TOOL):
     task_loop = {"kind": "loop", "name": "task_loop", "state": state, "body": iteration,
                  "until": {"kind": "any", "guards": [failed("steward_apply"), failed("steward_decide"),
                                                      guard("steward_decide", "signal", ["done", "needs_owner", "blocked"], "signal")]},
-                 "maxIterations": outer_iterations(initial_tasks), "promotedStatePaths": [[p] for p in DECISION_STATE]}
+                 "maxIterations": task_loop_ceiling(), "maxIterationsInput": ["taskLoopBound"],
+                 "promotedStatePaths": [[p] for p in DECISION_STATE]}
     decision = choice("task_result", [
         (failed("steward_apply"), fail("steward_apply_failed")),
         (failed("steward_decide"), fail("steward_decide_failed")),
@@ -597,13 +615,19 @@ def milestone_runtime(roles):
     """Map graph nodes to worker/reviewer/steward roles; reviewers always open fresh sessions."""
     scopes = {"worker": "node_instance", "reviewer": "execution", "steward": "execution"}
     return {"harness": "codex", "provider": "openai", "size": "medium", "nodes": {
-        name: {"kind": "agent", "sessionScope": scopes[role], **roles[role]} for name, role in ROLES.items()}}
+        name: {"kind": "agent", "sessionScope": scopes[role], **roles[role]} for name, role in ROLES.items()},
+        **memory_off()}
 
 
-def milestone_input(baseline, tool=TOOL):
+def milestone_input(baseline, tool=TOOL, rounds=TASK_ITERATIONS):
+    """The run input. `rounds` is the review loop's bound (`review_iterations`), within 1..REVIEW_LOOP_CEILING."""
     validate_baseline(baseline)
+    if type(rounds) is not int or not 1 <= rounds <= REVIEW_LOOP_CEILING:
+        raise Blocked("The review loop bound must be between 1 and %s, not %r." % (REVIEW_LOOP_CEILING, rounds),
+                      family="milestone.manifest_invalid")
     value = {name: "" for name in STATE_FIELDS}
     value.update({name: "pending" for name in VERDICTS}, **OUTCOMES)
+    value.update(taskLoopBound=outer_iterations(len(baseline["tasks"])), reviewLoopBound=rounds)
     value.update(schemaVersion="1", baseline=canonical(baseline), milestone=canonical({
         "plan_revision": baseline["plan_revision"], "id": baseline["milestone"]["id"], "title": baseline["milestone"]["title"],
         "manifest": MANIFEST, "baseline": BASELINE, "validate": "%s check %s --baseline %s" % (tool, MANIFEST, BASELINE)}))

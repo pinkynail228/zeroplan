@@ -336,7 +336,10 @@ class ShellTest(ProjectTest, unittest.IsolatedAsyncioTestCase):
         await pilot.pause()
         if on_pane and type(self.app.screen).__name__ == "MainScreen":
             await pilot.press("tab")
-            await self.until(pilot, lambda: getattr(self.app.focused, "id", None) == "plan-pane")
+            # A worker-backed command can push its modal during Tab. Focus belongs to that
+            # modal now; callers still assert the command's actual screen and content.
+            await self.until(pilot, lambda: type(self.app.screen).__name__ != "MainScreen"
+                             or getattr(self.app.focused, "id", None) == "plan-pane")
 
     async def panel(self, pilot):
         """D4: the main screen starts with the chat input focused, so a test that wants a plan-pane key asks for
@@ -536,15 +539,17 @@ class PanelTests(ShellTest):
             self.assertIn("[bold red]Hack[/]", text)
             self.assertNotIn("\x1b", text)
 
-    async def test_a_blocked_chat_refuses_the_message_and_keeps_the_text(self):
-        """Without an install under the temporary HOME the chat shows its catalog refusal; the text is not lost."""
+    async def test_a_blocked_chat_keeps_the_message_as_the_pending_goal(self):
+        """Without an install under the temporary HOME the chat shows its catalog refusal; v4b: the line is not lost,
+        it becomes the project's pending goal and the input clears."""
         async with self.shell() as pilot:
             await self.loaded(pilot)
             await self.chat_ready(pilot)
             await pilot.press(*"hello", "enter")  # the input has the start focus (D4): no Tab needed
             self.assertIn("zplan setup", screen_text(self.app))
             self.assertIn("setup.tools_invalid", screen_text(self.app))  # the narrow pane wraps the line
-            self.assertEqual(self.app.query_one("#input").value, "hello")  # text kept, nothing lost
+            self.assertEqual(self.app.query_one("#input").value, "")
+            self.assertEqual(self.app.chat.pending_goal()["text"], "hello")  # kept, nothing lost
 
 
 class ResponsivenessTests(ShellTest):
@@ -1084,7 +1089,6 @@ class ModalButtonTests(ShellTest):
             (modals.BootstrapScreen(profile), {"tui_bootstrap.accept", "tui_bootstrap.later"}),
             (modals.NoteScreen(), {"tui_note.send"}),
             (modals.NoteScreen(answer=True), {"tui_answer.send"}),
-            (modals.NoteScreen(answer=True, bar="tui_attempt"), {"tui_attempt.send"}),
         )
         async with self.shell() as pilot:
             await self.loaded(pilot)

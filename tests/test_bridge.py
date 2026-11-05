@@ -43,12 +43,14 @@ import sys
 import threading
 import time
 import unittest
+import uuid
 from unittest.mock import patch
 
-from terminal_planner import autonomy, bridge, delivery, milestone, process
+from terminal_planner import autonomy, bridge, delivery, feed, milestone, process
 from terminal_planner.authority import Blocked, decode
-from terminal_planner.engine import FixtureEngine
+from terminal_planner.engine import FixtureEngine, fixture_draft
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
+from terminal_planner.tui.controller import token_identity
 import test_terminal_planner as tp
 from test_terminal_planner import ROLES
 from test_parallel_runs import parallel_plan
@@ -56,6 +58,14 @@ from test_parallel_runs import parallel_plan
 ROOT = Path(__file__).resolve().parent.parent
 CODE = ("import sys; sys.path.insert(0, %s); from terminal_planner.architect_tools import main; "
         "sys.exit(main(sys.argv[1:]))" % json.dumps(str(ROOT)))
+
+
+def draft(title=None):
+    """The architect's plan: the fixture plan with a complete brief on every task (and a changed first title)."""
+    plan = fixture_draft()
+    if title is not None:
+        plan["milestones"][0]["title"] = title
+    return plan
 
 
 class BridgeCase(tp.ProjectTest):
@@ -85,13 +95,17 @@ class BridgeCase(tp.ProjectTest):
                 made.append(record)
             return made
 
-    def proposed(self, profile=False):
+    def proposed(self, profile=False, briefed=False):
         """The fixture plan left as a current `proposed` revision awaiting approval (no attempt): what the approve
-        tool acts on. `profile` as in `plan`."""
+        tool acts on. `profile` as in `plan`; `briefed` proposes the plan with a brief on every task, as an edit
+        needs it."""
         with tp.Authority(self.state, self.project) as authority:
             if profile:
                 authority.profile = process.Profile.of(authority)
-            self.begin(authority)
+            if briefed:
+                authority.begin("Requested feature", ROLES, "fixture", draft=fixture_draft())
+            else:
+                self.begin(authority)
             self.propose(authority)
 
     def two_revisions(self):
@@ -136,11 +150,13 @@ class BridgeCase(tp.ProjectTest):
         self.git("add", process.PROFILE_FILE)
         self.git("commit", "-qm", "process profile")
 
-    def write_profile(self, level="auto", merge="off", checks=None, tier=None):
+    def write_profile(self, level="auto", merge="off", checks=None, tier=None, max_runs=None):
         """An accepted `zplan.default/2` profile at `level` with `gates.merge`, optional frozen checks and optionally
         a risk rule that puts every path at `tier`, committed so the merge sees a clean, current project (the A5t2b
         merge tests)."""
         profile = {"preset": process.PRESET_V2, "autonomy": {"level": level}, "gates": {"merge": merge}}
+        if max_runs is not None:
+            profile["autonomy"]["max_runs"] = max_runs
         if checks is not None:
             profile["checks"] = checks
         if tier is not None:
@@ -204,8 +220,12 @@ class BridgeCase(tp.ProjectTest):
             controllers = self._started_controllers = []
         return controllers
 
-    def call(self, tool, args=None, rid="req"):
-        return bridge.call(bridge.path_for(self.project), {"id": rid, "tool": tool, "args": args or {}}, timeout=20)
+    def call(self, tool, args=None, rid=None, turn=None):
+        # Every fresh request, including a fresh status read, has a new durable operation id.
+        request = {"id": rid or uuid.uuid4().hex, "tool": tool, "args": args or {}}
+        if turn is not None:
+            request["turn"] = turn
+        return bridge.call(bridge.path_for(self.project), request, timeout=20)
 
     def entry(self, rid):
         status = self.call("zplan_status")["ok"]
@@ -381,8 +401,9 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual([t["name"] for t in tools],
                          ["zplan_list_files", "zplan_read_file", "zplan_search", "zplan_state", "zplan_state_update",
                           "zplan_status", "zplan_start",
-                          "zplan_stop", "zplan_approve_plan", "zplan_resume", "zplan_rebrief", "zplan_edit_plan",
-                          "zplan_revise_plan", "zplan_merge", "zplan_propose_commit"])
+                          "zplan_stop", "zplan_approve_plan", "zplan_resume", "zplan_rebrief", "zplan_plan",
+                          "zplan_edit_plan",
+                          "zplan_merge", "zplan_propose_commit", "zplan_settings"])
         status = json.loads(self._call(proc, "zplan_status", {})["result"]["content"][0]["text"])
         self.assertTrue(status["id"])
         self.assertIn("ok", status)
@@ -429,6 +450,127 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual(row["attempt"], 1)
         self.assertTrue(row["run_id"])
 
+    def test_v1a_a_stopped_row_carries_the_owners_reason_and_nothing_else_grows(self):
+        """v1a A1/A2: a blocked attempt's status row carries `reason` {heading, status, body, family} from the
+        owner's end view of its latest attempt (its body holds the engine's diagnostic), built without `end`
+        (nothing is exported); an awaiting_merge row and a running row carry no `reason`; a body of 40 long lines is
+        cut to 12 lines of at most 300 characters. Interpretation: the fixture's blocked diagnostic stands for the
+        final check's finding; `body` is the end view's lines joined by newlines."""
+        from terminal_planner.tui.controller import reason_fields
+        self.attempt("blocked")
+        self.controller()
+        with patch.object(delivery.Delivery, "end", side_effect=AssertionError("the status exports")):
+            row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        self.assertEqual(row["state"], "blocked")
+        self.assertEqual(set(row["reason"]), {"heading", "status", "body", "family"})
+        self.assertIn("Fixture driver: blocked", row["reason"]["body"])
+        self.assertEqual(row["reason"]["family"], "milestone.blocked")
+        view = delivery.EndView("blocked", None, "M1", "t", "heading", "status",
+                                tuple("%d " % n + "x" * 400 for n in range(40)), (), "milestone.blocked")
+        lines = reason_fields(view)["body"].split("\n")
+        self.assertEqual(len(lines), 12)
+        self.assertTrue(all(len(line) <= 300 for line in lines))
+
+    def test_v1a_an_awaiting_merge_row_has_no_reason(self):
+        """v1a A2: the awaiting_merge row keeps its merge fields and gets no `reason`."""
+        self.awaiting_merge()
+        self.controller()
+        row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        self.assertEqual(row["state"], "awaiting_merge")
+        self.assertNotIn("reason", row)
+        self.assertIn("merge", row)
+
+    def test_v1c_a_refused_merge_leaves_its_check_results_in_the_row_and_only_for_this_result(self):
+        """v1c A1/A2/A3/A4: after a merge refused for a failing check the awaiting_merge row carries `merge.gate_result`
+        {outcome "failed", checks [{name, status 1, tail}], critic None} with the failing line in the tail, cut to 12
+        lines, and `merge.tasks` {done, total}; reading the status again runs no check; a gate stored for another
+        result commit, or none, gives None; a stored critic gives {verdict, findings} cut to 12 lines of at most 300
+        characters; dropped tasks are not counted and an unavailable manifest gives None. Interpretation: a tail
+        keeps its last lines (its end is the failure), a critic's findings their first; the helpers are driven with
+        stored records and a fake app for the cases the fixture session cannot produce."""
+        from types import SimpleNamespace
+        from terminal_planner import checks
+        from terminal_planner.tui.controller import gate_result, tasks_count
+        script = "for i in $(seq 30); do echo noise-$i; done; echo FAILED test_x; exit 1"
+        self.awaiting_merge(checks=[{"name": "tests", "argv": ["sh", "-c", script], "timeout_s": 60}])
+        self.controller(profile=True)
+        row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        self.assertIsNone(row["merge"]["gate_result"])  # nothing was built yet, and the status builds nothing
+        self.assertEqual(set(row["merge"]["tasks"]), {"done", "total"})
+        reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="fail")
+        self.assertEqual(reply["ok"]["kind"], "refused", reply)
+        self.assertIn("merge.checks_failed", reply["ok"]["line"])
+        refused = self.call("zplan_status")["ok"]["results"][-1]  # v2b A3: a refused merge is a result, with its family
+        self.assertEqual((refused["operation"], refused["outcome"], refused["family"], refused["request"]),
+                         ("merge", "refused", "merge.checks_failed", "fail"))
+        with patch.object(checks, "qualify", side_effect=AssertionError("the status runs a check")):
+            row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        self.assertEqual(row["state"], "awaiting_merge")
+        result = row["merge"]["gate_result"]
+        self.assertEqual((result["outcome"], result["critic"], len(result["checks"])), ("failed", None, 1))
+        check = result["checks"][0]
+        self.assertEqual((set(check), check["name"], check["status"]), ({"name", "status", "tail"}, "tests", 1))
+        self.assertIn("FAILED test_x", check["tail"])
+        self.assertLessEqual(len(check["tail"].split("\n")), 12)
+        gate = {"result": "a" * 40, "critic": "merge-critic-1",
+                "evidence": {"outcome": "failed", "checks": [{"name": "t", "status": 1, "tail": "x\n" * 20}]}}
+        critics = [{"id": "merge-critic-1", "verdict": "block", "findings": "\n".join("y" * 400 for _ in range(20))}]
+        app = SimpleNamespace(authority=SimpleNamespace(state={"critics": critics}))
+        seen = gate_result(app, {"gate": gate}, "a" * 40)
+        self.assertEqual(seen["critic"]["verdict"], "block")
+        self.assertEqual(seen["critic"]["findings"].split("\n"), ["y" * 299 + "…"] * 12)
+        self.assertIsNone(gate_result(app, {"gate": gate}, "b" * 40))  # a gate of an older result
+        self.assertIsNone(gate_result(app, {}, "a" * 40))  # no gate
+        manifest = {"tasks": [{"status": "done"}, {"status": "done"}, {"status": "dropped"}], "amendments": []}
+        fake = lambda value: SimpleNamespace(delivery=SimpleNamespace(runs=SimpleNamespace(manifest=lambda r: value)))
+        self.assertEqual(tasks_count(fake(manifest), {}), {"done": 2, "total": 2})
+        self.assertIsNone(tasks_count(fake(None), {}))
+
+    def test_v1b_status_carries_the_blocking_readiness_items_and_the_profile_from_one_read(self):
+        """v1b A1/A2/A3: with a readiness whose `identity` item blocks (a warning and a passing item beside it), the
+        status `readiness` lists only that item as {id, line, fix} (`fix` the item's detail, scrubbed); an accepted
+        profile at level auto with max_runs 3 gives `profile` {state, digest (the 12-character short digest), level,
+        parallel_runs}; without a profile `profile` is None and without a readiness check `readiness` is []. The rows
+        job reads `autonomy.status_of` once per status, with or without a row awaiting merge. Interpretation: the
+        fixture session skips `origin`, so `identity` stands for the blocking item; `state`/`digest` are the
+        profile status' own."""
+        from terminal_planner import setup
+        items = [setup.item("identity", False, "d", "No Git identity", "Run git config password=hunter2", "i"),
+                 setup.item("repo", True, "d", "Project p", severity="warn", detail="a warning"),
+                 setup.item("branch", True, "d", "Branch main")]
+        self.plan(0)
+        self.controller()
+        bare = self.rows()
+        self.assertEqual((bare["readiness"], bare["profile"]), ([], None))
+        self.controller_stop()
+        self.write_profile(level="auto", max_runs=3)
+        self.controller(readiness=lambda: items, profile=True)
+        self.rows()
+        with patch.object(autonomy, "status_of", wraps=autonomy.status_of) as read:
+            payload = self.rows()
+        self.assertEqual(read.call_count, 1)
+        self.assertEqual([item["id"] for item in payload["readiness"]], ["identity"])
+        self.assertEqual(set(payload["readiness"][0]), {"id", "line", "fix"})
+        self.assertEqual(payload["readiness"][0]["line"], "No Git identity")
+        self.assertNotIn("hunter2", payload["readiness"][0]["fix"])
+        self.assertIn("Run git config", payload["readiness"][0]["fix"])
+        profile = payload["profile"]
+        self.assertEqual(set(profile), {"state", "digest", "level", "parallel_runs"})
+        self.assertEqual((profile["level"], profile["parallel_runs"], len(profile["digest"])), ("auto", 3, 12))
+
+    def test_v1b_the_rows_job_reads_the_profile_once_with_a_row_awaiting_merge(self):
+        """v1b A3: a row awaiting merge uses the same single `autonomy.status_of` read for its merge evidence and the
+        status `profile`."""
+        self.awaiting_merge()
+        self.controller(profile=True)
+        self.rows()
+        with patch.object(autonomy, "status_of", wraps=autonomy.status_of) as read:
+            payload = self.rows()
+        self.assertEqual(read.call_count, 1)
+        row = next(item for item in payload["rows"] if item["id"] == "M1")
+        self.assertEqual(row["merge"]["decision"], "allow")
+        self.assertEqual(payload["profile"]["level"], "auto")
+
     def test_rc3_status_is_fresh_after_a_state_change_and_stale_when_the_worker_is_held(self):
         """RC3 C1/C3 (regression of the 0.6.0 smoke): a status answers from the rows job it has just posted, so a
         state change is seen by the very next status; with the worker held past the bound it answers the last rows
@@ -472,6 +614,12 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual(row["run_id"], second["run_id"])  # B was not stopped
         self.assertEqual(row["state"], "running")
         self.assertEqual(row["attempt"], 2)
+        # v2e A3: the refusal is the call's one result, about the attempt the run id names; nothing was stopped
+        [result] = [r for r in self.call("zplan_status")["ok"]["results"] if r["operation"] == "stop"]
+        self.assertEqual((result["outcome"], result["family"], result["origin"], result["request"]),
+                         ("refused", "action.refused", "architect", "z"))
+        self.assertEqual(result["subject"], {"milestone": "M1", "attempt": 1})
+        self.assertIn("another attempt was started", " ".join(result["lines"]))
 
     def test_c3_stopping_the_latest_attempt_is_allowed(self):
         first, second = self.plan(2)
@@ -480,6 +628,51 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("ok", reply)
         self.assertEqual(reply["ok"]["run_id"], second["run_id"])
         self.assertEqual(reply["ok"]["attempt"], 2)
+
+    def test_v2e_a_stop_leaves_one_result_that_says_requested_and_never_stopped(self):
+        """v2e A1: the architect's stop leaves one `stop` result of the attempt, outcome requested (the attempt
+        reaches `stopped` later, as the row's state, so no line says it), and it reaches the owner once through
+        `on_result`. Interpretation: the owner's `run_note` keeps its wording (the screen words it from the same
+        error or stale line, and the requested note keeps STOP_REQUESTED), so the owner test pins the controller."""
+        first, second = self.plan(2)
+        shown = []
+        controller = self.controller()
+        controller.on_result = shown.append
+        reply = self.call("zplan_stop", {"milestone": "M1", "run_id": second["run_id"]}, rid="y")
+        self.assertIn("ok", reply, reply)
+        [result] = [r for r in self.call("zplan_status")["ok"]["results"] if r["operation"] == "stop"]
+        self.assertEqual((result["outcome"], result["family"], result["origin"], result["request"]),
+                         ("requested", "", "architect", "y"))
+        self.assertEqual(result["subject"], {"milestone": "M1", "attempt": 2})
+        self.assertEqual(result["lines"], ["Stop of M1 requested; the run ends shortly."])
+        self.assertEqual(shown, [result])
+
+    def test_v2e_the_owners_stop_leaves_its_own_result_and_a_repeat_is_refused(self):
+        """v2e A2/A3: the owner's confirmed stop leaves one `stop` result, origin owner, no request id, outcome
+        requested, and it is not sent to `on_result`; stopping the same attempt again (it is already stopping) is
+        refused with its family, which the architect's repeat shows as its own refused result."""
+        second = self.plan(1)[-1]
+        shown = []
+        controller = self.controller()
+        controller.on_result = shown.append
+        row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        done = threading.Event()
+        outcomes = []
+        controller.stop_run(token_identity(row["token"]), lambda outcome, error: (outcomes.append((outcome, error)),
+                                                                                  done.set()))
+        self.assertTrue(done.wait(10))
+        self.assertEqual(outcomes[0][1], None)
+        [owner] = [r for r in self.call("zplan_status")["ok"]["results"] if r["operation"] == "stop"]
+        self.assertEqual((owner["outcome"], owner["origin"], "request" in owner), ("requested", "owner", False))
+        self.assertEqual(owner["subject"], {"milestone": "M1", "attempt": 1})
+        self.assertEqual(owner["lines"], ["Stop of M1 requested; the run ends shortly."])
+        self.assertEqual(shown, [])
+        reply = self.call("zplan_stop", {"milestone": "M1", "run_id": second["run_id"]}, rid="again")
+        self.assertEqual(reply["error"], "action.refused")
+        repeat = self.call("zplan_status")["ok"]["results"][-1]
+        self.assertEqual((repeat["operation"], repeat["outcome"], repeat["family"], repeat["origin"]),
+                         ("stop", "refused", "action.refused", "architect"))
+        self.assertEqual(shown, [repeat])
 
     def test_c3_a_stop_without_a_current_plan_is_refused_with_changed(self):
         """Regression (A5t1 C3): a fresh session has no plan, so `Delivery.latest` has no revision to index; the
@@ -532,6 +725,11 @@ class BridgeCase(tp.ProjectTest):
             reply = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="moved")
         self.assertEqual(reply["error"], "process.changed")
         self.assertIn("changed", reply["message"])
+        moved = self.call("zplan_status")["ok"]["results"][-1]  # v2d A3: refused, nothing started
+        self.assertEqual((moved["operation"], moved["outcome"], moved["family"], moved["origin"], moved["subject"]),
+                         ("start", "refused", "process.changed", "architect", {"milestone": "M1", "attempt": 1}))
+        self.assertIn("The process profile changed", moved["lines"][0])
+        self.assertIsNone(next(item for item in self.rows()["rows"] if item["id"] == "M1")["attempt"])
 
     # C4 ------------------------------------------------------------------------
 
@@ -549,7 +747,7 @@ class BridgeCase(tp.ProjectTest):
         self.controller()
         for arguments in ({"milestone": "M1"}, {"milestone": "M1", "revision": True}, {"milestone": "", "revision": 1}):
             with self.subTest(arguments=arguments):
-                reply = self.call("zplan_start", arguments, rid="i")
+                reply = self.call("zplan_start", arguments)
                 self.assertEqual(reply["error"], "architect.request_invalid")
 
     def test_c4_a_revision_below_one_is_refused_as_request_invalid(self):
@@ -559,7 +757,7 @@ class BridgeCase(tp.ProjectTest):
         self.controller()
         for revision in (0, -1):
             with self.subTest(revision=revision):
-                reply = self.call("zplan_start", {"milestone": "M1", "revision": revision}, rid="r0")
+                reply = self.call("zplan_start", {"milestone": "M1", "revision": revision})
                 self.assertEqual(reply["error"], "architect.request_invalid")
 
     def test_c4_an_unknown_argument_refuses_a_start_before_the_revision_check(self):
@@ -724,15 +922,15 @@ class BridgeCase(tp.ProjectTest):
                          {"version": 1, "status": "review_exhausted", "verdict": "rejected", "findings": findings})
         self.assertIn("the plan is still too broad", findings)  # F1: the architect reads why it was rejected
 
-    def test_a10_b1_the_architect_gets_one_revision_after_a_rejection_then_the_owner_decides(self):
-        """A10 B1: owner r1 rejected -> `zplan_revise_plan` makes r2; r2 rejected -> both revise and edit refuse
-        ("the owner decides now") with nothing written, also after a restart; the owner's r3 rejected -> the
-        architect may revise once more (r4). Interpretation: r2's and r3's rejections are written by the test (the
+    def test_a10_b1_the_architect_gets_its_budget_after_a_rejection_then_the_owner_decides(self):
+        """A10 B1: owner r1 rejected -> `zplan_edit_plan` makes r2, r3 and r4 (the chain's budget of 3); r4 rejected
+        -> an edit refuses ("the owner decides now") with nothing written, also after a restart; the owner's r5
+        rejected -> the architect may edit once more (r6). Interpretation: the rejections are written by the test (the
         fixture planner is not run); the brake reads only the store."""
         from terminal_planner.tui.controller import OBSERVE
 
         def session():  # the architect's session: its feed port asked, the first observation bootstraps the feed
-            controller = self.controller()
+            controller = self.controller(engine_factory=lambda *_: FixtureEngine(scenario="exhausted"))
             controller.feed_port()
             controller.post(OBSERVE, lambda app: None, lambda result, error: None)
             self.rows()
@@ -745,23 +943,26 @@ class BridgeCase(tp.ProjectTest):
         with tp.Authority(self.state, self.project) as authority:
             self.begin(authority)
         reject()
-        session()
-        self.assertEqual(self.call("zplan_revise_plan", {"revision": 1, "feedback": "narrow it"})["ok"]["revision"], 2)
-        self.controller_stop()
-        reject()  # the planner rejects the architect's r2
+        for revision in (1, 2, 3):  # the architect's three edits, each rejected
+            session()
+            reply = self.call("zplan_edit_plan", {"revision": revision, "plan": draft("Try %d" % revision)},
+                              rid="try%d" % revision)
+            self.assertEqual(reply["ok"]["revision"], revision + 1, reply)
+            self.controller_stop()
+            reject()
         for restart in range(2):  # the second pass runs on a fresh controller
             session()
-            for tool, args in (("zplan_revise_plan", {"revision": 2, "feedback": "narrow it more"}),
-                               ("zplan_edit_plan", {"revision": 2, "plan": {"requirements": []}})):
-                reply = self.call(tool, args, rid="%s%d" % (tool, restart))
+            for name, args in (("again", {"revision": 4, "plan": draft("Again")}),
+                               ("invalid", {"revision": 4, "plan": {"requirements": []}})):
+                reply = self.call("zplan_edit_plan", args, rid="%s%d" % (name, restart))
                 self.assertEqual(reply["error"], "action.refused", reply)
                 self.assertIn("the owner decides now", reply["message"])
-            # nothing written: the current revision is still r2
-            self.assertEqual(self.plan_until(lambda plan: plan["version"] == 2)["status"], "review_exhausted")
+            # nothing written: the current revision is still r4
+            self.assertEqual(self.plan_until(lambda plan: plan["version"] == 4)["status"], "review_exhausted")
             self.controller_stop()
-        reject("the owner asks")  # the owner's r3, rejected
+        reject("the owner asks")  # the owner's r5, rejected
         session()
-        self.assertEqual(self.call("zplan_revise_plan", {"revision": 3, "feedback": "once"}, rid="again")["ok"]["revision"], 4)
+        self.assertEqual(self.call("zplan_edit_plan", {"revision": 5, "plan": draft("Once")}, rid="once")["ok"]["revision"], 6)
 
     # A5t2a C2 -------------------------------------------------------------------
 
@@ -919,21 +1120,118 @@ class BridgeCase(tp.ProjectTest):
     # A5t2a C4 -------------------------------------------------------------------
 
     def test_c4_approve_asks_until_the_gate_is_on_then_approves_and_status_shows_it(self):
-        """A5t2a C4: with an auto profile a current approve asks while `AUTOMATIC` is off (A5t2b shipped it on, so
-        the gate is patched off); with it on it approves, and the status `plan` names the approved revision."""
+        """P4a: even with an auto profile the architect's approve of the first revision asks (the owner's yes at every
+        level); the status lists the ask, the owner's approval answers it, and the status `plan` names the approved
+        revision."""
         self.write_auto_profile()
         self.proposed(profile=True)
-        self.controller(profile=True)
-        with patch.object(autonomy, "AUTOMATIC", False):
-            asked = self.call("zplan_approve_plan", {"revision": 1}, rid="p1")
-            self.assertEqual(asked["ok"], {"status": "awaiting_owner", "card": "plan"})
+        controller = self.controller(profile=True)
+        asked = self.call("zplan_approve_plan", {"revision": 1}, rid="p1")
+        self.assertEqual(asked["ok"], {"status": "awaiting_owner", "card": "plan"})
         self.assertEqual(self.call("zplan_status")["ok"]["asked"], {"approve": 1})  # the status lists the ask
-        reply = self.call("zplan_approve_plan", {"revision": 1}, rid="p2")
-        self.assertIn("ok", reply)
-        self.assertEqual(reply["ok"], {"revision": 1, "status": "approved"})
+        outcome, error = self.owner(controller.approve_plan, 1)
+        self.assertEqual((error, outcome.kind), (None, "approved"))
         self.assertNotIn("asked", self.call("zplan_status")["ok"])  # the approval answers it
+        # v2a A2: the architect's ask and the owner's approval are two results, oldest first
+        results = self.call("zplan_status")["ok"]["results"]
+        self.assertEqual([(r["operation"], r["outcome"], r["origin"], r["subject"]) for r in results],
+                         [("approve", "asked", "architect", {"revision": 1}),
+                          ("approve", "done", "owner", {"revision": 1})])
+        self.assertEqual(results[0]["request"], "p1")
+        self.assertLess(results[0]["seq"], results[1]["seq"])
         self.assertEqual({k: v for k, v in self.rows()["plan"].items() if k != "proposal"},
                          {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review."})
+
+    def owner(self, call, *args):
+        """The owner's own Controller call, answered: `(outcome, error)` of its `done`."""
+        event, box = threading.Event(), {}
+
+        def done(outcome, error):
+            box["answer"] = (outcome, error)
+            event.set()
+
+        self.assertTrue(call(*args, done))
+        self.assertTrue(event.wait(30), "the job never answered")
+        return box["answer"]
+
+    def test_v2a_an_approval_call_leaves_one_bounded_result_whoever_made_it_and_however_it_ended(self):
+        """v2a A1-A4: the owner's approve of r2 leaves {approve, done, owner} with its own line (no word about a
+        start); the architect's approve of the stale r1 leaves {refused, architect, request id} with the refusal's
+        family and line; the owner's refused approve is a result too; 25 more calls keep the last 20, seq
+        increasing, and write no feed event.
+
+        Interpretation: «lines» of a done result is the one line the screen shows ("Plan r2 approved."); an owner
+        refusal is recorded from the job that ran it and the job still fails as before."""
+        self.two_revisions()
+        controller = self.controller()
+        outcome, error = self.owner(controller.approve_plan, 2)
+        self.assertEqual((error, outcome.kind, outcome.lines), (None, "approved", ("Plan r2 approved.",)))
+        reply = self.call("zplan_approve_plan", {"revision": 1}, rid="old")
+        self.assertEqual(reply["error"], "action.refused")
+        done, refused = self.call("zplan_status")["ok"]["results"]
+        self.assertEqual(done, {"seq": done["seq"], "operation": "approve", "subject": {"revision": 2},
+                                "outcome": "done", "family": "", "lines": ["Plan r2 approved."], "origin": "owner"})
+        self.assertEqual((refused["operation"], refused["outcome"], refused["family"], refused["origin"],
+                          refused["request"]), ("approve", "refused", "action.refused", "architect", "old"))
+        self.assertIn("the plan was revised", " ".join(refused["lines"]))
+        outcome, error = self.owner(controller.override_plan, 1, "reason")  # not current: refused, still a result
+        self.assertIsNotNone(error)
+        self.assertEqual(self.call("zplan_status")["ok"]["results"][-1]["operation"], "override")
+        self.assertEqual(self.call("zplan_status")["ok"]["results"][-1]["outcome"], "refused")
+        with patch.object(feed, "_append") as append:
+            for index in range(25):
+                self.call("zplan_approve_plan", {"revision": 1}, rid="more%d" % index)
+        self.assertFalse(append.called)
+        results = self.call("zplan_status")["ok"]["results"]
+        self.assertEqual(len(results), 20)
+        self.assertEqual([r["seq"] for r in results], sorted(r["seq"] for r in results))
+        self.assertEqual(results[-1]["seq"], 28)
+
+    def test_v2c_the_last_result_of_each_subject_survives_a_reopen_and_never_gets_in_the_way(self):
+        """v2c A1-A4: 25 refused approvals of distinct revisions and three merge results of M1 attempt 2 leave
+        results.json (beside planning.json) with 20 subjects, oldest first, M1's entry its last result and the
+        approval of r1 asked twice kept once; planning.json is byte-identical; a reopened session on the same project
+        lists them and continues seq after the highest; a results.json of "[" gives no results; a results.json the
+        store cannot replace does not stop an approval from answering done and being listed.
+
+        Interpretation: a subject is the operation with its revision (approval) or milestone and attempt (merge), so
+        an override of r1 is another subject than its approval; the file is `{"results": [...]}`."""
+        self.two_revisions()
+        controller = self.controller()
+        self.call("zplan_status")
+        [store] = (self.state / "v3" / "fixtures" / "test").glob("*/planning.json")
+        saved = store.read_bytes()
+        for index, revision in enumerate([1] + list(range(3, 28)) + [1]):
+            self.call("zplan_approve_plan", {"revision": revision}, rid="r%d" % index)
+        for index in range(3):
+            controller._result("merge", {"milestone": "M1", "attempt": 2}, "architect", "refused", "action.refused",
+                               ["try %d" % index])
+        self.assertEqual(store.read_bytes(), saved)
+        self.controller_stop()
+        stored = json.loads((store.parent / "results.json").read_text(encoding="utf-8"))["results"]
+        self.assertEqual(len(stored), 20)
+        self.assertEqual([r["seq"] for r in stored], sorted(r["seq"] for r in stored))
+        self.assertEqual(stored[-1]["subject"], {"milestone": "M1", "attempt": 2})
+        self.assertEqual((stored[-1]["seq"], stored[-1]["lines"]), (30, ["try 2"]))
+        self.assertEqual([r["subject"] for r in stored if r["subject"] == {"revision": 1}], [{"revision": 1}])
+        self.assertEqual(store.read_bytes(), saved)
+        reopened = self.controller()
+        self.assertEqual(self.call("zplan_status")["ok"]["results"], stored)
+        self.assertEqual(reopened._result("approve", {"revision": 99}, "owner", "done", "", ["x"])["seq"], 31)
+        self.controller_stop()
+        results = store.parent / "results.json"
+        results.write_text("[", encoding="utf-8")
+        self.controller()
+        self.assertEqual(self.call("zplan_status")["ok"]["results"], [])
+        self.assertEqual(results.read_text(encoding="utf-8"), "[")  # nothing rewritten before the next result
+        self.controller_stop()
+        results.unlink()
+        results.mkdir()  # a store that cannot replace it
+        controller = self.controller()
+        outcome, error = self.owner(controller.approve_plan, 2)
+        self.assertEqual((error, outcome.kind), (None, "approved"))
+        [done] = self.call("zplan_status")["ok"]["results"]
+        self.assertEqual((done["operation"], done["outcome"], done["subject"]), ("approve", "done", {"revision": 2}))
 
     def test_c4_approve_refuses_when_the_profile_moved_since_the_gate(self):
         """A5t2a C4: the policy decides on the very digest the revision's gate was argued under, so a profile that
@@ -1011,7 +1309,7 @@ class BridgeCase(tp.ProjectTest):
         """A5t2b C1: `plan` carries the current revision's full proposal (the source the architect edits);
         `zplan_edit_plan {revision, plan}` saves the edit as revision n+1, whose verdict is "ready" - the planner
         watch (in the app) dispatches it, and the status then names the new revision planning."""
-        self.proposed()
+        self.proposed(briefed=True)
         self.controller()
         proposal = self.rows()["plan"]["proposal"]
         self.assertIsInstance(proposal, dict)
@@ -1021,8 +1319,8 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("ok", reply, reply)
         self.assertEqual(reply["ok"], {"revision": 2, "status": "ready"})
         plan = self.plan_until(lambda plan: plan["version"] == 2)
-        self.assertEqual(plan["status"], "planning")
-        self.assertIsNone(plan["proposal"])  # the planner has not produced one yet (the app's watch dispatches it)
+        self.assertEqual(plan["status"], "proposed")
+        self.assertIsInstance(plan["proposal"], dict)  # the application dispatched the fixture without a screen
         self.assertEqual(self.entry("ed")["state"], "done")
         self.controller_stop()
         with tp.Authority(self.state, self.project) as authority:  # the edit is the new revision's own draft
@@ -1035,7 +1333,7 @@ class BridgeCase(tp.ProjectTest):
         through `after_submission` and starts the planner watch), exactly once, with the service's own Outcome; a
         refusal (here "unchanged") never reaches it. The hook runs on the worker, as the owner's submission callback
         does."""
-        self.proposed()
+        self.proposed(briefed=True)
         controller = self.controller()
         seen = []
         controller.on_plan_submission = seen.append
@@ -1049,13 +1347,13 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("ok", reply, reply)
         self.assertEqual(len(seen), 1)
         outcome = seen[0]
-        self.assertEqual(outcome.kind, "ready")
+        self.assertEqual(outcome.kind, "dispatched")
         self.assertEqual(outcome.checks, ())
 
     def test_c1_an_edit_refuses_not_current_invalid_and_unchanged(self):
         """A5t2b C1: `Planning.edit`'s refusals stay - a revision that is not current, a proposal the validator
         refuses and an edit that changes nothing are all `action.refused`, with nothing written."""
-        self.proposed()
+        self.proposed(briefed=True)
         self.controller()
         current = self.rows()["plan"]["proposal"]
         edited = copy.deepcopy(current)
@@ -1075,15 +1373,15 @@ class BridgeCase(tp.ProjectTest):
         bridge job. The request's own bookkeeping still rides that job: the entry ends done and the revision is
         saved."""
         from terminal_planner.tui.controller import Controller
-        self.proposed()
+        self.proposed(briefed=True)
         self.controller()
         edited = copy.deepcopy(self.rows()["plan"]["proposal"])
         edited["milestones"][0]["title"] = "Admitted as a plan job"
         labels, original = [], Controller._plan_job
 
-        def spy(controller, label, work, done):
+        def spy(controller, label, work, done, *args, **kwargs):
             labels.append(label)
-            return original(controller, label, work, done)
+            return original(controller, label, work, done, *args, **kwargs)
 
         with patch.object(Controller, "_plan_job", spy):
             reply = self.call("zplan_edit_plan", {"revision": 1, "plan": edited}, rid="pj")
@@ -1091,7 +1389,7 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual(labels, ["zplan_edit_plan"])  # one plan job, nothing nested
         self.assertEqual(self.entry("pj")["state"], "done")
         plan = self.plan_until(lambda plan: plan["version"] == 2)
-        self.assertEqual(plan["status"], "planning")
+        self.assertEqual(plan["status"], "proposed")
 
     def test_c1_an_edit_without_an_open_session_fails_with_the_session_refusal(self):
         """A5t2b C1 (critic a5t2b-merge P2): the plan job refuses before the tool runs when the session did not open;
@@ -1123,36 +1421,20 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual((len(cut["findings"]), cut["findings"][-1]), (4000, "…"))
         self.assertEqual(plan_fields({"version": 1, "status": "planning", "evidence": None})["findings"], "")
 
-    def test_a8_f3_revise_plan_asks_the_planner_in_one_plan_job_and_refuses_what_is_not_current(self):
-        """A8 F3: `zplan_revise_plan {revision, feedback}` is `Planning.revise` in exactly one `_plan_job`, like
-        edit: the current revision with non-empty feedback -> {revision: n+1, status: "ready"}, the hook gets the
-        "ready" verdict and the feedback is the new revision's; a revision that is not current, or empty or missing
-        feedback, is refused with nothing written. Interpretation: none."""
-        from terminal_planner.tui.controller import Controller
+    def test_v2g_a4_reading_leaves_no_result_besides_the_approval(self):
+        """V2g A4: the plan details, the record and the changes jobs are not operations; the architect's approval
+        keeps v2a's one result. Interpretation: none."""
         self.proposed()
         controller = self.controller()
-        seen, labels, original = [], [], Controller._plan_job
-        controller.on_plan_submission = seen.append
-
-        def spy(self_, label, work, done):
-            labels.append(label)
-            return original(self_, label, work, done)
-
-        with patch.object(Controller, "_plan_job", spy):
-            for rid, arguments, family in (("old", {"revision": 2, "feedback": "add examples"}, "action.refused"),
-                                           ("blank", {"revision": 1, "feedback": "  "}, "architect.request_invalid"),
-                                           ("none", {"revision": 1}, "architect.request_invalid")):
-                with self.subTest(rid=rid):
-                    self.assertEqual(self.call("zplan_revise_plan", arguments, rid=rid)["error"], family)
-            self.assertEqual((seen, self.rows()["plan"]["version"]), ([], 1))
-            reply = self.call("zplan_revise_plan", {"revision": 1, "feedback": "add examples"}, rid="ok")
-        self.assertEqual(reply["ok"], {"revision": 2, "status": "ready"})
-        self.assertEqual((len(seen), seen[0].kind), (1, "ready"))
-        self.assertEqual(labels.count("zplan_revise_plan"), 4)  # each call is its own single plan job
-        self.assertEqual(self.plan_until(lambda plan: plan["version"] == 2)["status"], "planning")
-        self.controller_stop()
-        with tp.Authority(self.state, self.project) as authority:
-            self.assertIn("add examples", authority.current["feedback"])
+        done = []
+        for read in (controller.details, controller.plan_record, controller.changes):
+            event = threading.Event()
+            read(lambda *_: (done.append(read.__name__), event.set()))
+            self.assertTrue(event.wait(20))
+        self.assertEqual(len(done), 3)
+        self.assertEqual(self.call("zplan_approve_plan", {"revision": 1}, rid="ap")["ok"]["status"], "awaiting_owner")
+        self.assertEqual([(r["operation"], r["origin"], r["request"]) for r in self.call("zplan_status")["ok"]["results"]],
+                         [("approve", "architect", "ap")])
 
     # A5t2b C2 -------------------------------------------------------------------
 
@@ -1174,19 +1456,34 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("Merged: M1", reply["ok"]["line"])
         self.assertEqual(self.entry("mg")["state"], "done")
 
-    def test_c2_a_merge_at_auto_with_the_gate_off_lands_and_says_what_did_not_run(self):
-        """p2a A2: at auto with `gates.merge: off` the architect's merge lands without checks or critic, and the
-        tool's line ends by saying so; the merge gate decides what runs, not who merges. Interpretation: the sentence
-        is appended to `Delivery.merge`'s line only when the merge integrated and the gate is not required."""
+    def test_c2_a_merge_at_auto_with_the_gate_off_waits_for_the_owner(self):
+        """Automatic merge requires real checks; the owner may still make an explicitly unverified manual merge."""
         self.awaiting_merge(merge="off")
-        self.controller(profile=True)
+        shown = []
+        self.controller(profile=True).on_result = shown.append
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
-        self.assertEqual(row["merge"]["decision"], "allow")
+        self.assertEqual(row["merge"]["decision"], "ask")
         reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="off")
-        self.assertIn("ok", reply, reply)
-        self.assertEqual(reply["ok"]["kind"], "integrated")
-        self.assertTrue(reply["ok"]["line"].endswith("No merge check or critic ran: the profile's merge gate is off."),
-                        reply)
+        self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"})
+        self.assertEqual(next(item for item in self.rows()["rows"] if item["id"] == "M1")["state"],
+                         "awaiting_merge")
+        [result] = [r for r in self.call("zplan_status")["ok"]["results"] if r["operation"] == "merge"]
+        self.assertEqual((result["outcome"], result["origin"], result["request"], result["family"]),
+                         ("asked", "architect", "off", ""))
+        self.assertEqual(result["subject"], {"milestone": "M1", "attempt": 1})
+        self.assertEqual(shown, [result])
+
+    def test_an_ordinary_owner_turn_does_not_consent_to_unverified_merge(self):
+        self.awaiting_merge(merge="off")
+        controller = self.controller(profile=True)
+        row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
+        head = self.git("rev-parse", "HEAD")
+        turn = controller.begin_turn("Only explain the current status; do not merge anything.", 0)
+        reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="explain", turn=turn)
+        self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"})
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual(next(item for item in self.rows()["rows"] if item["id"] == "M1")["state"], "awaiting_merge")
+        controller.end_turn(turn)
 
     def test_c2_what_the_level_leaves_to_the_owner_becomes_a_card_or_a_request(self):
         """p6a: a supervised merge of a high-risk change and an approve are the owner's own cards: the architect
@@ -1199,6 +1496,9 @@ class BridgeCase(tp.ProjectTest):
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
         reply = self.call("zplan_merge", {"milestone": "M1", "token": row["token"]}, rid="m")
         self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "merge"}, reply)
+        asked = self.call("zplan_status")["ok"]["results"][-1]  # v2b A3: an ask is a result too
+        self.assertEqual((asked["operation"], asked["outcome"], asked["family"], asked["request"]),
+                         ("merge", "asked", "", "m"))
         with patch.object(autonomy, "AUTOMATIC", False):
             reply = self.call("zplan_approve_plan", {"revision": 1}, rid="a")
             self.assertEqual(reply["ok"], {"status": "awaiting_owner", "card": "plan"}, reply)
@@ -1242,6 +1542,10 @@ class BridgeCase(tp.ProjectTest):
         self.controller(profile=True)
         started = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="sup-start")
         self.assertIn("ok", started, started)
+        start = self.call("zplan_status")["ok"]["results"][-1]  # v2d A2: the architect's start is a result
+        self.assertEqual((start["operation"], start["outcome"], start["origin"], start["request"], start["subject"]),
+                         ("start", "done", "architect", "sup-start", {"milestone": "M1", "attempt": 1}))
+        self.assertEqual(start["lines"], ["M1 started · plan r1 · attempt 1"])
         row = next(item for item in self.rows()["rows"] if item["id"] == "M1")
         self.assertEqual(row["state"], "running")
         # the row's own token resolves; a running attempt has no result to judge, so the merge asks (fail closed)
@@ -1277,11 +1581,11 @@ class BridgeCase(tp.ProjectTest):
         (self.project / "ZPLAN_FIXTURE.md").write_text("seed\n" * 8)
         self.git("add", "ZPLAN_FIXTURE.md")
         self.git("commit", "-qm", "seed")
-        self.awaiting_merge(level="supervised", merge="off", tier="medium")
+        self.awaiting_merge(level="supervised", merge="required", tier="medium")
         rules = [{"paths": ["**"], "tier": "medium"}, {"paths": [".github/**"], "tier": "high"}]
         (self.project / process.PROFILE_FILE).write_text(json.dumps(
-            {"preset": process.PRESET_V2, "autonomy": {"level": "supervised"}, "gates": {"merge": "off"},
-             "risk": {"rules": rules}}))
+            {"preset": process.PRESET_V2, "autonomy": {"level": "supervised"}, "gates": {"merge": "required"},
+             "checks": [{"name": "unit", "argv": ["true"], "timeout_s": 60}], "risk": {"rules": rules}}))
         (self.project / ".github" / "workflows").mkdir(parents=True)
         self.git("mv", "ZPLAN_FIXTURE.md", ".github/workflows/ZPLAN_FIXTURE.md")
         self.git("add", process.PROFILE_FILE)
@@ -1304,6 +1608,212 @@ class BridgeCase(tp.ProjectTest):
         reply = self.call("zplan_start", {"milestone": "M1", "revision": 1}, rid="manual")
         self.assertEqual(reply["ok"]["status"], "awaiting_owner", reply)
         self.assertEqual(reply["ok"]["request"], self.call("zplan_status")["ok"]["consent"]["id"])
+
+    def test_v6a_an_owner_turn_binds_its_requests_and_anything_else_is_events(self):
+        """V6a A1, A2, A4: the Controller mints a token per owner turn; the turn's MCP server (`--turn`) sends it in
+        the envelope and the request is bound to the owner, with a reference to the owner's message (first line,
+        scrubbed, at most 200 characters, and its occurrence). No token, a forged one and a closed one are the events;
+        at manual the owner-turn start runs as the owner's own (V6b: no consent request).
+
+        Interpretation: `begin_turn(message, occurrence)` takes the message's store occurrence from the chat, which
+        already knows it (the store's role-row count when the turn started)."""
+        self.plan(0)
+        self.write_profile(level="manual")
+        controller = self.controller(profile=True)
+        token = controller.begin_turn("Start M1 password=hunter2 " + "y" * 300 + "\nsecond line", 7)
+        proc = subprocess.Popen([sys.executable, "-I", "-c", CODE, "--project", str(self.project),
+                                 "--controller", bridge.path_for(self.project), "--turn", token],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self._close, proc)
+        self._rpc(proc, "initialize", {"protocolVersion": "2025-06-18"})
+        self._call(proc, "zplan_status", {})
+        started = json.loads(self._call(proc, "zplan_start", {"milestone": "M1", "revision": 1})["result"]
+                             ["content"][0]["text"])
+        found = self.entry(started["id"])
+        self.assertEqual(found["binding"], "owner")
+        self.assertEqual(found["message"]["occurrence"], 7)
+        self.assertLessEqual(len(found["message"]["text"]), 200)
+        self.assertTrue(found["message"]["text"].startswith("Start M1 "))
+        self.assertNotIn("hunter2", found["message"]["text"])
+        self.assertNotIn("second line", found["message"]["text"])
+        self.assertNotIn("consent", self.call("zplan_status")["ok"])  # V6b: it ran, no request was stored
+        controller.end_turn(token)
+        for rid, turn in (("none", None), ("forged", "f" * 32), ("closed", token), ("odd", ["x"])):
+            request = {"id": rid, "tool": "zplan_start", "args": {"milestone": "M1", "revision": 99}}
+            if turn is not None:
+                request["turn"] = turn
+            bridge.call(bridge.path_for(self.project), request, timeout=20)
+            self.assertEqual(self.entry(rid)["binding"], "events", rid)
+            self.assertNotIn("message", self.entry(rid))
+
+    def test_v6e_zplan_plan_saves_the_plan_in_an_owner_turn_only(self):
+        """V6e A1-A3: an owner turn's `zplan_plan {goal, plan}` saves the architect's plan in one plan job: revision
+        1 is created (the UI hook hears the "ready" verdict once) and the result is {operation plan, outcome sent,
+        origin owner, via chat}; an events request is refused (`autonomy.ask`) and creates no revision; an owner
+        turn without a plan is refused (`action.refused`), nothing written. Interpretation: an owner turn's sent
+        result also leads with the "at your word" line, as the other owner-turn results do."""
+        from terminal_planner import setup
+        controller = self.controller()
+        seen = []
+        controller.on_plan_submission = seen.append
+        asked = {"goal": "Add a changelog", "plan": draft()}
+        self.assertEqual(self.call("zplan_plan", asked, rid="ev")["error"], "autonomy.ask")
+        self.assertEqual(seen, [])
+        token = controller.begin_turn("Plan: add a changelog", 3)
+        self.assertEqual(self.call("zplan_plan", {"goal": "Add a changelog"}, rid="np", turn=token)["error"],
+                         "action.refused")
+        self.assertEqual(seen, [])
+        reply = self.call("zplan_plan", asked, rid="ow", turn=token)
+        self.assertEqual(reply.get("ok"), {"revision": 1, "status": "ready"}, reply)
+        self.assertEqual([item.kind for item in seen], ["dispatched"])
+        results = self.call("zplan_status")["ok"]["results"]
+        self.assertEqual([(r["operation"], r["outcome"], r["origin"], r["request"]) for r in results],
+                         [("plan", "refused", "architect", "ev"), ("plan", "refused", "owner", "np"),
+                          ("plan", "sent", "owner", "ow")])
+        self.assertEqual((results[-1]["via"], results[-1]["subject"], results[-1]["lines"]),
+                         ("chat", {"revision": 1}, ["Planned at your word: «Plan: add a changelog»",
+                                                    "Plan r1 sent to the plan check."]))
+        self.controller_stop()
+        with tp.Authority(self.state, self.project) as authority:  # the refused requests created nothing
+            self.assertEqual((authority.current["version"], authority.current["goal"]), (1, "Add a changelog"))
+        dirty = "Uncommitted changes block planning"
+        controller = self.controller(readiness=lambda: [setup.item("branch", False, "d", dirty, "commit", "b")])
+        seen = []
+        controller.on_plan_submission = seen.append
+        token = controller.begin_turn("Plan again", 4)
+        reply = self.call("zplan_plan", {"goal": "Second goal", "plan": draft("Second")}, rid="rb", turn=token)
+        self.assertEqual(reply.get("ok"), {"revision": 2, "status": "blocked"}, reply)  # as an edit blocked by readiness
+        self.assertEqual(seen, [])
+        result = [r for r in self.call("zplan_status")["ok"]["results"] if r["request"] == "rb"][-1]
+        self.assertEqual((result["operation"], result["outcome"], result["origin"], result["via"], result["subject"],
+                          result["lines"]), ("plan", "unsent", "owner", "chat", {"revision": 2}, [dirty]))
+        self.controller_stop()
+        with tp.Authority(self.state, self.project) as authority:  # the plan is kept as the unsent revision
+            self.assertEqual((authority.current["version"], authority.current["goal"]), (2, "Second goal"))
+            self.assertEqual(authority.current["draft"], draft("Second"))
+
+    def test_v6f_zplan_settings_changes_the_snapshot_on_the_owners_word_only(self):
+        """V6f A1-A3 (A0 3.3): an owner turn's `zplan_settings {level: manual}` never applies itself: it answers
+        `awaiting_owner`, leaves {settings, asked, owner, chat} and opens the owner's consent card; the owner's yes
+        (`Controller.consent`) changes the accepted snapshot and leaves {settings, done, owner} with the line
+        "level: auto -> manual" and the note that running attempts keep their profile; an events request is refused
+        (`autonomy.ask`) and an invalid value (`bogus`) or an empty call is refused at once, the profile unchanged;
+        with the owner's own zplan.process.json as the source the change is refused naming the proposed one and the
+        file's bytes stay. Interpretation: a role change is one "roles: worker.model: a -> b" line; the result's
+        subject is the sorted argument keys."""
+        with tp.Authority(self.state, self.project) as authority:
+            process.Profile.of(authority).accept()  # a snapshot, no file
+        controller = self.controller(profile=True)
+        self.assertEqual(self.call("zplan_status")["ok"]["profile"]["level"], "auto")
+        events = self.call("zplan_settings", {"max_runs": 1}, rid="ev")
+        self.assertEqual(events["error"], "autonomy.ask")
+        token = controller.begin_turn("Switch to manual", 2)
+        self.assertEqual(self.call("zplan_settings", {}, rid="empty", turn=token)["error"], "architect.request_invalid")
+        bogus = self.call("zplan_settings", {"level": "bogus"}, rid="bogus", turn=token)
+        self.assertEqual(bogus["error"], "process.invalid")
+        profile = self.call("zplan_status")["ok"]["profile"]
+        self.assertEqual((profile["level"], profile["parallel_runs"]), ("auto", process.parallel_runs(3)))
+        asked = self.call("zplan_settings", {"level": "manual"}, rid="ow", turn=token)
+        self.assertEqual(asked["ok"]["status"], "awaiting_owner")
+        self.assertEqual(self.call("zplan_status")["ok"]["profile"]["level"], "auto")
+        outcome, error = self.owner(controller.consent, controller.consent_request.id)
+        self.assertIsNone(error)
+        status = self.call("zplan_status")["ok"]
+        self.assertEqual(status["profile"]["level"], "manual")
+        done = status["results"][-1]
+        self.assertEqual((done["operation"], done["outcome"], done["origin"], done["request"]),
+                         ("settings", "done", "owner", controller.consent_request.id))
+        self.assertNotIn("via", done)
+        self.assertNotIn("turn", done)
+        self.assertIn("level: auto -> manual", done["lines"])
+        self.assertIn("running attempts keep their profile", done["lines"][0])
+        self.assertEqual([(r["outcome"], r["origin"]) for r in status["results"] if r["operation"] == "settings"],
+                         [("refused", "architect"), ("refused", "owner"), ("refused", "owner"), ("asked", "owner"),
+                          ("done", "owner")])
+        asked = self.call("zplan_settings", {"roles": {"worker": {"model": "gpt-x", "effort": "low"}}, "max_runs": 1},
+                          rid="roles", turn=token)
+        self.assertEqual(asked["ok"]["status"], "awaiting_owner")
+        outcome, error = self.owner(controller.consent, controller.consent_request.id)
+        self.assertIsNone(error)
+        lines = self.call("zplan_status")["ok"]["results"][-1]["lines"]
+        self.assertIn("max_runs: 3 -> 1", lines)
+        self.assertTrue(any(line.startswith("roles: worker.") and "-> gpt-x" in line for line in lines), lines)
+        self.controller_stop()
+        self.write_profile(level="auto")  # the owner's own file becomes the source
+        before = (self.project / process.PROFILE_FILE).read_bytes()
+        controller = self.controller(profile=True)
+        token = controller.begin_turn("Set one run", 3)
+        refused = self.call("zplan_settings", {"max_runs": 1}, rid="file", turn=token)
+        self.assertEqual(refused["error"], "action.refused")
+        self.assertIn("set max_runs to 1", refused["message"])
+        self.assertEqual((self.project / process.PROFILE_FILE).read_bytes(), before)
+        self.assertEqual(self.call("zplan_status")["ok"]["profile"]["level"], "auto")
+
+    def test_format_refusals_stay_off_the_owners_screen_until_the_cap(self):
+        """A0 3.5: the model gets each plan format refusal whole; the owner sees one line at the cap (FORMAT_REFUSALS) in an owner turn,
+        then both plan tools refuse quietly for the rest of the turn; a new turn writes again."""
+        controller = self.controller()
+        shown = []
+        controller.on_result = shown.append
+        first = controller.begin_turn("Plan: add a changelog", 2)
+        self.assertIn("ok", self.call("zplan_plan", {"goal": "Add a changelog", "plan": draft()}, rid="r1", turn=first))
+        since = len(shown)
+        token = controller.begin_turn("Change it", 3)
+        bad = copy.deepcopy(draft())
+        bad["milestones"][0]["slices"][0]["tasks"][0]["acceptance"] = "x"
+        lines = lambda: [r["lines"] for r in shown[since:] if r["operation"] in ("plan", "edit")]
+        from terminal_planner.tui.controller import FORMAT_REFUSALS
+        for n in range(1, FORMAT_REFUSALS):
+            reply = self.call("zplan_plan", {"goal": "Add a changelog", "plan": bad}, rid="f%d" % n, turn=token)
+            self.assertEqual(reply.get("error"), "action.refused", reply)
+            self.assertIn("acceptance", reply.get("message", ""))
+        self.assertEqual(lines(), [])
+        self.call("zplan_plan", {"goal": "Add a changelog", "plan": bad}, rid="f%d" % FORMAT_REFUSALS, turn=token)
+        self.assertEqual(len(lines()), 1)
+        self.assertTrue(lines()[0][0].startswith("The plan could not be written: "), lines())
+        retry = self.call("zplan_plan", {"goal": "Add a changelog", "plan": bad}, rid="after-retry", turn=token)
+        edit = self.call("zplan_edit_plan", {"revision": 1, "plan": draft("Edited")}, rid="after-edit", turn=token)
+        for reply in (retry, edit):
+            self.assertEqual(reply.get("error"), "action.refused", reply)
+        self.assertEqual(len(lines()), 1)
+        self.assertEqual(self.plan_until(lambda plan: plan is not None)["version"], 1)
+        later = controller.begin_turn("Try again", 4)
+        self.assertIn("ok", self.call("zplan_plan", {"goal": "Add a changelog", "plan": draft("Later")}, rid="later", turn=later))
+
+    def test_a_plan_sent_as_json_text_is_read_as_the_plan(self):
+        """The model often sends `plan` as the JSON text of the plan (A0 rig, 2026-11-05): it is read as the plan; text
+        that is not a JSON object is a quiet format refusal, as any other."""
+        controller = self.controller()
+        shown = []
+        controller.on_result = shown.append
+        token = controller.begin_turn("Plan: add a changelog", 2)
+        refused = self.call("zplan_plan", {"goal": "Add a changelog", "plan": "## Plan\n- add a changelog"}, rid="t1", turn=token)
+        self.assertEqual(refused.get("error"), "action.refused", refused)
+        self.assertEqual([r for r in shown if r["operation"] == "plan"], [])
+        reply = self.call("zplan_plan", {"goal": "Add a changelog", "plan": json.dumps(draft())}, rid="t2", turn=token)
+        self.assertEqual(reply.get("ok", {}).get("revision"), 1, reply)
+
+    def test_v6a_a_late_job_keeps_the_binding_of_the_turn_that_admitted_it(self):
+        """V6a A3: a request admitted in owner turn T1 whose job runs after T1 ended and T2 began is the owner's, with
+        T1's message, never T2's."""
+        self.plan(0)
+        controller = self.controller()
+        first = controller.begin_turn("first turn", 1)
+        hold = threading.Event()
+        controller.post("hold", lambda app: hold.wait(10))  # the worker is busy: the job stays queued past the wait
+        with patch.object(bridge, "TIMEOUT", 0.2):
+            reply = bridge.call(bridge.path_for(self.project), {"id": "late", "tool": "zplan_start", "turn": first,
+                                                               "args": {"milestone": "M1", "revision": 99}}, timeout=20)
+        self.assertEqual(reply["error"], "architect.controller_timeout")
+        controller.end_turn(first)
+        controller.begin_turn("second turn", 2)
+        hold.set()
+        end = time.monotonic() + 8
+        while self.entry("late")["state"] != "done" and time.monotonic() < end:
+            time.sleep(0.05)
+        late = self.entry("late")
+        self.assertEqual(late["state"], "done")
+        self.assertEqual((late["binding"], late["message"]), ("owner", {"text": "first turn", "occurrence": 1}))
 
 
 if __name__ == "__main__":

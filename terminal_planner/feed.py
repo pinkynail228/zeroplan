@@ -27,7 +27,7 @@ import json
 from datetime import datetime, timezone
 
 from . import autonomy
-from .authority import PLAN_STATUSES, Blocked, PersistenceError, require
+from .authority import PLAN_STATUSES, Blocked, PersistenceError, chain_approved, chain_budget, require
 
 # The one optional schema-2 key this module owns.
 SCHEMA_KEYS = frozenset({"seq", "handled", "last", "verdicts", "events"})
@@ -38,12 +38,15 @@ PLAN_KEY = "plan"
 # A10: the other optional key: the plan revisions an architect tool (revise or edit) created, in order. The brake reads
 # it (`architect_made`): a rejected revision made that way is the owner's to decide, also after a restart.
 ARCHITECT_KEY = "architect"
-EVENT_KINDS = ("state", "verdict", "plan")
+BUDGET_SILENT = frozenset(("review_exhausted", "run_failed", "proposal_invalid"))  # no wake at the chain budget
+EVENT_KINDS = ("state", "verdict", "plan", "result")
 STATE_KEYS = frozenset({"seq", "kind", "key", "milestone", "plan_revision", "attempt", "run_id", "state",
                         "previous", "wake", "at"})
 PLAN_EVENT_KEYS = frozenset({"seq", "kind", "key", "plan_revision", "status", "previous", "wake", "at"})
 VERDICT_KEYS = frozenset({"seq", "kind", "key", "milestone", "plan_revision", "attempt", "run_id", "execution",
                           "task", "round", "role", "verdict", "text", "wake", "at"})
+# R3d: a merge, start or rebrief the architect asked for that ended after its bridge wait: the late result event.
+RESULT_KEYS = frozenset({"seq", "kind", "key", "plan_revision", "operation", "outcome", "family", "lines", "wake", "at"})
 # A state the architect must react to (C2): an event carrying it wakes a catch-up turn.
 WAKE = frozenset({"stopped", "conflict", "integrated", "awaiting_merge", "needs_owner", "blocked",
                   "failed_recoverable", "failed"})
@@ -156,11 +159,40 @@ def capture(authority):
     return snapshot
 
 
+def late_result(authority, request, operation, outcome, family, lines):
+    """R3d: append, and save, the result of a tool job that ended after its bridge wait gave up. Nothing without a
+    feed or a plan revision. It wakes by the autonomy level, as a plan event of an approved plan does."""
+    queue = _feed(authority)
+    if queue is None:
+        return
+    revisions = authority.state.get("revisions") or []
+    if not revisions:
+        return
+    seq = queue["seq"]
+    event = {"kind": "result", "key": "result/%s" % request, "plan_revision": revisions[-1]["version"],
+             "operation": operation, "outcome": outcome, "family": family, "lines": list(lines),
+             "wake": autonomy.decide(autonomy.level(authority.profile), "start") == "allow", "at": now()}
+    _append(queue, event)
+
+    def undo():
+        current = authority.state["feed"]
+        if event in current["events"]:
+            current["events"].remove(event)
+        current["seq"] = seq
+
+    _save(authority, undo)
+
+
 def _plan_wakes(authority, status):
     """RS5: whether a plan event with `status` wakes a turn: the autonomy level of the session's profile lets the
     architect do what the status asks (`PLAN_WAKE`)."""
     action = PLAN_WAKE.get(status)
-    return action is not None and autonomy.decide(autonomy.level(authority.profile), action) == "allow"
+    if action is None:
+        return False
+    level = autonomy.level(authority.profile)
+    if action == "approve":
+        return autonomy.approves_alone(level, chain_approved((authority.state or {}).get("revisions") or []))
+    return autonomy.decide(level, action) == "allow"
 
 
 def _capture_plan(authority, queue):
@@ -181,11 +213,21 @@ def _capture_plan(authority, queue):
         queue.setdefault(ARCHITECT_KEY, []).append(latest["revision"])
     _append(queue, {"kind": "plan", "key": "plan/%d" % latest["revision"], "plan_revision": latest["revision"],
                     "status": latest["status"], "previous": previous,
-                    "wake": (_plan_wakes(authority, latest["status"]) and not _acting(authority)
-                             and not (latest["status"] == "review_exhausted"
-                                      and latest["revision"] in queue.get(ARCHITECT_KEY, []))),
+                    "wake": _plan_event_wakes(authority, revisions, latest, queue),
                     "at": now()})
     queue[PLAN_KEY] = latest
+
+
+def _plan_event_wakes(authority, revisions, latest, queue):
+    """Whether the plan event of `latest` wakes. A Goldfish revision wakes by the level and not while the architect
+    acts, except that a rejection or a failed run does not wake the architect once its chain budget is spent (its
+    only step would be the refused edit); the A10 architect mark applies to the other revisions only."""
+    wakes = _plan_wakes(authority, latest["status"]) and not _acting(authority)
+    budget = chain_budget(revisions)
+    if budget is not None:
+        return wakes and not (latest["status"] in BUDGET_SILENT and budget[0] >= budget[1])
+    return wakes and not (latest["status"] == "review_exhausted"
+                          and latest["revision"] in queue.get(ARCHITECT_KEY, []))
 
 
 def architect_made(authority, version):
@@ -288,6 +330,9 @@ def _event_line(event):
     """One wake event as the event turn names it: a state event by its milestone, attempt and transition; a plan
     event by its revision and transition (RS5); a verdict event by its milestone, task, round, role, verdict and its
     text as one line (`_one_line`), clipped to `VERDICT_TEXT` characters."""
+    if event.get("kind") == "result":
+        return "Late result of %s: %s - %s" % (event["operation"], event["outcome"],
+                                                _one_line("; ".join(event["lines"])))
     if event.get("kind") == "plan":
         return "plan r%s: %s -> %s" % (event["plan_revision"], event.get("previous") or "—", event["status"])
     if event.get("kind") == "verdict":
@@ -352,6 +397,12 @@ def validate_feed(queue):
                   and type(event.get("plan_revision")) is int and event["plan_revision"] >= 1
                   and isinstance(event.get("wake"), bool) and isinstance(event.get("at"), str) and bool(event["at"]))
         require(common, INVALID)
+        if event["kind"] == "result":
+            require(set(event) == RESULT_KEYS and isinstance(event.get("operation"), str)
+                    and isinstance(event.get("outcome"), str) and isinstance(event.get("family"), str)
+                    and isinstance(event.get("lines"), list) and all(isinstance(line, str) for line in event["lines"]),
+                    INVALID)
+            continue
         if event["kind"] == "plan":
             require(set(event) == PLAN_EVENT_KEYS and event.get("status") in PLAN_STATUSES
                     and (event.get("previous") is None or event["previous"] in PLAN_STATUSES)

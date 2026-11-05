@@ -49,7 +49,7 @@ ACCEPTED_KEYS = tuple(KEYS - set(missing) for size in range(len(LATER_KEYS) + 1)
 ROLES = {"worker": "worker", "code_review": "code review", "acceptance_review": "acceptance",
          "steward_apply": "steward", "final_verify": "final check", "final_reverify": "final check",
          "scope_verify": "final check", "repair": "final-check repair", "planner": "planner",
-         "plan_verifier": "plan check", "critic": "plan check", "preflight": "pre-check",
+         "plan_verifier": "plan check", "critic": "plan check", "comprehension": "plan reader", "preflight": "pre-check",
          "select_init": "task selection",
          "select": "task selection", "select_verify": "task selection", "steward_decide": "steward"}
 PLANNER_ROLES = dict(ROLES, repair="plan rework")
@@ -84,7 +84,9 @@ def valid(value):
 
     def verdicts(v):
         def entry(e):
-            return (isinstance(e, dict) and set(e) == VERDICT_KEYS and stamp(e["at"]) and e["at"] is not None
+            return (isinstance(e, dict) and set(e) in (VERDICT_KEYS, VERDICT_KEYS | {"execution"})
+                    and ("execution" not in e or isinstance(e["execution"], str) and bool(e["execution"]))
+                    and stamp(e["at"]) and e["at"] is not None
                     and (e["task"] is None or isinstance(e["task"], str))
                     and (e["round"] is None or type(e["round"]) is int and e["round"] >= 1)
                     and e["role"] in VERDICT_ROLES
@@ -159,7 +161,7 @@ def timeline(live, active, stamp, ended=False):
     """Update the planner step timeline `live["steps"]` (P2a) from one watch record; returns nothing.
 
     `active` is the record's `status.activeExecutions` (the same list the record's `nodes` are made of). Every
-    execution on it the timeline does not carry yet is appended as `[node_base, execution, first, end]` with
+    execution on it the timeline does not carry yet is appended as `[node, execution, first, end]` with
     `first` = `stamp`; every open step (`end` None) whose execution is no longer on it gets `end` = `stamp`. An
     `ended` record is the one that finishes the run: nothing is active any more, so no step is added there and
     every open step is closed at `stamp` (the envelope kept beside a finished run may still list executions).
@@ -174,7 +176,7 @@ def timeline(live, active, stamp, ended=False):
     known = {step[1] for step in kept}
     for entry in active:
         if entry["execution"] not in known:
-            bounded(kept, [base(entry["node"]), entry["execution"], stamp, None], STEPS_LIMIT)
+            bounded(kept, [entry["node"], entry["execution"], stamp, None], STEPS_LIMIT)
 
 
 NATIVE = re.compile(r"nv2-[0-9a-f]{64}\Z")  # a native selector: opaque, it names no task, whatever a task is called
@@ -214,8 +216,9 @@ def stages(live, status, stamp, tasks=()):
 
     Returns the departed reviewers as `(role, execution)` pairs, role the node base, oldest first: a
     `acceptance_review`/`code_review` execution of the previous `live["nodes"]` that this record no longer lists.
-    The caller queues them (C4a); `stages` itself persists nothing but the stage journal and the new `live["nodes"]`."""
+    The caller queues them (C4a); `stages` updates the bounded execution timeline, journal and `live["nodes"]`."""
     previous = live["nodes"]
+    timeline(live, status.get("activeExecutions", []), stamp)
     live["nodes"] = [[a["node"], a["execution"]] for a in status.get("activeExecutions", [])]
     current = {execution for _, execution in live["nodes"]}
     departed = [(base(node), execution) for node, execution in previous
@@ -426,7 +429,30 @@ def flow(live, started, now, rounds=None):
 
     attempt = live.get("finals") or None
     check = None if attempt is None else "final_reverify" if live["repairs"] else "final_verify"
-    return {"task": task or None, "round": number, "rounds": rounds, "worker": {"state": worker_state},
+    events = []
+    attempts = {}
+    for node, execution, first, end in live.get("steps", []):
+        attempts[node] = attempts.get(node, 0) + 1
+        elapsed = seconds_between(first, end or now)
+        state, result = ("unknown", "outcome unknown") if end else ("running", "")
+        if end:
+            # Role/task/round (or timestamps alone) cannot bind a retry's outcome. Legacy
+            # verdicts without an execution id remain useful summaries, never execution proof.
+            verdict = next((entry for entry in reversed(verdicts)
+                            if entry.get("execution") == execution and entry["role"] == base(node)), None)
+            if verdict is not None:
+                state = {"accepted": "succeeded", "rejected": "failed", "conflict": "failed"}.get(
+                    verdict["verdict"], verdict["verdict"])
+                result = verdict["text"]
+
+        events.append({"node": node, "state": state, "execution": execution,
+                       # A full bounded window cannot prove the absolute attempt number.
+                       "attempt": attempts[node] if len(live.get("steps", [])) < STEPS_LIMIT else None,
+                       "duration": duration(elapsed) if elapsed is not None else "", "result": result})
+    # Active facts retain exact engine names, including generated paths and empty_ variants.
+    events.extend({"node": node, "state": "running", "execution": execution, "result": ""}
+                  for node, execution in nodes)
+    return {"events": events, "task": task or None, "round": number, "rounds": rounds, "worker": {"state": worker_state},
             "reviewers": reviewers,
             "final": {"state": "running" if on("final_verify", "final_reverify", "scope_verify", "repair")
                       else "waiting", "attempt": attempt, "check": check},

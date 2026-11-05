@@ -3,7 +3,7 @@ U1b — the stage graph's loops and its optional branch in the owner's words (A1
 
 The tests read the plain text of the result (`.plain`), never styles, except A5, which is the one style check (a
 failed reviewer and a failed worker must not look the same). Only `render`, `legend` and `observation_from_flow`
-are used; the graphs are the two the task names, built from `milestone.milestone_graph(3)` and
+are used; the graphs are the two the task names, built from `milestone.milestone_graph()` and
 `engine.planner_graph_v2(3)` (the same shapes as `devtools/ui-lab/fixtures/*.json`).
 
 Interpretations recorded here (the worker's final summary is not shown to reviewers):
@@ -36,15 +36,17 @@ Interpretations recorded here (the worker's final summary is not shown to review
 import unittest
 from unittest.mock import patch
 
+import tui_support  # bootstrap the documented offline wheelhouse before importing Rich
+
 # The source-hygiene scan (`tests.test_toolchain`) imports every test module with neither Textual nor Rich
 # importable, so Rich — and `scheme`, which draws with it — is imported only when it is there; the tests are then
 # declared and skipped, never hidden (unittest discovery must see them).
 try:
     from rich.cells import cell_len
-    from terminal_planner import engine, milestone
+    from terminal_planner import engine, live, milestone
     from terminal_planner.tui import scheme
 except ImportError:  # pragma: no cover - covered by the bare import scan of tests.test_toolchain
-    cell_len = engine = milestone = scheme = None
+    cell_len = engine = live = milestone = scheme = None
 HAVE_RICH = scheme is not None
 RICH_REASON = "Rich unavailable: ZPLAN_TEST_WHEELHOUSE with the rich wheels is needed"
 
@@ -78,7 +80,7 @@ GLOSSARY_RU = {
 @unittest.skipUnless(HAVE_RICH, RICH_REASON)
 class SchemeTests(unittest.TestCase):
     def milestone_graph(self):
-        return milestone.milestone_graph(3)["root"]
+        return milestone.milestone_graph()["root"]
 
     def planner_graph(self):
         return engine.planner_graph_v2(3)["root"]
@@ -114,7 +116,7 @@ class SchemeTests(unittest.TestCase):
                       scheme.render(graph, {"acceptance_review": {"state": "failed"}}, 70, 30).plain)
         self.assertIn("! worker", scheme.render(graph, {"worker": {"state": "failed"}}, 70, 30).plain)
         self.assertIn("◌ worker", scheme.render(graph, {}, 70, 30).plain)
-        # A choice draws only the taken branch; before anything ran, the default (the first) one.
+        # Before a choice is decided only its default path is expanded; once decided, untaken paths stay named.
         choice = {"kind": "seq", "name": "g", "children": [
             {"kind": "choice", "name": "pick", "branches": [
                 {"node": {"kind": "step", "name": "left_step"}},
@@ -124,7 +126,8 @@ class SchemeTests(unittest.TestCase):
         self.assertNotIn("right step", default)
         taken = scheme.render(choice, {"right_step": {"state": "running"}}, 70, 30).plain
         self.assertIn("right step", taken)
-        self.assertNotIn("left step", taken)
+        self.assertIn("left step", taken)
+        self.assertIn("skipped", taken)
         # A loop shows ↻ with its round (count) out of maxIterations, or "up to N times" when no count is set.
         loop = {"kind": "loop", "name": "review_loop", "maxIterations": 4, "body": {"kind": "step", "name": "worker"}}
         self.assertIn("↻ review rounds · 2 of 4", scheme.render(loop, {"review_loop": {"count": 2}}, 70, 2).plain)
@@ -138,7 +141,7 @@ class SchemeTests(unittest.TestCase):
         self.assertEqual(scheme.legend().plain, "◐ running  ✓ done  ✗ rejected  ◌ waiting  ")
         graph = self.milestone_graph()
         observation = {"worker": {"state": "succeeded"}, "review_loop": {"count": 1}}
-        english = scheme.render(graph, observation, 70, 30).plain
+        english = scheme.render(graph, observation, 70, 30, limits={"review_loop": 4}).plain  # a bound is a fact of the attempt
         self.assertIn("worker", english)
         self.assertIn("done", english)
         self.assertIn("1 of 4", english)
@@ -304,7 +307,12 @@ class SchemeTests(unittest.TestCase):
         observed = {"left_step": {"state": "skipped"}, "right_step": {"state": "running"}}
         plain = scheme.render(choice, observed, 70, 30).plain
         self.assertIn("right step", plain)
-        self.assertNotIn("left step", plain)
+        self.assertIn("left step", plain)  # untaken, but still part of the actual graph
+        for name, mark in (("left_step", "–"), ("right_step", "◐")):
+            leaf = {"kind": "step", "name": name}
+            rendered = scheme.render(leaf, observed, 70, 30, tick=0).plain
+            self.assertIn(mark, rendered)
+            self.assertIn(name.replace("_", " "), rendered)
 
     def test_a3_glossary_derived_callable(self):
         """A3 regression: a callable holding only GLOSSARY ids/placeholders renders both graphs, count set and unset.
@@ -354,6 +362,7 @@ class SchemeTests(unittest.TestCase):
     # 20 and the review loop on round 1 of 4, no other node set) and the owner-approved lines the lab draws
     # (`devtools/ui-lab/flowdraw.py` NAMES/`_leaf`; `flowdraw.render(milestone graph, obs, 110, 34, 0)`).
     U1B_OBS = {"task_loop": {"count": 3}, "review_loop": {"count": 1}}
+    U1B_LIMITS = {"review_loop": 4, "task_loop": 20, "repair_loop": 3}  # the bounds are facts of the attempt (the graph holds ceilings)
     U1B_LINES = ("↻ tasks one by one · 3 of 20", "↻ review rounds · 1 of 4",
                  "? if needed: fix-up after the final check", "↻ fix-up rounds · up to 3 times",
                  "┆ │ ◌ stage fix-up · if needed")
@@ -372,7 +381,7 @@ class SchemeTests(unittest.TestCase):
                           ("repair_loop", "flow.repair_loop"), ("final_repair", "flow.final_repair")):
             with self.subTest(name):
                 self.assertEqual(scheme.NODE_IDS.get(name), gid)
-        plain = scheme.render(self.milestone_graph(), self.U1B_OBS, 110, 34, 0).plain
+        plain = scheme.render(self.milestone_graph(), self.U1B_OBS, 110, 34, 0, limits=self.U1B_LIMITS).plain
         for line in self.U1B_LINES:
             with self.subTest(line):
                 self.assertIn(line, plain)
@@ -416,7 +425,7 @@ class SchemeTests(unittest.TestCase):
         `state.if_needed` word, as the approved lab `_leaf` does. A `words` callable returning its id shows which
         id each part requests."""
         graph = self.milestone_graph()
-        plain = scheme.render(graph, self.U1B_OBS, 110, 34, 0).plain
+        plain = scheme.render(graph, self.U1B_OBS, 110, 34, 0, limits=self.U1B_LIMITS).plain
         self.assertEqual(plain.count("fix-up after the final check"), 1)  # the header names the branch once
         self.assertIn("◌ stage fix-up · if needed", plain)  # the step's word is the plain if_needed word
         seen = []
@@ -425,7 +434,7 @@ class SchemeTests(unittest.TestCase):
             seen.append(gid)
             return "«%s»" % gid
 
-        ids = scheme.render(graph, self.U1B_OBS, 110, 34, 0, words=words).plain
+        ids = scheme.render(graph, self.U1B_OBS, 110, 34, 0, words=words, limits=self.U1B_LIMITS).plain
         self.assertIn("«state.if_needed»", ids)  # the step inside the branch asks for state.if_needed
         self.assertIn("«flow.optional»", ids)  # the branch header asks for flow.optional
         self.assertIn("flow.optional", seen)
@@ -440,10 +449,163 @@ class SchemeTests(unittest.TestCase):
         given is still substituted here."""
         from terminal_planner.tui import strings
         with patch("terminal_planner.tui.strings.language", return_value="en"):
-            plain = scheme.render(self.milestone_graph(), self.U1B_OBS, 110, 34, 0, words=strings.text).plain
+            plain = scheme.render(self.milestone_graph(), self.U1B_OBS, 110, 34, 0, words=strings.text,
+                                  limits=self.U1B_LIMITS).plain
         self.assertIn("↻ tasks one by one · 3 of 20", plain)
         self.assertIn("↻ review rounds · 1 of 4", plain)
         self.assertIn("? if needed: fix-up after the final check", plain)
         self.assertIn("↻ fix-up rounds · up to 3 times", plain)
         self.assertIn("◌ stage fix-up · if needed", plain)
         self.assertIn("if needed", plain)
+
+    def test_arbitrary_non_linear_graph_keeps_parallel_choices_exits_and_attempt_evidence(self):
+        """Graph JSON plus observed events keeps the real structure; no decorative linear completion flags."""
+        graph = {"kind": "seq", "name": "root", "children": [
+            {"kind": "step", "name": "worker"},
+            {"kind": "par", "name": "reviews", "branches": [
+                {"kind": "verifier", "name": "acceptance_review"},
+                {"kind": "seq", "name": "code_and_repair", "children": [
+                    {"kind": "verifier", "name": "code_review"},
+                    {"kind": "loop", "name": "repair_loop", "maxIterations": 3,
+                     "body": {"kind": "step", "name": "repair"}}]}]},
+            {"kind": "choice", "name": "result", "branches": [
+                {"node": {"kind": "fail", "name": "failure_exit"}},
+                {"node": {"kind": "succeed", "name": "success_exit"}}],
+             "otherwise": {"kind": "verifier", "name": "final_check"}}]}
+        events = [
+            {"node": "worker", "state": "succeeded", "attempt": 1, "duration": "4s", "result": "committed"},
+            {"node": "acceptance_review", "state": "failed", "attempt": 1, "duration": "3s", "result": "changes requested"},
+            {"node": "code_review", "state": "succeeded", "attempt": 1, "duration": "2s", "result": "accepted"},
+            {"node": "repair", "state": "running", "attempt": 2, "duration": "5s", "result": "repairing"},
+            {"node": "repair_loop", "count": 2},
+            {"node": "failure_exit", "state": "skipped"},
+            {"node": "success_exit", "state": "skipped"},
+        ]
+        observation = scheme.observation_from_events(events)
+        observation["repair"]["title"] = "retry-node"
+        self.assertEqual((observation["repair"]["state"], observation["repair"]["attempt"]), ("running", 2))
+        self.assertEqual((observation["code_review"]["state"], observation["code_review"]["attempt"]), ("succeeded", 1))
+        plain = scheme.render(graph, observation, 140, 60).plain
+        for expected in ("worker · attempt 1", "committed", "acceptance review", "code review",
+                         "retry-node · attempt 2", "repairing", "failure exit", "success exit", "final check",
+                         "↻ fix-up rounds · 2 of 3"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, plain)
+        self.assertIn("changes requested", plain)
+        self.assertIn("5s", plain)
+
+    def test_nested_parallel_branches_keep_fork_join_and_branch_membership(self):
+        a, b, c = ({"kind": "step", "name": name} for name in ("A", "B", "C"))
+        parallel = {"kind": "par", "children": [a, {"kind": "seq", "children": [b, c]}]}
+        sequential = {"kind": "seq", "children": [a, b, c]}
+        for width, height in ((80, 24), (140, 60)):
+            with self.subTest(size=(width, height)):
+                drawn = scheme.render(parallel, {}, width, height).plain
+                self.assertNotEqual(drawn, scheme.render(sequential, {}, width, height).plain)
+                self.assertIn("parallel fork", drawn)
+                self.assertIn("join", drawn)
+                first, second = drawn.split("branch 1", 1)[1].split("branch 2", 1)
+                self.assertIn("A", first)
+                self.assertNotIn("B", first)
+                self.assertNotIn("C", first)
+                self.assertIn("B", second)
+                self.assertIn("C", second)
+                self.assertNotIn("A", second)
+                self.assertLess(second.index("B"), second.index("C"))
+                self.assertTrue(all(cell_len(line) <= width for line in drawn.splitlines()))
+                self.assertLessEqual(len(drawn.splitlines()), height)
+
+    def test_a_retry_does_not_inherit_an_earlier_or_legacy_verdict(self):
+        for identity in ({}, {"execution": "T1-review-old"}):
+            with self.subTest(identity=identity):
+                facts = live.new()
+                facts.update(task="T1", workers=1)
+                facts["verdicts"] = [dict(at="2026-01-01T00:00:01Z", task="T1", round=1,
+                                          role="code_review", verdict="accepted", text="old review accepted",
+                                          **identity)]
+                self.assertTrue(live.valid(facts))
+                live.stages(facts, {"activeExecutions": [
+                    {"node": "generated/code_review", "execution": "T1-review-retry"}]}, "2026-01-01T00:00:02Z")
+                live.stages(facts, {"activeExecutions": []}, "2026-01-01T00:00:03Z")
+                graph = {"kind": "verifier", "name": "code_review"}
+                observed = scheme.observation_from_flow(live.flow(facts, None, "2026-01-01T00:00:04Z"), graph)
+                self.assertEqual(observed["code_review"]["execution"], "T1-review-retry")
+                self.assertEqual(observed["code_review"]["state"], "unknown")
+                drawn = scheme.render(graph, observed, 80, 24).plain
+                self.assertNotIn("✓", drawn)
+                self.assertNotIn("old review accepted", drawn)
+                self.assertIn("unknown", drawn)
+
+    def test_legacy_store_verdict_is_a_summary_not_execution_success(self):
+        facts = live.new()
+        facts.pop("steps")
+        facts.update(task="T1", workers=1)
+        facts["verdicts"] = [dict(at="2026-01-01T00:00:01Z", task="T1", round=1,
+                                  role="code_review", verdict="accepted", text="legacy summary")]
+        self.assertTrue(live.valid(facts))
+        flow = live.flow(facts, None, "2026-01-01T00:00:04Z")
+        self.assertEqual(flow["reviewers"][1]["state"], "accepted")  # legacy summary remains readable
+        graph = {"kind": "verifier", "name": "code_review"}
+        drawn = scheme.render(graph, scheme.observation_from_flow(flow, graph), 80, 24).plain
+        self.assertNotIn("✓", drawn)
+        self.assertNotIn("done", drawn)
+
+    def test_eviction_of_a_retry_never_restores_a_stale_success(self):
+        facts = live.new()
+        facts.update(task="T1", workers=1)
+        stamp = "2026-01-01T00:00:01Z"
+        facts["verdicts"] = [dict(at=stamp, task="T1", round=1, role="code_review",
+                                  execution="old", verdict="accepted", text="old success")]
+        graph = {"kind": "verifier", "name": "code_review"}
+        for i in range(live.STEPS_LIMIT + 2):
+            node = "code_review" if i == 0 else "other"
+            live.stages(facts, {"activeExecutions": [{"node": node, "execution": "retry-%s" % i}]}, stamp)
+            live.stages(facts, {"activeExecutions": []}, stamp)
+            observed = scheme.observation_from_flow(live.flow(facts, None, stamp), graph)
+            self.assertNotEqual(observed.get("code_review", {}).get("state"), "succeeded")
+            self.assertNotIn("✓", scheme.render(graph, observed, 80, 24).plain)
+        self.assertFalse(any(step[0] == "code_review" for step in facts["steps"]))
+
+    def test_loop_choice_prefers_current_execution_over_previous_iteration(self):
+        graph = {"kind": "loop", "name": "retry", "maxIterations": 3,
+                 "body": {"kind": "choice", "name": "pick", "branches": [
+                     {"node": {"kind": "step", "name": name}} for name in ("left", "right")]}}
+        facts = live.new()
+        stamp = "2026-01-01T00:00:01Z"
+        for i, name in enumerate(("left", "right", "left")):
+            live.stages(facts, {"activeExecutions": [{"node": name, "execution": str(i)}]}, stamp)
+            for active in (True, False):
+                if not active:
+                    live.stages(facts, {"activeExecutions": []}, stamp)
+                observed = scheme.observation_from_flow(live.flow(facts, None, stamp), graph)
+                for width, height in ((80, 24), (140, 60)):
+                    with self.subTest(iteration=i, active=active, width=width):
+                        drawn = scheme.render(graph, observed, width, height).plain
+                        self.assertIn(name + " · attempt", drawn)
+                        self.assertIn("running" if active else "unknown", drawn)
+                        if i:
+                            self.assertIn("skipped", drawn)
+
+    def test_a_departed_review_keeps_its_known_verdict_in_the_common_projection(self):
+        facts = live.new()
+        facts.update(task="T1", workers=1)
+        stamp = "2026-01-01T00:00:00Z"
+        live.stages(facts, {"activeExecutions": [{"node": "generated/code_review", "execution": "T1-review"}]}, stamp)
+        live.stages(facts, {"activeExecutions": []}, "2026-01-01T00:00:01Z")
+        facts["verdicts"] = [{"at": stamp, "task": "T1", "round": 1, "role": "code_review",
+                              "execution": "T1-review", "verdict": "accepted", "text": "accepted"}]
+        graph = {"kind": "verifier", "name": "code_review"}
+        observed = scheme.observation_from_flow(live.flow(facts, stamp, "2026-01-01T00:00:02Z"), graph)
+        drawn = scheme.render(graph, observed, 80, 24).plain
+        self.assertIn("✓", drawn)
+        self.assertIn("accepted", drawn)
+        self.assertNotIn("unknown", drawn)
+
+    def test_unknown_engine_states_are_not_rendered_as_waiting_or_done(self):
+        graph = {"kind": "step", "name": "custom_build"}
+        observation = scheme.observation_from_events([{"node": "custom_build", "state": "new_engine_state"}])
+        drawn = scheme.render(graph, observation, 80, 24).plain
+        self.assertIn("?", drawn)
+        self.assertIn("unknown", drawn)
+        self.assertNotIn("waiting", drawn)
+        self.assertNotIn("done", drawn)

@@ -148,5 +148,50 @@ class LimitTests(ReadTest):
         self.assertEqual(project_read.search(self.p, self.p, "def")["hits"], [])
 
 
+class UncommittedTests(ReadTest):
+    """F17 (owner's PenPot, 2026-11-04): a project whose files are not committed. The tools still read the last commit
+    only, and every answer says so: an empty listing is not silence, an untracked file is not "outside the project"."""
+
+    def setUp(self):
+        super().setUp()
+        (self.p / "a.py").unlink()
+        git(self.p, "commit", "-q", "--allow-empty", "-m", "init")
+        self.write("README.md", "hello\n")
+        self.write("docs/plan.md", "needle\n")
+        self.write(".env", "PASSWORD = 1\n")
+
+    def test_tools_on_an_uncommitted_project_name_what_they_cannot_see(self):
+        listing = project_read.list_files(self.p, self.p)
+        self.assertEqual(listing["paths"], [])
+        self.assertIn("README.md", listing["note"])
+        self.assertIn("docs/plan.md", listing["note"])
+        self.assertNotIn(".env", listing["note"])  # a credential name is never shown, as in the listing itself
+        self.assertEqual(self.family(project_read.read_file, self.p, "README.md"), "read.uncommitted")
+        self.assertEqual(self.family(project_read.read_file, self.p, "missing.md"), "read.outside_project")
+        found = project_read.search(self.p, self.p, "needle")
+        self.assertEqual(found["hits"], [])
+        self.assertIn("docs/plan.md", found["note"])
+
+    def test_a_modified_file_reads_its_committed_lines_with_a_note_and_a_clean_project_has_none(self):
+        self.commit()
+        self.write("README.md", "changed\n")
+        read = project_read.read_file(self.p, self.p, "README.md")
+        self.assertEqual(read["lines"], ["hello"])
+        self.assertIn("note", read)
+        self.assertIn("README.md", project_read.list_files(self.p, self.p)["note"])
+        git(self.p, "checkout", "--", "README.md")
+        self.assertNotIn("note", project_read.read_file(self.p, self.p, "README.md"))
+        self.assertNotIn("note", project_read.list_files(self.p, self.p))
+        self.assertNotIn("note", project_read.search(self.p, self.p, "needle"))
+
+    def test_the_architect_is_told_its_tools_read_the_last_commit(self):
+        from terminal_planner import architect, architect_tools
+        rule = " ".join(line for line in architect.TOOL_RULES[:3])
+        self.assertIn("zplan_list_files", rule)
+        self.assertIn("last commit", rule)
+        listed = [tool for tool in architect_tools.TOOLS if tool["name"] == "zplan_list_files"][0]
+        self.assertIn("last commit", listed["description"])
+
+
 if __name__ == "__main__":
     unittest.main()

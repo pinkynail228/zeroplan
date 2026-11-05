@@ -150,6 +150,7 @@ class RunCommandShell(MilestoneShell):
             await self.until(pilot, lambda: type(self.app.screen).__name__ == "NoteScreen")
             await pilot.press("escape")
             await self.until(pilot, lambda: self.app.screen is main)
+            await self.until(pilot, lambda: self.app.focused is decline)  # under load focus returns a frame later
             self.assertIs(self.app.focused, decline)
             await pilot.press("/", "s", "t")
             await pilot.pause(0.3)

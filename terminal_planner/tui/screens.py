@@ -77,7 +77,6 @@ class PlanScreen(ButtonScreen):
     from_main = False  # R-A: opened by the owner from the main screen; a plan screen that follows a goal form is not
     ACTION_IDS = {"start": "run", "retry": "run", "restart": "run", "renew": "renew", "login": "login",
                   "watch": "watch", "tail": "tail", "approve": "approve", "override": "override", "revise": "revise",
-                  "reject": "reject",
                   "requirements": "info", "details": "info"}
 
     def compose(self):
@@ -91,7 +90,8 @@ class PlanScreen(ButtonScreen):
     def on_mount(self):
         from .app import PROGRESS_TITLE  # function-level: app imports this module
         self.query_one("#plan-scroll").border_title = "Plan"
-        self.query_one("#plan-progress").border_title = PROGRESS_TITLE
+        g = getattr(self.app.snapshot, "goldfish", False)
+        self.query_one("#plan-progress").border_title = "Plan check" if g else PROGRESS_TITLE
         self.ready = True
         self.render_state()
         self.app.request_check()  # a blocked message is re-checked against the project as it is now
@@ -117,7 +117,7 @@ class PlanScreen(ButtonScreen):
         return list(dict.fromkeys(names))
 
     def render_state(self):
-        from .app import command_hints, plan_tab_line  # function-level: app imports this module
+        from .app import PLAN_CHECK_WORKING, command_hints, plan_tab_line  # function-level: app imports this module
         from .card_kinds import plan_auto_approves
         if not self.ready:
             return
@@ -139,7 +139,8 @@ class PlanScreen(ButtonScreen):
         progress = self.query_one("#plan-progress", Static)
         shown = [command_hints(line) for line in list(app.progress)[-6:]]  # K1d: a failure line names steps, not letters
         progress.display = bool(shown or app.watching)
-        progress.update(Text("\n".join(wrapped(shown or ["The planner is working…"], max(self.size.width - 4, 20)))))
+        idle = PLAN_CHECK_WORKING if getattr(app.snapshot, "goldfish", False) else "The planner is working…"
+        progress.update(Text("\n".join(wrapped(shown or [idle], max(self.size.width - 4, 20)))))
         state = (view.version, view.kind, view.status) if view else None
         self.sync_buttons(self.offered(), fresh=state != self.row_state)
         self.row_state = state
@@ -211,12 +212,6 @@ class PlanScreen(ButtonScreen):
                 NoteScreen("Approve plan r%s despite the check?" % version, answer=True,
                            label="Reason (one line, at most 500 characters); the plan check stays on record."),
                 lambda text: self.app.override_note(version, text))
-
-    def action_reject(self):
-        if self.allowed("reject"):
-            version = self.view().version
-            self.app.confirm("Reject proposal r%s? Nothing will run; the proposal stays as it is."
-                             % version, lambda: self.app.decide("reject", version))
 
     def action_revise(self):
         if self.allowed("revise"):

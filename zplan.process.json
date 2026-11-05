@@ -32,12 +32,18 @@
   "gates": {
     "plan": "required",
     "task": "off",
-    "merge": "off"
+    "merge": "required"
   },
   "limits": {
     "plan_rounds": 3,
     "task_rounds": 2,
     "merge_rounds": 2
   },
-  "checks": []
+  "checks": [
+    {
+      "name": "test",
+      "argv": ["python3.13", "devtools/fasttest.py"],
+      "timeout_s": 3600
+    }
+  ]
 }

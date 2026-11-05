@@ -8,11 +8,9 @@ the chat without Textual against the scripted codex of tests/test_tui_chat.py.
 Interpretations (the task leaves these open):
 - The handoff and warm-up messages are stored under the `system` role (`chat.PROMPT_ROLE`, O4): the owner did not
   type them and the pane never shows that role; the architect's replies to them stay `architect` rows.
-- O4: "the reset row is the first line, one short «новый диалог» line" — the stored reset row (`Новый диалог: …`) is
-  that line; its text is not changed. Rows cut by the reset and the hidden prompts still count in `occurrence` and
-  `ChatState.transcript` (the place among the store's role rows), so stamps and draft-card keys keep their meaning.
-- O4: «nothing from before the reset» for the note and the live text: after the thread is forgotten the pane reloads
-  and the note is the reset note alone; the handoff turn's streamed text is cleared.
+- The reset row is a visible session divider; earlier project history stays readable around it. Hidden prompts do not
+  take a visible row, but still count in `occurrence` and `ChatState.transcript` for stable stamps and draft keys.
+- The note and live text still reset with the model session: the handoff turn's streamed text is cleared.
 - "the `chat_snapshot()` of that moment" is the snapshot taken when `/new` or Ctrl+R is pressed; the handoff turn and
   the warm-up turn both carry it, and the warm-up message holds it as JSON.
 - The warm-up reads the STATE when it runs; an unreadable STATE counts as "(none)".
@@ -136,23 +134,25 @@ class NewSessionTests(unittest.TestCase):
         self.assertFalse(chat_module.session_long((1, 1_999_999)))
         self.assertFalse(chat_module.session_long(None))
 
-    def test_o4_c1_c4_the_pane_starts_at_the_last_reset_row_and_the_store_keeps_every_row(self):
-        """O4 C1/C4: rows A, B, reset, C -> the pane shows reset, C (a start of the chat reads the same rows); with no
-        reset row every row is shown, still capped at `history`; the store is untouched."""
+    def test_the_pane_keeps_history_before_the_reset_divider_and_the_store_keeps_every_row(self):
+        """Rows A, B, reset, C remain one timeline; reset is a divider, not a deletion or a new project history."""
         rows = [{"role": "owner", "text": "A"}, {"role": "architect", "text": "B"},
                 {"role": "reset", "text": "Новый диалог: прежний thread id забыт."}, {"role": "owner", "text": "C"}]
         shown = chat_module.entries_of(rows)
-        self.assertEqual([(entry.role, entry.occurrence) for entry in shown], [("reset", 2), ("owner", 3)])
+        self.assertEqual([(entry.role, entry.occurrence) for entry in shown],
+                         [("owner", 0), ("architect", 1), ("reset", 2), ("owner", 3)])
         self.assertEqual(chat_module.transcript_size(rows), 4)
         self.assertEqual([entry.text for entry in chat_module.entries_of(rows[:2])], ["A", "B"])
         self.assertEqual(len(chat_module.entries_of(rows[:2] * 30, history=5)), 5)
         again = rows + [{"role": "reset", "text": "x"}]
-        self.assertEqual([entry.role for entry in chat_module.entries_of(again)], ["reset"])
+        self.assertEqual([entry.role for entry in chat_module.entries_of(again)],
+                         ["owner", "architect", "reset", "owner", "reset"])
         store = self.fixture.store()
         for row in rows:
             store.append(row["role"], text=row["text"])
         chat = self.chat([])
-        self.assertEqual([entry.text for entry in chat.state.entries][1:], ["C"])
+        self.assertEqual([entry.text for entry in chat.state.entries], ["A", "B",
+                         "Новый диалог: прежний thread id забыт.", "C"])
         self.assertEqual(len(store.transcript()), 4)
 
     def test_o4_c2_old_stores_keep_the_prompts_as_events_rows_and_the_pane_hides_them(self):
@@ -166,19 +166,16 @@ class NewSessionTests(unittest.TestCase):
                          [("architect", "сохранил"), ("architect", "Мы тут"), ("events", "задача готова")])
         self.assertEqual([entry.occurrence for entry in chat_module.entries_of(rows)], [1, 3, 4])
 
-    def test_o4_c3_after_new_nothing_from_before_the_reset_is_on_the_pane(self):
-        """O4 C3: a chat with an owner turn, `/new` -> the pane holds the reset line and the warm-up reply only (no
-        prompt, no earlier row), the handoff turn's streamed text is gone and the note is the reset note; the store
-        keeps all seven rows. C5: the owner turn still counts (usage) and a following owner turn is shown after the
-        reset."""
+    def test_after_new_the_reset_divides_but_does_not_hide_the_project_history(self):
+        """The new model session clears live text, while all earlier visible rows remain around its reset divider."""
         project_state.write(self.project, STATE)
         chat = self.chat([{"lines": REPLY}, {"lines": REPLY}, {"lines": NEW_REPLY}, {"lines": NEW_REPLY}])
         self.first_turn(chat)
         self.assertTrue(chat.new_session(SNAPSHOT)[0])
         self.idle(chat)
-        self.assertEqual([(entry.role, entry.text) for entry in chat.state.entries][1:], [("architect", "Продолжаем.")])
-        self.assertEqual(chat.state.entries[0].role, "reset")
-        self.assertEqual(len(chat.state.entries), 2)
+        self.assertEqual([(entry.role, entry.text) for entry in chat.state.entries],
+                         [("owner", "начнём"), ("architect", "Привет."), ("architect", "Привет."),
+                          ("reset", "New dialog: the previous thread id is forgotten."), ("architect", "Продолжаем.")])
         self.assertEqual(chat.state.live, "")
         self.assertIn("New conversation", chat.state.note)
         self.assertEqual(len(self.roles()), 7)
@@ -186,7 +183,8 @@ class NewSessionTests(unittest.TestCase):
         self.assertEqual(chat.state.usage[0], 3)
         self.assertTrue(chat.send("дальше")[0])
         self.idle(chat)
-        self.assertEqual([entry.role for entry in chat.state.entries], ["reset", "architect", "owner", "architect"])
+        self.assertEqual([entry.role for entry in chat.state.entries],
+                         ["owner", "architect", "architect", "reset", "architect", "owner", "architect"])
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)

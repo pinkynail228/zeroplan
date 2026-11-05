@@ -350,7 +350,7 @@ class _Screen:
 
     def __init__(self, snapshot=None, controller=None):
         self.box, self.app = _Slot(), _Pad(snapshot, controller)
-        self.card_widgets, self.card_specs, self.draft_cards, self.cards_seen = {}, {}, {}, set()
+        self.card_widgets, self.card_specs, self.cards_seen = {}, {}, set()
 
     def query_one(self, selector, *args):
         if selector == "#chat":

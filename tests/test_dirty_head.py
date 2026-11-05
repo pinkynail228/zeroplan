@@ -178,10 +178,10 @@ class ReadTests(tp.ProjectTest):
         self.assertEqual(project_read.search(root, root, "needle")["hits"], [])
         self.assertEqual(project_read.search(root, root, "only in")["hits"],
                          [{"path": "kept.txt", "line": 1, "text": "only in head"}])
-        for path in ("new.txt", "link"):
+        for path, family in (("new.txt", "read.uncommitted"), ("link", "read.outside_project")):
             with self.assertRaises(Blocked) as raised:
                 project_read.read_file(root, root, path)
-            self.assertEqual(raised.exception.family, "read.outside_project")
+            self.assertEqual(raised.exception.family, family)
 
     def test_k4_uncommitted_paths_follow_status_including_renames(self):
         self.git("mv", "source.txt", "moved.txt")

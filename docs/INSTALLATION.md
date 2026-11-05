@@ -32,8 +32,8 @@ brew install python node
   there is no guarded mode; install zplan only under a user and on a machine where that is acceptable. The
   architect chat itself runs Codex read-only.
 - **Autonomy.** The process profile zplan proposes on the first start in a project sets `autonomy.level` to `auto`:
-  while the full-screen shell is open, the architect approves a checked plan and starts or resumes ready
-  milestones by itself. `"autonomy": {"level": "manual"}` in `zplan.process.json` makes it ask for each of these;
+  the first revision of every plan waits for your yes; after it, while the full-screen shell is open, the architect
+  approves later checked revisions and starts or resumes ready milestones by itself. `"autonomy": {"level": "manual"}` in `zplan.process.json` makes it ask for each of these;
   `supervised` asks for the plan approval and for high-risk merges. On that first start «configure» sets the autonomy level,
   parallel runs (1-3), the merge rule and each role's model and effort before saving; `/setup` → «profile» changes them
   later. At `auto` the architect merges each milestone after its reviews pass, `supervised` unless the change is high
@@ -79,7 +79,7 @@ cd zeroplan
 python3 install.py
 export PATH="${ZEROSHOT_TOOLS:-$HOME/.local}/bin:$PATH"
 zplan --version            # zplan 0.8.3
-zplan setup                # pinned Zeroshot 10.16.0 + Codex 0.162.1
+zplan setup                # pinned Zeroshot 11.0.0 + Codex 0.162.1
 zplan login                # Codex device login
 ```
 
@@ -108,15 +108,15 @@ maintainer's qualification checklist: [UPGRADE.md](UPGRADE.md).
 ## Setup, login, doctor
 
 ```sh
-zplan setup     # pinned Zeroshot 10.16.0 + Codex 0.162.1; rerunnable, verifies hashes
+zplan setup     # pinned Zeroshot 11.0.0 + Codex 0.162.1; rerunnable, verifies hashes
 zplan login     # Codex device login (enable device login for your account if asked)
 cd /path/to/your-project
 zplan doctor    # every line OK: → ready
 ```
 
-- `zplan setup` downloads Zeroshot 10.16.0 and checks its pinned SHA256, installs Codex 0.162.1 from the bundled
+- `zplan setup` downloads Zeroshot 11.0.0 and checks its pinned SHA256, installs Codex 0.162.1 from the bundled
   npm lockfile with `npm ci`, verifies both versions and only then publishes the tool directory
-  (`tools/zeroshot-10.16.0-codex-0.162.1-runtime2`). A failed setup publishes nothing; corrupt tools fail closed.
+  (`tools/zeroshot-11.0.0-codex-0.162.1-runtime2`). A failed setup publishes nothing; corrupt tools fail closed.
   Global `zeroshot` / `codex` installations are never used or replaced.
 - `zplan login` first runs the pinned Codex `login status` (file credential store) in zplan's own Codex home: a login
   that is there is kept («Login already present»); otherwise it runs `login --device-auth`. To sign in again run
@@ -153,7 +153,7 @@ zplan doctor    # every line OK: → ready
 | --- | --- |
 | App venvs | `~/.local/share/planning-kit/app/<version>/` |
 | Launcher | `~/.local/bin/zplan` or `$ZEROSHOT_TOOLS/bin/zplan` |
-| Pinned tools | `~/.local/share/planning-kit/tools/zeroshot-10.16.0-codex-0.162.1-runtime2/` |
+| Pinned tools | `~/.local/share/planning-kit/tools/zeroshot-11.0.0-codex-0.162.1-runtime2/` |
 | Codex home | zplan's own `~/.local/share/planning-kit/codex-home/`; an explicit `$CODEX_HOME` overrides it |
 | Roles | `~/.config/planning-kit/roles.json` |
 | Plan and run records | `~/Library/Application Support/PlanningKit/production/v3/<project>/planning.json` |

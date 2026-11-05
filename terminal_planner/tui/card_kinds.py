@@ -24,6 +24,7 @@ from . import cards, chat as chat_module, strings
 from .modals import NoteScreen
 from .text import ELLIPSIS, display_width, elide_end, plain_lines, wrapped
 
+TAB_DRAFTS = "tab-drafts"  # the third fixed canvas tab (v3d): the goal drafts of the retained history
 TAB_LIVE = "tab-live"  # never `#plan`/`#live`: the pane bodies keep those ids (`app` pairs it with `TAB_PLAN`)
 STATUS_SHARE = 0.4  # #status is capped at 40% of the left pane (zplan.tcss): more lines would be cut from the bottom
 NOT_STARTED_BELOW = "Not started: fix the items marked below first."  # the marked items follow the message
@@ -37,11 +38,11 @@ FIX_KEY = re.compile(r"\s+—\s+\[i\].*$")  # [i] of the plain readiness screen 
 # `MainScreen.run_command`, which is the only caller — `argument` is the parsed argument ("" when there is none) and
 # `key` the card the command came from (None: a typed line, which acts on the newest card of that kind). A `Submitted`
 # command absent from here shows `note.not_now` like a refusal; later runs add one entry each. i3a
-# wires /plan and /decline to the draft card and /open and /diff to the canvas tabs (/diff used to reach
+# wires /plan to the newest sendable goal draft and /open and /diff to the canvas tabs (/diff used to reach
 # `action_open_milestone`; i5's `open_diff_tab` is what it names now).
 # `/language CODE` passes the typed code to i6's `choose_language(code)`; a bare `/language` opens the chooser.
 def card_kind(key):
-    """The kind of a card key: its prefix before `:` (`draft:<hash>` -> `draft`)."""
+    """The kind of a card key: its prefix before `:` (`merge:r1:M1:1` -> `merge`)."""
     return key.split(":", 1)[0]
 
 
@@ -58,7 +59,7 @@ def token_run_id(outcome):
 # key)}. CARD_SOURCES: {kind: callable(screen) -> iterable of CardSpec}; `render_state` shows what a source returns and
 # takes off that kind's open cards it no longer returns, so a stale card never acts. AUTO_END_CARDS: the end states
 # (`EndView.state`) whose automatic RunScreen at the end of a watch is replaced by their card; [o] still opens it.
-CARD_ROUTES = {("/decline", "draft"): lambda screen, argument, key: screen.action_decline(argument, key)}
+CARD_ROUTES = {}
 CARD_SOURCES = {}
 AUTO_END_CARDS = set()  # a card run adds its states: AUTO_END_CARDS.add("awaiting_merge")
 
@@ -81,7 +82,7 @@ def card_route(command, fallback=None):
 COMMAND_ACTIONS = {
     "/help": lambda screen, argument, key: screen.app.action_help(),
     "/quit": lambda screen, argument, key: screen.app.run_worker(screen.app.action_quit()),
-    "/stop": lambda screen, argument, key: screen.stop_running_row(),
+    "/stop": lambda screen, argument, key: screen.stop_running_row(argument),
     "/new": lambda screen, argument, key: screen.action_reset_session(),
     "/setup": lambda screen, argument, key: screen.app.action_settings(),
     "/status": lambda screen, argument, key: screen.show_status(),
@@ -152,10 +153,9 @@ CARD_KEY_SEP = "\x1f"  # joins the fields of a card key; a draft's text may hold
 
 
 def card_clock():
-    """The `HH:MM` the sent receipt carries (i3a): the wall clock when the owner acts.
+    """The `HH:MM` a card carries (i3a): the wall clock when the card is drawn or the owner acts.
 
-    The receipt is the moment the planner was started, so it is the clock read then — not the reply's time, which
-    is what the open card's own `at` carries (`draft_reply_time`)."""
+    A receipt is the moment the decision was taken, so it is the clock read then."""
     return time.strftime("%H:%M")
 
 
@@ -169,17 +169,16 @@ def stamp_hm(stamp):
     return chat_module.stamp_at(stamp)
 
 
-def draft_card_key(entry, draft, occurrence=None):
-    """The stable key of one goal-draft card (i3a): built from the reply the draft came from, the draft's own text
-    and the *occurrence* of that reply in the store's transcript — never from `draft.identity` alone, because two
-    drafts under one plan (and two drafts of one reply) share the plan identity.
+def draft_key(entry, draft, occurrence=None):
+    """The stable key of one goal draft (i3a): built from the reply the draft came from, the draft's own text and
+    the *occurrence* of that reply in the store's transcript — never from `draft.identity` alone, because two drafts
+    under one plan (and two drafts of one reply) share the plan identity.
 
     `occurrence` is the reply's own place (`reply_occurrence`), so two *identical* replies — the same role, text and
-    draft, and so the same content — are still two cards: that is the fix for the acceptance finding that the same
-    reply repeated under one plan identity was suppressed as already seen. The same stored reply keeps its place
-    across refreshes and restarts, so a card is still shown once per reply and a declined reply stays declined.
-    Without a place (`occurrence is None`: the store cannot be read, the reply is not stored) the content alone
-    decides the key, as before."""
+    draft, and so the same content — are still two drafts: the same reply repeated under one plan identity is not
+    suppressed as already seen. The same stored reply keeps its place across refreshes and restarts, so a draft is
+    noted once per reply. Without a place (`occurrence is None`: the store cannot be read, the reply is not stored)
+    the content alone decides the key."""
     fields = (entry.role, entry.text, draft.kind, draft.text, repr(draft.identity),
               "" if occurrence is None else str(occurrence))
     return "draft:" + hashlib.sha1(CARD_KEY_SEP.join(fields).encode("utf-8", "replace")).hexdigest()
@@ -192,7 +191,7 @@ def reply_occurrence(chat, entry):
 
     The count runs from the start of the file, never from the end of the window the pane happens to keep: the window
     slides (a newer row drops an older one out of `HISTORY`), and a distance from its end would move with it, which
-    would re-key a declined card and bring it back. The newest card is always the newest actionable draft's reply,
+    would re-key a noted draft and note it again. The key is only ever asked for the newest actionable draft's reply,
     so the *last* stored row matching the entry is that reply's own — an identical reply stored *after* it is the
     next occurrence and gets the next key."""
     store = getattr(chat, "store", None)
@@ -212,13 +211,13 @@ def reply_occurrence(chat, entry):
     return found
 
 
-def draft_card_of(chat):
+def newest_draft_of(chat):
     """`(key, draft)` of the newest actionable goal draft of the retained history, or None (i3a).
 
     The choice itself is `chat.newest_goal_draft` — the one source the `[c]` key reads too — and the key is the
-    stable card key of the reply that carries it (`draft_card_key`), with that reply's own place in the store's
-    transcript as its occurrence (`reply_occurrence`); a draft whose own reply is not in the retained history cannot
-    be keyed and is no card."""
+    stable key of the reply that carries it (`draft_key`), with that reply's own place in the store's transcript as
+    its occurrence (`reply_occurrence`); a draft whose own reply is not in the retained history cannot be keyed and
+    is not noted."""
     entries = chat.state.entries
     draft = chat_module.newest_goal_draft(entries)
     if draft is None:
@@ -227,54 +226,35 @@ def draft_card_of(chat):
     if position is None:
         return None
     entry = entries[position]
-    return draft_card_key(entry, draft, reply_occurrence(chat, entry)), draft
+    return draft_key(entry, draft, reply_occurrence(chat, entry)), draft
 
 
-def draft_reply_time(chat, draft):
-    """The `HH:MM` the goal-draft card's `at` carries (i3a/A2): the reply's own time, never the clock the card is
-    drawn at.
-
-    The pane's own data names no time (`chat.ChatEntry` has no timestamp), so the reply is found in the store's
-    transcript — the same rows `chat.entries_of` built the entry from — by the draft it carries (kind, text,
-    milestone and identity all equal), and that row's `ts` gives the time (`stamp_hm`). A store that cannot be
-    read, and a draft no stored row carries, fall back to `card_clock()`; the time is read once per key, right
-    before the card is shown, so no refresh of a history already carrying a card pays for it."""
-    store = getattr(chat, "store", None)
-    if store is not None:
-        try:
-            rows = store.transcript()
-        except (OSError, ValueError):
-            rows = ()
-        for row in reversed(rows):
-            if isinstance(row, dict) and row.get("role") == "architect" and draft in chat_module.drafts_of(row):
-                time_of = stamp_hm(row.get("ts"))
-                if time_of:
-                    return time_of
-    return card_clock()
+def draft_tab_text(entries):
+    """The Drafts canvas tab's body: every goal draft of the retained history, newest first, each with its time
+    (`HH:MM` of its reply, left out when the entry names none) and its whole text, verbatim — the exact text the
+    planner gets, so the tab is what the owner is agreeing to. Every line is escaped by `plain_lines` (L-2), so a
+    terminal sequence in a draft can never reach the screen; the text itself is not changed. No draft: one line
+    saying where the architect's drafts appear."""
+    blocks = []
+    for entry in reversed(tuple(entries)):
+        for draft in reversed(tuple(entry.drafts)):
+            if draft.kind == "goal":
+                time_of = stamp_hm(entry.at)
+                blocks.append("\n".join(([time_of] if time_of else []) + list(plain_lines(draft.text))))
+    return Text("\n\n".join(blocks) if blocks else strings.text("canvas.drafts_empty"))
 
 
-def draft_tab_text(draft):
-    """The «Goal draft» canvas tab's body: the catalog's intro line and then the draft's whole text, verbatim —
-    the exact text the planner gets, so the tab is what the owner is agreeing to. Every line is escaped by
-    `plain_lines` (L-2), so a terminal sequence in the draft can never reach the screen; the text itself is not
-    changed."""
-    return Text("\n".join([strings.text("canvas.draft_intro"), ""] + list(plain_lines(draft.text))))
+class DraftSaved(Message):
+    """v3e: a new goal draft is saved in Drafts — posted by `MainScreen.refresh_drafts`.
 
+    The chat's line and the canvas live in the pane's layout, so mounting them from inside `render_state` (a
+    post-refresh callback) leaves that layout unresolved for a frame. The note is a message instead, handled on the
+    screen's own pump right after the refresh it was posted from, so Textual lays the chat and the canvas out once and
+    the next render reads the settled regions. `key` is the draft's stable key (`draft_key`), `draft` the goal draft."""
 
-class DraftCardRequested(Message):
-    """i3a: a goal-draft card is to be shown (with its canvas tab) — posted by `MainScreen.refresh_draft_card`.
-
-    The card slot and the canvas live in the pane's layout, so mounting them from inside `render_state` (a
-    post-refresh callback) leaves that layout unresolved for a frame: the slot keeps its old rows and the chat body
-    keeps the rows the card took. The request is a message instead, handled on the screen's own pump right after
-    the refresh it was posted from, so Textual lays the slot, the chat body and the canvas out once and the next
-    render reads the settled regions. `key` is the card's stable key, `draft` the goal draft it decides on and `at`
-    the reply's own `HH:MM` (`draft_reply_time`), read then so the card's subtitle is the reply's time."""
-
-    def __init__(self, key, draft, at):
+    def __init__(self, key, draft):
         self.key = key
         self.draft = draft
-        self.at = at
         super().__init__()
 
 
@@ -361,6 +341,8 @@ def merge_card_source(screen):
         counts = screen.merge_counts(key, row.id) if row.token.delivery == "awaiting_merge" else None
         overlap = screen.merge_overlap.get(key, ())
         spec = merge_spec(key, screen.merge_card_at(key), row.id, counts, overlap)
+        if merge_unchecked(snapshot) and not overlap:  # no project check ran: the change is unverified
+            spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_unverified")]))
         if asked.get("merge") == row.id and not overlap:  # P6: the architect asked for this merge; the card is its answer
             spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_asked", stage=row.id)]))
         shown.append(spec)
@@ -503,6 +485,8 @@ def consent_line(request):
     if request.action == "resume":
         return strings.text("card.consent_resume", stage=request.milestone,
                             attempt=(args.get("token") or {}).get("attempt"))
+    if request.action == "settings":
+        return strings.text("card.consent_settings", changes="; ".join(request.lines))
     note = " ".join(str(args.get("note", "")).split())
     return strings.text("card.consent_rebrief", stage=request.milestone, note=elide_end(note, CONSENT_NOTE))
 
@@ -668,6 +652,20 @@ def profile_level(snapshot):
     return "manual"
 
 
+# The same profile view names the merge gate on «  merge check: required|no check  [source]».
+MERGE_CHECK_LINE = "  merge check: "
+
+
+def merge_unchecked(snapshot):
+    """Whether `snapshot.profile` says no project check verifies a merge: its merge-check line does not start with
+    «required». No profile or no such line claims nothing (False); checks listed with the gate off stay unverified."""
+    profile = getattr(snapshot, "profile", None)
+    for line in tuple(getattr(profile, "lines", None) or ()):
+        if line.startswith(MERGE_CHECK_LINE):
+            return not line[len(MERGE_CHECK_LINE):].startswith("required")
+    return False
+
+
 def plan_stale(snapshot):
     """Whether the proposed plan is the RS2 stale one (the project changed after planning)."""
     return getattr(snapshot.plan, "family", None) == "plan.stale"
@@ -677,8 +675,14 @@ def plan_auto_approves(snapshot):
     """Whether the architect approves the proposed plan itself: the plan is proposed and not stale and the policy
     allows `approve` at the profile's level (the same decision `feed._plan_wakes` takes). Any level that cannot be
     read is "manual", which asks."""
+    if getattr(snapshot, "scripted", False):
+        return False  # the fixture script never approves: the owner does
     return (snapshot is not None and snapshot.version is not None and snapshot.status == "proposed"
-            and not plan_stale(snapshot) and autonomy.decide(profile_level(snapshot), "approve") == "allow")
+            and not plan_stale(snapshot) and autonomy.approves_alone(profile_level(snapshot), getattr(snapshot, "chain_approved", False)))
+
+
+READER_LINE = "How a fresh reader understood it:"  # planning.py writes it from the goldfish paraphrase
+READER_WIDTH = 72  # the card's width when its screen reports none
 
 
 def plan_card_spec(key, at, stages, tasks, stale=False, auto=False, narrow=False, milestones=(), asked=False):
@@ -737,6 +741,17 @@ def plan_card_source(screen):
     room = getattr(screen, "question_text_room", None)
     width = room()[1] if room is not None else 0
     listed = []
+    # the fresh reader's paraphrase heads the list: at most three rows
+    reader = next((line for line in tuple(getattr(snapshot.plan, "lines", None) or ())
+                   if line.startswith(READER_LINE)), None)
+    if reader is not None:
+        room = width or READER_WIDTH
+        rows = wrapped([reader], room, 0)
+        listed.extend(rows[:2])
+        listed.append(elide_end(" ".join(rows[2:]), room) if len(rows) > 2 else "")
+        listed = [row for row in listed if row]
+    if merge_unchecked(snapshot):  # no project check will verify a merge: each one waits for the owner
+        listed.append(strings.text("card.plan_no_check"))
     for number, title, count in found[:5]:
         tasks = strings.text("canvas.count_task_one" if count == 1 else "canvas.count_task_many", n=count)
         line = strings.text("card.plan_milestone", number=number, title=title, tasks=tasks)

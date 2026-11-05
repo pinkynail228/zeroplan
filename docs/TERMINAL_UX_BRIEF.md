@@ -18,23 +18,32 @@ button runs the same `/` command a typed line does.
   empty input recall the previous lines of this run. The bar names these keys while the palette is shown, (`bar.key_complete`, `bar.key_pick` in `strings.py`).
 - Each screen ends with a "Next:" hint, and the hint names a command or a button (`/run`, «merge»), never a letter.
 - Enter only sends or presses the focused button. Approve, start, merge and stop always need their own command or
-  button (a start, a stop and the plan screen's approve also ask «yes» / «no»).
+  button, and the typed command or pressed button is the consent: only the planner's stop also asks «yes» / «no».
+- The right column has three fixed tabs: «Scheme» (the live state), «Plan» (the last approved plan and its
+  progress) and «Drafts» (the current revision while it is not approved, above the goal drafts, newest first). The
+  planner's end and a new goal draft bring «Drafts» forward, an approval and a run start bring «Plan» forward,
+  unless the owner chose a tab since their last message or command.
+- An action the architect takes (start, stop, approve, a plan edit, merge) shows as one zplan line on the status
+  line above the chat.
 - Milestone states: waiting, ready, running, needs an answer, blocked, failed (can continue / cannot continue),
   waiting for merge, conflict, merged, submission status unknown.
 
 Flows:
 
-- No plan: tell the architect the goal in the chat -> card «Goal draft» -> «yes, draft the plan» (`/plan`; or type
-  `/plan <goal>`) -> planner progress -> card «Plan» -> «yes, approve» (`/approve`) or «no, revise»
-  (`/decline`, then a revision note). `/view` opens the plan screen with its buttons.
-- Ready: `/run` shows worktree, branches, models and bounds in a confirmation -> «yes» -> observe: one line per
+- No plan: tell the architect the goal in the chat -> the draft lands in «Drafts» with one chat line («Draft saved
+  in Drafts.») -> `/plan` sends the newest draft (`/plan <goal>` is a new goal) -> planner progress -> card «Plan»
+  -> «yes, approve» (`/approve`; the note says «Plan rN approved.», nothing more) or «no, revise» (`/decline`, then
+  a revision note). `/view` opens the plan screen with its buttons.
+- Ready: `/run` starts the ready milestone at once -> observe: one line per
   progress record ("T3 · implementation", "T3 · review: rejected, repair 1/3", "plan: +T8 split T3"). Ctrl+Q = detach
-  (the run continues; `/attempt` watches it again); `/stop` stops with a confirmation.
+  (the run continues; `/attempt` watches it again); `/stop M1` stops at once, and a bare `/stop` does too when one
+  run is going (with several it names `/stop M1, /stop M2` and stops nothing).
 - Done: card «M1 ready» with the tasks line -> «merge» (`/merge`) or «see the changes» (`/diff`).
 - Needs answer: card with the steward's question -> «simplify», «split», «skip» (`/approve`), your own words
   in the answer note (`/decline`) or the architect's draft (`/answer`).
 - Blocked: the run-end screen (`/attempt`) -> «answer» or «to plan». Recoverable failure: the red card -> «try
-  again» (`/retry`) or «details» (`/details`).
+  again» (`/retry`) or «details» (`/details`). A new attempt starts at once, without a note; new instructions go
+  through the architect in the chat.
 - Conflict: files list, hint to resolve manually and rerun `zplan` (ancestry detection finishes it).
 
 ## Line UI (`zplan --plain`)
@@ -57,7 +66,7 @@ Each screen ends with a "Next:" hint and single-letter keys; Enter only navigate
 always need their key). Flows:
 
 - No plan: goal (multi-line, empty line ends) -> roles summary -> planner progress -> proposal view ->
-  [a] approve [r] revise [x] decline.
+  [a] approve [r] revise.
 - Ready: [g] start M<n> -> observe; Ctrl-C = detach (run continues); [k] stop = force-stop with
   confirmation.
 - Done: [m] merge into <branch> [d] diff [l] later. Needs answer: [a] accept [t] answer [x] stop. Blocked: [t]

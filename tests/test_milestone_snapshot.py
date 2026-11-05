@@ -116,7 +116,7 @@ class MilestoneSnapshotTests(RunsTest):
             self.assertTrue(Path(first["worktree"]).is_dir())
             self.assertEqual(self.git("rev-parse", "refs/heads/" + first["result"]["branch"]).decode().strip(),
                              first["result"]["commit"])
-            merged = service.merge(first)
+            merged = service.merge(first, allow_unverified=True)
             self.assertEqual(merged.kind, "integrated")
             items = {item["id"]: item for item in controller.overview()}
             self.assertEqual(items["M1"]["state"], "integrated")

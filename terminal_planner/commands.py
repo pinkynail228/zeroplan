@@ -19,6 +19,18 @@ COMMANDS = (
             ("zplan --plain                  line-oriented mode without the full-screen interface",
              "zplan --project ~/work/app     open another project",
              "zplan --fixture demo --state-dir /tmp/zplan-demo   demo without a model in an isolated directory")),
+    Command("exec", "zplan exec --goal GOAL.md --operation-id ID [--project PATH]",
+            "send one owner goal through the shared Application Service and print JSON",
+            "Reads UTF-8 goal text and sends one architect turn with initial tool dispatch; not continuous goal-to-merge "
+            "automation. Reuse the operation id with exactly the same text to replay safely, scoped to this checkout. "
+            "Accepted/running/interrupted submissions are never automatically resent. Stdout is one bounded, scrubbed "
+            "JSON result; diagnostics go to stderr. Exit: 3 running/indeterminate, else 4 awaiting owner, else 1 failed/refused, "
+            "else 0 completed; usage errors are 2 before admission. Model status is separate from child outcomes; "
+            "verification is not_run and merge is not_requested. --fixture ID --state-dir DIR uses isolated deterministic "
+            "architect/engine transport without provider auth.",
+            "Sends one owner message, returning JSON and durable replay by operation id; does not verify or merge.",
+            ("zplan exec --goal GOAL.md --operation-id change-42",
+             "zplan exec --goal GOAL.md --operation-id demo-1 --fixture demo --state-dir /tmp/zplan-demo")),
     Command("status", "zplan status [--project PATH]",
             "show the home screen once, without prompts",
             "Prints the plan and the milestones' state and exits; starts and changes nothing. Suitable for scripts "
@@ -90,18 +102,22 @@ COMMANDS = (
 )
 
 FLAGS = (
+    Flag(("--goal",), "GOAL.md", "exec: UTF-8 file containing one owner goal (required)",
+         "Goal text, unchanged on replay; at most 1 MiB.", ("exec",)),
+    Flag(("--operation-id",), "ID", "exec: stable submission key, 1-128 characters (required)",
+         "Same id and different goal is a conflict; replay creates no new turn or effect.", ("exec",)),
     Flag(("--plain",), None, "line-oriented mode without the full-screen interface (also when the output is not a terminal)",
          "Forces the line-oriented UI.", (START,)),
     Flag(("--project",), "PATH", "Git project (default: the current directory)",
-         "Selects the Git project instead of the working directory.", (START, "status", "doctor", "roles", "profile")),
+         "Selects the Git project instead of the working directory.", (START, "status", "doctor", "roles", "profile", "exec")),
     Flag(("--state-dir",), "DIR", "fixture only: root of the isolated state",
-         "Fixture state root; production overrides are rejected.", (START, "status", "profile")),
+         "Fixture state root; production overrides are rejected.", (START, "status", "profile", "exec")),
     Flag(("--fixture",), "ID", "isolated demo without a model; native runs are forbidden",
-         "Runs against the deterministic fixture engine in an isolated authority.", (START, "status", "profile")),
+         "Runs against the deterministic fixture engine in an isolated authority.", (START, "status", "profile", "exec")),
     Flag(("--native-binary",), "PATH", "explicit isolated Zeroshot executable (development)",
-         "Explicit Zeroshot executable instead of the pinned private tools.", (START, "status")),
+         "Explicit Zeroshot executable instead of the pinned private tools.", (START, "status", "exec")),
     Flag(("--native-state-dir",), "DIR", "durable Zeroshot history; a short path for Unix sockets",
-         "Durable native state root (short path: Unix socket limit).", (START, "status", "doctor")),
+         "Durable native state root (short path: Unix socket limit).", (START, "status", "doctor", "exec")),
     Flag(("--check",), None, "only show the versions, change nothing (for update)",
          "Reports the installed and the newest release without changing anything.", ("update",)),
     Flag(("--version",), None, "show the version", "Prints the version.", ()),

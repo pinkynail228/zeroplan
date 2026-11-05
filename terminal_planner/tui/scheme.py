@@ -40,7 +40,7 @@ from rich.text import Text
 
 SPIN = "◐◓◑◒"
 MARK = {"done": ("✓", "green"), "fail": ("✗", "red"), "error": ("!", "bold red"),
-        "wait": ("◌", "dim"), "skip": ("–", "dim")}
+        "wait": ("◌", "dim"), "skip": ("–", "dim"), "unknown": ("?", "yellow")}
 # Observation state -> the internal state key whose mark and word are drawn.
 STATE = {"running": "run", "succeeded": "done", "recorded": "done", "idle": "wait", "skipped": "skip"}
 # Internal state key -> the GLOSSARY id of the word that says it (state.*, EN column).
@@ -65,6 +65,8 @@ WORDS = {
     "role.final_reverify": "final re-check",
     "role.planner": "planning",
     "role.plan_check": "plan check",
+    "role.plan_reader": "plan reader",
+    "role.plan_reader_failed": "plan reader failed",
     "state.running": "running",
     "state.done": "done",
     "state.rejected": "rejected",
@@ -90,7 +92,8 @@ NODE_IDS = {
     "steward_apply": "role.steward_apply", "steward_decide": "role.steward_decide",
     "final_verify": "role.final_check", "repair": "role.repair", "scope_verify": "role.scope_verify",
     "final_reverify": "role.final_reverify", "planner": "role.planner", "critic": "role.plan_check",
-    "plan_verifier": "role.plan_check",
+    "plan_verifier": "role.plan_check", "comprehension": "role.plan_reader",
+    "comprehension_failed": "role.plan_reader_failed",
     "task_loop": "flow.task_loop", "review_loop": "flow.review_loop", "repair_loop": "flow.repair_loop",
     "final_repair": "flow.final_repair",
 }
@@ -225,19 +228,22 @@ def _state(node, obs):
     raw = (obs.get(node.get("name"), {}) or {}).get("state", "idle")
     if raw == "failed":
         return "fail" if node["kind"] == "verifier" else "error"
-    return STATE.get(raw, "wait")
+    return STATE.get(raw, "unknown")
 
 
 def _leaf(node, obs, optional, words):
     o = obs.get(node.get("name"), {}) or {}
     state = _state(node, obs)
-    # `optional` marks a step inside an "if needed" branch (its value is the branch name); a step that has not run
-    # says `state.if_needed` alone, the branch being named once by the `?` header, never repeated on every step.
-    fallback = (_word(words, "state.if_needed") if optional and state == "wait"
+    fallback = ("unknown: " + str(o.get("state")) if state == "unknown" else
+                _word(words, "state.if_needed") if optional and state == "wait"
                 else _word(words, STATE_ID[state]))
-    return dict(title=_one_line(o.get("title")) if o.get("title") else node_title(node["name"], words),
-                state=state, word=_one_line(o.get("detail")) if o.get("detail") else fallback,
-                timer=(o.get("timer") or "") if state == "run" else "",
+    title = _one_line(o.get("title")) if o.get("title") else node_title(node["name"], words)
+    if o.get("attempt") is not None:
+        title += " · attempt %s" % o["attempt"]
+    word = (_one_line(o.get("detail")) if o.get("detail") else
+            _one_line(o.get("result")) if o.get("result") else fallback)
+    timer = o.get("timer") or o.get("duration") or ""
+    return dict(title=title, state=state, word=word, timer=timer,
                 color="cyan" if node["kind"] == "verifier" else "yellow")
 
 
@@ -252,33 +258,68 @@ def _touched(node, obs):
     return False
 
 
+def _choice_rank(node, obs):
+    """Current execution wins; otherwise prefer the most recently observed path.
+
+    Event order is local to the projection, not an invented engine iteration counter.
+    Legacy observations without order keep their first-touched fallback.
+    """
+    if isinstance(node, list):
+        return max((_choice_rank(child, obs) for child in node), default=(False, False, -1))
+    if not isinstance(node, dict):
+        return False, False, -1
+    fact = obs.get(node.get("name"), {}) or {}
+    touched = fact.get("state", "idle") not in ("idle", "skipped")
+    own = (fact.get("state") == "running", touched, fact.get("order", -1) if touched else -1)
+    return max([own] + [_choice_rank(child, obs) for child in node.values() if isinstance(child, (dict, list))])
+
+
+def _decided(node, obs):
+    """Whether engine facts settle any branch direction, including an explicitly skipped path."""
+    if isinstance(node, dict):
+        if (obs.get(node.get("name"), {}) or {}).get("state", "idle") != "idle":
+            return True
+        return any(_decided(value, obs) for value in node.values() if isinstance(value, (dict, list)))
+    if isinstance(node, list):
+        return any(_decided(value, obs) for value in node)
+    return False
+
+
 def _accepts(guard):
     """A guard that tests a check's verdict for `accepted`."""
     value = (guard or {}).get("value") or {}
     return value.get("field") == "verdict" and "accepted" in (guard or {}).get("labels", [])
 
 
+def _skipped(items, words):
+    """The projected nodes of an untaken branch, derived as skipped rather than hidden."""
+    result = []
+    for kind, value in items:
+        if kind == "stage":
+            result.append((kind, [dict(leaf, state="skip", word=_word(words, "state.skipped"), timer="")
+                                  for leaf in value]))
+        else:
+            result.append((kind, dict(value, active=False, items=_skipped(value["items"], words))))
+    return result
+
+
 def project(node, obs, optional=None, words=None, limits=None):
     kind = node.get("kind")
-    if kind in ("step", "verifier"):
+    if kind in ("step", "verifier", *EXITS):
         return [("stage", [_leaf(node, obs, optional, words)])]
     if kind == "seq":
         return [item for child in node.get("children", []) for item in project(child, obs, optional, words, limits)]
     if kind == "par":
-        nodes = []
-        for branch in node.get("children", node.get("branches", [])):
-            branch = branch.get("node", branch)
-            if branch["kind"] in ("step", "verifier"):
-                nodes.append(_leaf(branch, obs, optional, words))
-            else:  # a compound branch folds into one line named after it, no detail word
-                nodes.append(dict(title=node_title(branch.get("name", "?"), words), state="wait", word="",
-                                  timer="", color="yellow"))
-        return [("stage", nodes)]
+        branches = [branch.get("node", branch) for branch in node.get("children", node.get("branches", []))]
+        if all(branch["kind"] in ("step", "verifier", *EXITS) for branch in branches):
+            return [("stage", [_leaf(branch, obs, optional, words) for branch in branches])] if branches else []
+        return [("parallel", {"items": [("branch", {"title": "branch %s" % (i + 1),
+                                "items": project(branch, obs, optional, words, limits)})
+                               for i, branch in enumerate(branches)]})]
     if kind == "loop":
         o = obs.get(node.get("name"), {}) or {}
         items = project(node["body"], obs, optional, words, limits)
         if _bare(node.get("name", "")) in RETRY_LOOPS:
-            # No frame: the final check is drawn alone and a retry is a count on its box (`final check ↻2/2`).
             count = o.get("count")
             if count and count > 1:
                 for item_kind, value in items:
@@ -289,20 +330,22 @@ def project(node, obs, optional=None, words=None, limits=None):
                               max=_loop_bound(node, limits), count=o.get("count"),
                               active=_touched(node["body"], obs), items=items))]
     if kind == "choice":
-        raw = node.get("branches", [])
-        branches = [b.get("node", b) for b in raw]
-        paths = [b for b in branches if b["kind"] not in EXITS]
-        other = node.get("otherwise")
-        if other and other["kind"] not in EXITS:
-            if not paths and any(b.get("node", {}).get("kind") == "succeed" and _accepts(b.get("when")) for b in raw):
-                # The flow ends when a check accepts; the default path only runs when it did not.
-                return [("cond", dict(title=node_title(other.get("name", ""), words),
-                                      items=project(other, obs, node_title(other.get("name", ""), words), words, limits)))]
-            paths.append(other)
-        if not paths:
-            return []
-        taken = next((p for p in paths if _touched(p, obs)), paths[0])
-        return project(taken, obs, optional, words, limits)
+        paths = [branch.get("node", branch) for branch in node.get("branches", [])]
+        if node.get("otherwise") is not None:
+            paths.append(node["otherwise"])
+        decided = any(_decided(path, obs) for path in paths)
+        touched = [path for path in paths if _touched(path, obs)]
+        taken = (max(touched, key=lambda path: _choice_rank(path, obs)) if touched else
+                 next((path for path in paths if path.get("kind") not in EXITS), paths[0] if paths else None))
+        items = []
+        for path in paths:
+            selected = path is taken
+            if not selected and not decided:
+                continue  # an unresolved future choice stays compact; decided branches name their untaken paths
+            projected = project(path, obs, node_title(path.get("name", ""), words), words, limits) if selected else []
+            items.append(("cond", dict(title=node_title(path.get("name", ""), words), items=projected,
+                                       state="run" if selected else "skip", word=_word(words, "state.skipped"))))
+        return items
     return []
 
 
@@ -382,6 +425,10 @@ def _flatten(items, depth, stages, loops):
         if kind == "stage":
             stages.append(value)
             continue
+        if kind == "cond" and not value["items"]:
+            stages.append([dict(title=value["title"], state="skip", word=value.get("word", "skipped"),
+                                timer="", color="yellow")])
+            continue
         start = len(stages)
         _flatten(value["items"], depth + (kind == "loop"), stages, loops)
         if kind == "loop" and len(stages) > start:
@@ -395,6 +442,13 @@ def _flatten(items, depth, stages, loops):
 
 
 def _full(items, width, height, tick):
+    # Flattening compound parallel branches would invent sequential edges. Use the
+    # recursive fork/join drawing until a lane layout can preserve those same edges.
+    def compound_parallel(items):
+        return any(kind == "parallel" or (kind != "stage" and compound_parallel(value["items"]))
+                   for kind, value in items)
+    if compound_parallel(items):
+        return None
     stages, loops = [], []
     _flatten(items, 0, stages, loops)
     if not stages:
@@ -493,14 +547,25 @@ def _lines(items, tick, trunk, prefix, words):
             for node in value:
                 fork = [("├ ", "yellow" if live else "dim")] if len(value) > 1 else []
                 out.append((prefix + fork + _node_line(node, tick), True, _running(node), node["title"]))
+        elif kind == "parallel":
+            out.append((prefix + [("┬ parallel fork", "dim")], False, False, None))
+            out += _lines(value["items"], tick, trunk, prefix + [("│ ", "dim")], words)
+            out.append((prefix + [("┴ join", "dim")], False, False, None))
+        elif kind == "branch":
+            out.append((prefix + [("├ " + value["title"], "dim")], False, False, None))
+            out += _lines(value["items"], tick, trunk, prefix + [("│   ", "dim")], words)
         elif kind == "loop":
             style = "yellow" if value["active"] else "dim"
             phrase = _loop_phrase(words, value["title"], value["count"], value["max"])
             out.append((prefix + [("↻ ", style), (phrase, "bold" if value["active"] else "dim")], False, False, None))
             out += _lines(value["items"], tick, trunk, prefix + [("│ ", style)], words)
         else:
-            out.append((prefix + [("? ", "dim"),
-                                  (_template(words, "flow.optional", name=value["title"]), "dim")], False, False, None))
+            if value.get("state") == "skip":
+                out.append((prefix + [("– ", "dim"), (value["title"] + " · " + _word(words, "state.skipped"), "dim")],
+                            False, False, None))
+            else:
+                out.append((prefix + [("? ", "dim"),
+                                      (_template(words, "flow.optional", name=value["title"]), "dim")], False, False, None))
             out += _lines(value["items"], tick, trunk, prefix + [("┆ ", "dim")], words)
     return out
 
@@ -592,11 +657,46 @@ def legend(words=None):
     return out
 
 
+def observation_from_events(events, graph=None):
+    """Latest observed fact per graph node, with attempt/duration/result evidence preserved.
+
+    Events are engine facts, not UI completion flags. Later facts for the same node replace earlier scalar fields;
+    unrelated fields survive so an attempt or result already observed is not forgotten by a state update.
+    """
+    names = set()
+
+    def visit(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("name"), str):
+                names.add(value["name"])
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(graph)
+    observation = {}
+    for order, event in enumerate(events or ()):
+        if not isinstance(event, dict) or not isinstance(event.get("node"), str):
+            continue
+        name = event["node"]
+        if names and name not in names:
+            matches = [candidate for candidate in names if name.endswith("/" + candidate)]
+            if len(matches) == 1:
+                name = matches[0]
+        current = dict(observation.get(name, {}))
+        current.update({key: value for key, value in event.items() if key != "node" and value is not None})
+        current["order"] = order
+        observation[name] = current
+    return observation
+
+
 WORKER_STATE = {"running": "running", "done": "succeeded", "waiting": "idle"}
 REVIEW_STATE = {"running": "running", "accepted": "succeeded", "rejected": "failed", "conflict": "failed", "waiting": "idle"}
 
 
-def observation_from_flow(flow):
+def observation_from_flow(flow, graph=None):
     """The scheme observation of one attempt from `terminal_planner.live.flow`'s facts (F1). `None` or `{}` -> `{}`.
 
     The worker's state, the two reviewers (a verdict maps accepted -> succeeded, rejected -> failed), a running
@@ -607,6 +707,19 @@ def observation_from_flow(flow):
     select_verify succeeded, and the echo of the running command as the worker's detail while the worker runs."""
     if not flow:
         return {}
+    if "events" in flow:
+        # An explicit execution projection is authoritative, even when empty (legacy
+        # store or evicted timeline). Role/task/round summaries cannot prove a node
+        # succeeded. Keep the old summary-only API below for explicit legacy callers.
+        obs = observation_from_events(flow["events"], graph)
+        final = flow.get("final") or {}
+        if final.get("attempt") and final.get("check"):
+            obs.setdefault(final["check"] + "_loop", {})["count"] = final["attempt"]
+        if flow.get("round") is not None:
+            obs.setdefault("review_loop", {})["count"] = flow["round"]
+        if flow.get("command") and obs.get("worker", {}).get("state") == "running":
+            obs["worker"]["detail"] = program_name(flow["command"])
+        return obs
     obs = {}
     worker = WORKER_STATE.get((flow.get("worker") or {}).get("state"))
     if worker:
@@ -616,7 +729,7 @@ def observation_from_flow(flow):
         if name and state:
             obs[name] = {"state": state}
     final = flow.get("final") or {}
-    if final.get("state") == "running":
+    if final.get("state") == "running" and "events" not in flow:
         obs["final_verify"] = {"state": "running"}
     if final.get("attempt") and final.get("check"):
         obs.setdefault(final["check"] + "_loop", {})["count"] = final["attempt"]

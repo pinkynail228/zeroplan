@@ -2,15 +2,13 @@
 
 One invariant test through the real shell, at 80x24 and at 140x40, covers C1-C4: the intro in the scroll (C1, the
 generic examples of C2), the arrows picking an example and Enter sending it (C3), the arrows recalling the lines
-again once the chat has an entry and the intro back after `/new` (C4). The `chat.greeting` id is gone (C1).
+again once the chat has an entry and preserved history after `/new` (C4). The `chat.greeting` id is gone (C1).
 
 Interpretations (the task leaves these open; reviewers do not see the worker's summary):
-- `/new` leaves one `reset` entry in the shown history (the divider the pane keeps since O4), so "the shown history is
-  empty again" is read as "holds no entry but a `reset` one": the intro shows below that divider line and
-  `test_tui_chat.py` keeps seeing the reset entry's text.
+- `/new` preserves project history and adds a session divider. An existing conversation is not empty:
+  it must not show the empty-chat intro or replace recall with example picking.
 - Up on a fresh intro (input empty, `❯` on the first example) wraps to the last example, Down goes to the second; an
   input that holds an example (typed or picked) starts the move from that example.
-- The selection returns to the first example whenever the intro is taken off, so it is on the first after `/new`.
 """
 
 import unittest
@@ -85,16 +83,18 @@ class ChatEmptyTests(ChatShell):
             await pilot.press("up")
             self.assertEqual(field.value, second)
             await pilot.press("down")
-            # C4: `/new` empties the shown history again; the intro returns with `❯` on the first, and the arrows
-            # pick examples although recall holds `/new`
+            # C4: a new model session keeps the visible project timeline and ordinary input recall.
+            before = tuple(app.chat.state.entries)
             await self.command(pilot, "/new")
-            await self.until(pilot, lambda: [e.role for e in app.chat.state.entries] == ["reset"])
-            await self.until(pilot, lambda: len(app.query("#chat .intro")) == 1)
+            await self.until(pilot, lambda: any(e.role == "reset" for e in app.chat.state.entries))
             await pilot.pause()
-            self.assertEqual(self.marked(), first)
-            self.assertIn(first, chat_band(app))
-            await pilot.press("down")
-            self.assertEqual((field.value, self.marked()), (second, second))
+            self.assertEqual(tuple(app.chat.state.entries[:len(before)]), before)
+            self.assertEqual([e.text for e in app.chat.state.entries if e.role == "owner"], [second])
+            self.assertEqual(len(app.query("#chat .intro")), 0)
+            self.assertIn(second, chat_band(app))
+            self.assertIn("Привет", chat_band(app))
+            await pilot.press("up")
+            self.assertEqual(field.value, "/new")
 
     async def test_c1_c4_at_80x24(self):
         await self.drive((80, 24))

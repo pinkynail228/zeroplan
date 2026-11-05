@@ -269,7 +269,7 @@ class LabLookTests(ChatShell):
             self.assertEqual(canvas.border_title,
                              strings.text("canvas.scheme_running", stage="%s %s" % (running[0].id, running[0].title)))
             self.assertEqual([tab.label_text for tab in app.query("Tab")],
-                             [strings.text("pane.flow"), strings.text("pane.plan")])
+                             [strings.text("pane.flow"), strings.text("pane.plan"), strings.text("pane.drafts")])
             self.assertEqual(app.query_one("#activity").border_title, strings.text("pane.activity"))
             # A5: the first entry stands behind a time line taken from the stored row's ts, the next (a minute later)
             # does not

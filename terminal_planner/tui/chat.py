@@ -25,7 +25,7 @@ import time
 from typing import Tuple
 
 from .. import architect as adapter
-from .. import bridge, feed, process, project_state, setup
+from .. import application, bridge, feed, process, project_state, setup
 from ..architect import NO_PLAN, Architect, ArchitectStore, check_home, home_provider
 from ..authority import Blocked
 from ..cli import refusal
@@ -55,6 +55,25 @@ PREPARING = "preparing chat…"
 CHAT_UNAVAILABLE = "Chat unavailable."
 # A6b2a C4: the note the owner's message shows while an event check or an event turn runs ahead of it.
 WAITING = "Will send after the current turn."
+RETRY_FIRST, RETRY_CAP = 5.0, 60.0  # R3c: a failed event turn or check runs again after a backoff, then holds
+NO_RETRY = ("readiness.auth", "architect.home_lost", "architect.cancelled")  # families a retry cannot cure
+HELD = "On hold: write a message to resume. Cause: %s"
+
+
+def call_later(delay, call):
+    timer = threading.Timer(delay, call)
+    timer.daemon = True
+    timer.start()
+
+
+def architect_retries(project):
+    """The accepted profile's `autonomy.architect_retries`; 0 when unaccepted or unreadable."""
+    try:
+        status = process.Profile.peek(project).status(write=False)
+        config = status.resolved.config if status.state == "accepted" and status.resolved is not None else {}
+        return int(config.get("autonomy", {}).get("architect_retries", 0))
+    except (Blocked, OSError, ValueError):
+        return 0
 
 
 @dataclass(frozen=True)
@@ -187,11 +206,10 @@ def time_labels(entries, today=None):
 def entries_of(rows, history=HISTORY):
     """The transcript tail the pane shows, from the store's rows; the whole transcript stays in the store.
 
-    O4: the pane shows the current conversation only — the rows from the last `reset` row on (that row is the first
-    line), or every row when there is none — and never a prompt zplan sent on `/new` itself: a row of the hidden
-    `system` role is not a transcript role at all, and an `events` row of an older store that begins with the handoff
-    or the warm-up prompt (`is_prompt_row`) is skipped. Skipped and cut rows still count in each shown entry's
-    `occurrence`, so an entry keeps its place among the store's role rows.
+    The pane is one project timeline: a `reset` row is a visible model-session divider, never a deletion of earlier
+    history. Prompts zplan sent on `/new` itself stay hidden: a row of the `system` role is not a transcript role,
+    and an `events` row of an older store that begins with the handoff or warm-up prompt (`is_prompt_row`) is skipped.
+    Skipped and cut rows still count in each shown entry's `occurrence`, so an entry keeps its stable place.
 
     An architect reply is transformed before it is clipped. Every eligible source span `architect.draft_spans`
     finds in the full stored text is matched once, in stored order, to the draft records stored with the row (by
@@ -212,14 +230,12 @@ def entries_of(rows, history=HISTORY):
         if not isinstance(row, dict) or row.get("role") not in ROLES:
             continue
         text = str(row.get("text") or "")
-        if row["role"] == "reset":  # O4: a new conversation starts here; what came before is not shown
-            found = []
-        elif is_prompt_row(row):  # O4: an old store kept the `/new` prompts as `events` rows
+        if is_prompt_row(row):  # an old store kept the `/new` prompts as `events` rows
             occurrence += 1
             continue
         if row["role"] == "events":  # C1a/U1b: the status and the closing instruction are for the architect; the pane shows the events only
             text = "\n".join(line for line in text.split("\n") if line not in EVENT_HIDDEN
-                              and line not in LEGACY_EVENT_HIDDEN
+                              and line not in LEGACY_EVENT_HIDDEN and line != adapter.live.HIDDEN
                               and not line.startswith((feed.STATUS_PREFIX, feed.LEGACY_STATUS_PREFIX)))
         drafts = drafts_of(row)
         sections, matched = entry_sections(text, drafts)
@@ -503,21 +519,7 @@ def architect_binding(project, role="architect"):
     A profile the chat cannot read is not a fallback: a broken (malformed) or deleted (missing) accepted profile
     raises `Blocked` with the catalog refusal and its remedy, instead of talking to Codex with a role nobody chose.
     The same holds for a roles.json the profile cannot read (its `Blocked` travels through unchanged)."""
-    model, effort = process.PRESETS[process.PRESET]["roles"][role]
-    try:
-        status = process.Profile.peek(project).status(write=False)
-    except (OSError, ValueError):
-        return model, effort
-    if status.state == "malformed":
-        raise Blocked(status.problem or ("%s is damaged." % process.PROFILE_FILE), family="process.invalid")
-    if status.state == "missing":
-        raise Blocked(status.problem or ("The accepted %s was removed from the project." % process.PROFILE_FILE),
-                      family="process.missing")
-    resolved = getattr(status, "resolved", None)
-    binding = resolved.config.get("roles", {}).get(role) if resolved is not None else None
-    if not isinstance(binding, dict):
-        return model, effort
-    return str(binding.get("model") or model), str(binding.get("effort") or effort)
+    return adapter.architect_binding(project, role)
 
 
 def header_line(prefix, model, effort):
@@ -568,32 +570,10 @@ def default_prepare(project):
     """Production preparation: the installed toolchain, the login and the profile's architect role. Returns
     (Architect, header); raises Blocked with a catalog family and a remedy when the chat cannot start. Runs off the
     UI event loop (the pinned binaries are executed here) and never on the controller worker."""
-    try:  # pinned receipt + version checks; Blocked(setup.tools_invalid)
-        root = setup.check_installation()
-    except Blocked:
-        raise
-    except OSError as error:  # nothing installed under this data root at all
-        raise Blocked("zplan tools are not installed: run zplan setup.", family="setup.tools_invalid") from error
-    environment = setup.native_environment()
-    executable = setup.tool_paths(root)[1]
-    if not (executable.is_file() and os.access(executable, os.X_OK)):
-        raise Blocked("Codex not found: %s; run zplan setup." % executable, family="setup.tools_invalid")
-    missing = adapter.verify_cli(executable, environment)
-    if missing:
-        raise Blocked("The pinned Codex lacks required flags (%s); update the tools: zplan setup."
-                      % ", ".join(missing), family="setup.tools_invalid")
-    model, effort = architect_binding(project)
-    # The action tools reach the live Controller of this process through its published socket (None: no window
-    # serves this project, so they answer `architect.controller_unavailable`).
-    architect = Architect(executable, environment, project, model, effort, controller=bridge.path_for(project))
-    home, resumed = architect.next_home()
-    if not resumed:
-        # R-5: only a new thread is judged here -- the existing readiness.auth refusals, unchanged in text. A
-        # continuation runs no check of its recorded home at all (directory, config, profile, auth): every one of
-        # them is deferred to the turn, so a broken recorded home never blocks preparation and Ctrl+R (new dialog)
-        # stays reachable (gate9 A).
-        check_home(home, environment, resumed)
-    header = ChatHeader(home=setup.tilde(home), provider=header_provider(home), model=model, effort=effort)
+    architect = adapter.prepare(project)
+    home, _resumed = architect.next_home()
+    header = ChatHeader(home=setup.tilde(home), provider=header_provider(home),
+                        model=architect.model, effort=architect.effort)
     return architect, header
 
 
@@ -603,7 +583,7 @@ class ArchitectChat:
     changes happen on the UI thread (through the hand-over), so the renderer never sees a torn chat."""
 
     def __init__(self, project, prepare, *, binding=None, hand_over=None, on_change=None, history=HISTORY,
-                 pending=PENDING, store=None, feed=None):
+                 pending=PENDING, store=None, feed=None, on_ready=None):
         self.project = Path(project).expanduser().resolve()
         self.prepare = prepare
         self.binding = binding or (lambda: architect_binding(self.project))
@@ -615,6 +595,7 @@ class ArchitectChat:
         # A6b2a: the injected feed port (`pending()`/`handle(seq)`/`snapshot()`, called off the UI thread) or None.
         # Without one every behaviour and text below is byte-identical to the owner-only chat.
         self.feed = feed
+        self.on_ready = on_ready or (lambda: None)  # UI thread, each time the chat becomes ready (after the catch-up check starts)
         self._header = ChatHeader()
         self._state = ChatState()
         self._guard = threading.Lock()
@@ -626,9 +607,12 @@ class ArchitectChat:
         self._mode = None            # the activity `_work` runs: None | "owner" | "reset" | "check"
         self._in_turn = False        # a cancellable turn runs (owner, reset, an event turn) — not a bare feed check
         self._turn_at = 0.0          # U1b: `time.monotonic()` when that turn began (read only with `_in_turn`)
-        self._waiting = None         # C4: the one owner message waiting behind an event check: (text, snapshot)
+        self._waiting = None         # C4: durably accepted input behind an event check: (text, snapshot, request)
         self._check_requested = False  # a check is due (on open, after a turn, or from `notify`)
         self._held = False           # C3: event checks stopped after a failure until an owner turn completes or a reset
+        self._retries = self._failures = 0  # R3c: the profile's retries (read after a failure); failures since a success
+        self._retry = None           # R3c: the token of the backoff timer in flight
+        self._no_retry = False       # R3c: the failure that just ended cannot be cured by running again
         self._cancelled = False
         self._closing = False
 
@@ -735,6 +719,10 @@ class ArchitectChat:
 
     # owner operations ---------------------------------------------------------
 
+    def application_service(self):
+        controller = getattr(self.feed, "controller", None)
+        return application.ApplicationService(self._architect, controller=controller, owner_port=self.feed)
+
     def send(self, message, snapshot=None):
         """One owner message = one turn on its own thread. Returns (accepted, refusal line); nothing is queued when
         the chat refuses and the refusal stays on screen. The owner's line appears at once; the transcript is
@@ -754,28 +742,59 @@ class ArchitectChat:
         if self._closing:
             return self._refuse(refusal(Blocked("Exiting: new messages are not sent.",
                                                 family="architect.closing")))
-        if self.busy:
+        try:
             with self._guard:
-                if self._mode == "check" and self._waiting is None:
-                    self._waiting = (text, snapshot)
-                    queued = True
-                else:
-                    queued = False
-            if queued:
-                self._write(replace(self._state, note=WAITING,
-                                    entries=(self._state.entries + (owner_entry(text, self._state.transcript),))[-self.history:]))
-                self._changed()
-                return True, ""
-            return self._refuse(refusal(Blocked("The architect is already answering: wait for the reply or cancel the turn [esc].",
-                                                family="architect.busy")))
+                queued = self.busy and self._mode == "check" and self._waiting is None
+                if self.busy and not queued:
+                    raise Blocked("The architect is already answering: wait for the reply or cancel the turn [esc].",
+                                  family="architect.busy")
+                service = self.application_service()
+                request = service.new_request(text, snapshot=snapshot)
+                service.accept_message(request)
+                if queued:
+                    self._waiting = (text, snapshot, request)
+        except (Blocked, OSError, ValueError) as error:
+            return self._refuse(refusal(error))
+        if queued:
+            self._write(replace(self._state, note=WAITING,
+                                entries=(self._state.entries + (owner_entry(text, self._state.transcript),))[-self.history:]))
+            self._changed()
+            return True, ""
         self._cancelled = False
         self._mode = "owner"
         self._enter_turn()
         self._write(replace(self._state, running=True, started=time.monotonic(), live="", note="",
                             entries=(self._state.entries + (owner_entry(text, self._state.transcript),))[-self.history:]))
-        self._launch(threading.Thread(target=self._turn, args=(text, snapshot), name="zplan-chat-turn", daemon=True))
+        self._launch(threading.Thread(target=self._turn, args=(text, snapshot), kwargs={"request": request},
+                                      name="zplan-chat-turn", daemon=True))
         self._changed()
         return True, ""
+
+    def keep_goal(self, message):
+        """The chat cannot take a turn yet (preparing, or blocked by tools or login): keep `message` as the project's
+        one pending goal. Returns "kept", "same" or "replaced"; None when this is not a goal to keep (empty, the chat
+        is ready or closing, or the store cannot be written) so `send` answers as before and the line stays."""
+        text = str(message or "").strip()
+        if not text or self._closing or self._state.phase == "ready":
+            return None
+        try:
+            return self._store().keep_goal(text)
+        except OSError:
+            return None
+
+    def pending_goal(self):
+        """The goal kept for this project that has not been sent, or None."""
+        try:
+            return self._store().pending_goal()
+        except OSError:
+            return None
+
+    def goal_sent(self, goal_id):
+        """The pending goal's turn was accepted: it is not sent again."""
+        try:
+            self._store().goal_sent(goal_id)
+        except OSError:
+            pass
 
     def _launch(self, thread):
         """Make `thread` the `_work` and start it under one guard; `wait` reads `_work` under the same guard, so it
@@ -876,7 +895,7 @@ class ArchitectChat:
         if self._header.line:
             self._send(("header", self._header))
 
-    def _turn(self, message, snapshot, role="owner", owner=True, ack=None, last=True):
+    def _turn(self, message, snapshot, role="owner", owner=True, ack=None, last=True, request=None):
         """One turn off the UI thread: an owner message (`owner` True, the default) or an event-driven turn
         (`owner` False, `role` "events", `ack` the batch's last seq to acknowledge when it completed).
 
@@ -889,40 +908,49 @@ class ArchitectChat:
         reserved = False
         completed = False
         try:
-            self._rebind(architect)  # the effective role again: the profile may have changed since the last turn
-            if owner:
-                # the other window's turns, with our own line kept on top: the line's own occurrence is the place
-                # the reload will carry it at (the store's role-row count when the turn started)
-                occurrence = self._state.transcript
-                self._sync(owner_entry(message, occurrence))
-                # i9/A5 repair: the optimistic line above carries no `ts` — the store only gets one when the turn
-                # writes the row. Stamp it from there while the turn runs (the row is written before Codex starts).
-                threading.Thread(target=self._stamp_owner_line, args=(occurrence, message), name="zplan-chat-stamp",
-                                 daemon=True).start()
-            with self._guard:
-                cancelled = self._cancelled
-                if not cancelled:  # reserve under the chat lock: `cancel` takes it too, so it cannot slip in here
+            def run_message(bound_token=None):
+                nonlocal reserved
+                # ApplicationService has already persisted the owner row. Every preparation failure
+                # below therefore leaves both that row and a linked failed outcome on reopen.
+                if owner:
+                    self._sync()
+                self._rebind(architect)
+                with self._guard:
+                    if self._cancelled:
+                        raise Blocked("Turn cancelled before Codex started: the message was not sent.",
+                                      family="architect.cancelled")
                     architect.begin()
                     reserved = True
-            if cancelled:  # cancelled after Enter, before Codex existed: no process is started at all
-                self._send(("note", "Turn cancelled before Codex started: the message was not sent."))
+                return architect.run(message, snapshot=request.snapshot if owner else snapshot,
+                                     on_event=self._on_event, role=role,
+                                     **({"turn": bound_token, "recorded": True, "turn_id": request.turn_id} if owner else {}))
+
+            if owner:
+                service = self.application_service()
+                request = request or service.new_request(message, snapshot=snapshot)
+                result = service.send_message(request, prepared_runner=run_message).turn
             else:
-                result = architect.run(message, snapshot=snapshot, on_event=self._on_event, role=role)
-                completed = result.status == "completed"
-                if not completed:
-                    self._send(("note", result.cause or "The architect's turn did not finish."))
-                elif ack is not None:
-                    try:  # A6b2a C3: the completed event turn acknowledges everything up to the batch's last seq
-                        self.feed.handle(ack)
-                    except (Blocked, OSError, ValueError) as error:
-                        completed = False
-                        self._send(("note", refusal(error)))
+                result = run_message()
+            completed = result.status == "completed"
+            self._no_retry = result.status == "cancelled" or result.cause == adapter.CAUSE_AUTH
+            if not completed:
+                self._send(("note", result.cause or "The architect's turn did not finish."))
+            elif ack is not None:
+                try:
+                    self.feed.handle(ack)
+                except (Blocked, OSError, ValueError) as error:
+                    completed = False
+                    self._send(("note", refusal(error)))
         except (Blocked, OSError, ValueError) as error:
+            if getattr(error, "family", None) in NO_RETRY:
+                self._no_retry = True
             self._send(("note", refusal(error)))
         finally:
             if reserved:
                 architect.finish()
             self._sync_later()
+            if not owner and not completed:
+                self._retries = architect_retries(self.project)
             if last:
                 self._send(("done", "owner" if owner else "event", completed))
         return completed
@@ -939,6 +967,7 @@ class ArchitectChat:
             events = port.pending()
         except (Blocked, OSError, ValueError) as error:
             self._send(("note", refusal(error)))
+            self._retries = architect_retries(self.project)
             self._send(("done", "check", False))
             return
         events, rest = feed.batch(events)
@@ -949,6 +978,7 @@ class ArchitectChat:
             snapshot = port.snapshot()
         except (Blocked, OSError, ValueError) as error:
             self._send(("note", refusal(error)))
+            self._retries = architect_retries(self.project)
             self._send(("done", "check", False))
             return
         try:  # C1a: the status rides the turn; one that cannot be read never blocks or fails it
@@ -1060,16 +1090,17 @@ class ArchitectChat:
         if self._work is not None:
             return
         if self._waiting is not None:
-            text, snapshot = self._waiting
+            text, snapshot, request = self._waiting
             self._waiting = None
             self._cancelled = False
             self._mode = "owner"
             self._enter_turn()
             self._write(replace(self._state, running=True, started=time.monotonic(), live="", note=""))
-            self._launch(threading.Thread(target=self._turn, args=(text, snapshot), name="zplan-chat-turn", daemon=True))
+            self._launch(threading.Thread(target=self._turn, args=(text, snapshot), kwargs={"request": request},
+                                          name="zplan-chat-turn", daemon=True))
             self._changed()
             return
-        if self.feed is None or self._held or not self._check_requested or self._state.phase != "ready":
+        if self.feed is None or self._held or self._retry or not self._check_requested or self._state.phase != "ready":
             return
         self._check_requested = False
         self._mode = "check"
@@ -1078,15 +1109,34 @@ class ArchitectChat:
     def _after(self, what, ok):
         """UI thread: an activity ended. C3 — a failed check, a turn that did not complete or a failed ack holds
         the checks until an owner turn completes or a reset; "after every turn ends" asks for the next check."""
-        if what == "check":
-            if not ok:
-                self._held = True
-        else:
+        final, self._no_retry = self._no_retry, False
+        if what in ("check", "event"):
+            if ok:
+                self._failures = 0
+            elif final or self._failures >= self._retries:
+                self._held, self._failures = True, 0
+                self._note(HELD % self._state.note)
+            else:
+                self._failures += 1
+                token = self._retry = object()
+                call_later(min(RETRY_FIRST * 2 ** (self._failures - 1), RETRY_CAP),
+                           lambda: self.hand_over(lambda: self._retry_due(token)))
+        if what != "check":
             if what == "reset" or (what == "owner" and ok):
                 self._held = False
-            elif not ok:
+                self._failures = 0
+                self._retry = None
+            elif not ok and what == "owner":
+                self._retry = None
                 self._held = True
             self._check_requested = True
+        self._advance()
+
+    def _retry_due(self, token):
+        if token is not self._retry:
+            return
+        self._retry = None
+        self._check_requested = True
         self._advance()
 
     def _stamp_owner_line(self, occurrence, message):
@@ -1177,6 +1227,7 @@ class ArchitectChat:
             # A6b2a C3: catch-up on open — once ready, look for events that accumulated while no turn ran.
             self._check_requested = True
             self._advance()
+            self.on_ready()
         elif kind == "header":
             self._state = replace(self._state, header=item[1].line, header_fields=item[1])
         elif kind == "blocked":
@@ -1227,7 +1278,7 @@ class ArchitectChat:
 PLAN_TONES = {"planning": "run", "submission_unknown": "run", "observing": "run", "observation_blocked": "bad",
               "detached": "bad", "run_failed": "bad", "proposal_invalid": "bad", "review_exhausted": "bad",
               "proposed": "ok", "approved": "ok", "stopped": "bad"}
-RUN_TONES = {"waiting": "idle", "ready": "idle", "unknown": "idle", "preparing": "run", "submission_unknown": "run",
+RUN_TONES = {"waiting": "idle", "ready": "idle", "unknown": "idle", "paused": "idle", "preparing": "run", "submission_unknown": "run",
              "submitted": "run", "running": "run", "stopping": "run", "resume_pending": "run", "finished": "ok",
              "integrated": "ok", "awaiting_merge": "ok", "stopped": "bad", "conflict": "bad", "needs_owner": "bad",
              "blocked": "bad", "failed_recoverable": "bad", "failed": "bad"}

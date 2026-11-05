@@ -113,7 +113,7 @@ class Processes:
     def turns(self, binary):
         """The launches of `binary` that are not its `--help` tool probe: the real child processes of a turn."""
         return [call for call in self.calls if call["argv"][:1] == [str(binary)] and "--help" not in call["argv"]
-                and call["argv"][1:3] != ["mcp", "list"]]
+                and call["argv"][1:3] != ["mcp", "list"] and call["argv"][1:2] != ["sandbox"]]
 
 
 class Screen:

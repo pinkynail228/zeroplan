@@ -219,7 +219,7 @@ class MilestoneShell(ShellTest):
 
 class JourneyTests(MilestoneShell):
     async def test_b2_start_progress_done_diff_merge_and_cancelled_confirmations_change_nothing(self):
-        """p4a A1/A3: `/run` starts M1 with no confirmation; `/stop` still asks and «no» leaves the run going."""
+        """p4a A1/A3: `/run` starts M1 with no confirmation; typing stays live and the merge ends the journey."""
         self.approve(running=False)
         head = self.head()
         self.driver.gate.clear()
@@ -237,15 +237,9 @@ class JourneyTests(MilestoneShell):
             self.assertEqual(self.app.query_one("#right").border_title,
                              strings.text("canvas.scheme_running", stage="%s %s" % (running.id, running.title)))
             self.assertEqual(len(self.driver.sent), 1)
-            # A stop that is not confirmed sends nothing.
-            await self.command(pilot, "/stop")
-            await self.shows(pilot, "Stop the run M1")
-            await self.press_button(pilot, "no")
-            await pilot.pause(0.3)
-            self.assertEqual(self.driver.stopped, [])
             # Typing stays responsive while a slice is in flight.
-            await self.until(pilot, lambda: getattr(self.app.focused, "id", None) == "input")  # the cancelled stop's
-            await self.type(pilot, "hello")  # modal handed the focus back to the chat input
+            self.app.screen.query_one("#input").focus()
+            await self.type(pilot, "hello")
             await pilot.pause(0.1)
             self.assertEqual(self.app.screen.query_one("#input").value, "hello")
             self.assertTrue(self.driver.live)
@@ -255,15 +249,8 @@ class JourneyTests(MilestoneShell):
             await self.press_button(pilot, "diff")
             await self.shows(pilot, "+Fixture driver change for milestone M1")
             await pilot.press("escape")
-            await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "no")  # cancelled merge: the destination does not move
-            await pilot.pause(0.3)
-            self.assertEqual(self.head(), head)
-            self.assertTrue(self.app.screen.query("#run-buttons-merge"))
-            await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "yes")
+            await self.press_button(pilot, "merge")  # u3: the pressed button is the consent, no question first
+            self.assertNotEqual(type(self.app.screen).__name__, "ConfirmScreen")
             await self.shows(pilot, "Merged: M1 → main.")
             self.assertNotEqual(self.head(), head)
             self.assertTrue((self.project / "ZPLAN_FIXTURE.md").is_file())
@@ -405,8 +392,6 @@ class JourneyTests(MilestoneShell):
             await self.open_merge_end(pilot)  # resumed, observed to its end, exported (i3c: [o] opens the modal)
             self.assertIn("waiting for merge", self.flat())
             await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "yes")
             await self.shows(pilot, "Merged: M1 → main; left in place:")  # A7c: a resume checkpoint keeps the worktree
         self.assertNotEqual(self.head(), head)
         runs = self.stored()["runs"]
@@ -428,20 +413,17 @@ class JourneyTests(MilestoneShell):
         self.assertEqual(len(self.stored()["runs"]), 2)
         self.assertEqual(len(self.driver.sent), 1)
 
-    async def test_b3_failed_new_attempt_takes_an_optional_note(self):
+    async def test_b3_failed_new_attempt_starts_at_once_without_a_note(self):
         self.driver.outcomes = ("failed", "done")
         self.approve(running=False)
         async with self.shell(size=(120, 40), follow=True) as pilot:
             await self.loaded(pilot)
             await self.to_end(pilot)
             await self.press_button(pilot, "new_attempt")
-            await self.shows(pilot, "The new attempt starts from HEAD main")
-            await self.type(pilot, "Try the other way")
-            await self.press_button(pilot, "send")
             await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
         runs = self.stored()["runs"]
         self.assertEqual([(r["attempt"], r["status"]) for r in runs], [(1, "failed"), (2, "finished")])
-        self.assertEqual(runs[1]["context"]["text"], "Try the other way")
+        self.assertEqual((runs[1]["context"] or {}).get("text", ""), "")
 
     async def test_b3_conflict_then_the_owner_resolves_and_the_row_follows(self):
         self.approve(running=False)
@@ -453,8 +435,6 @@ class JourneyTests(MilestoneShell):
             self.git("add", "ZPLAN_FIXTURE.md")
             self.git("commit", "-qm", "owner")
             await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "yes")
             await self.shows(pilot, "merge conflict into main")
             text = self.flat()
             self.assertIn("Files: ZPLAN_FIXTURE.md", text)
@@ -514,9 +494,8 @@ class StopAndDetachTests(MilestoneShell):
             await self.begin_run(pilot)
             await self.until(pilot, self.driver.entered.is_set)
             await self.shows(pilot, "running")
-            await self.command(pilot, "/stop")
-            await self.shows(pilot, "Stop the run M1")
-            await self.press_button(pilot, "yes")
+            await self.command(pilot, "/stop")  # v3a: the only running stage, so a bare /stop acts at once
+            self.assertNotEqual(type(self.app.screen).__name__, "ConfirmScreen")
             await pilot.pause(0.3)
             self.assertEqual(self.driver.stopped, [])  # the stop waits its turn behind the slice in flight
             self.driver.gate.set()
@@ -533,9 +512,8 @@ class StopAndDetachTests(MilestoneShell):
             await self.begin_run(pilot)
             await self.until(pilot, self.driver.entered.is_set)
             await self.shows(pilot, "running")
-            await self.command(pilot, "/stop")
-            await self.shows(pilot, "Stop the run M1")
-            await self.press_button(pilot, "yes")
+            await self.command(pilot, "/stop")  # v3a: the only running stage, so a bare /stop acts at once
+            self.assertNotEqual(type(self.app.screen).__name__, "ConfirmScreen")
             await pilot.pause(0.3)
             self.assertTrue(self.app.stop_pending("M1"))
             self.driver.gate.set()
@@ -557,8 +535,6 @@ class StopAndDetachTests(MilestoneShell):
             await self.shows(pilot, "running")
             self.driver.lose_stop = True
             await self.command(pilot, "/stop")
-            await self.shows(pilot, "Stop the run M1")
-            await self.press_button(pilot, "yes")
             self.driver.gate.set()  # the slice in flight ends; the queued stop is then sent, and lost
             await self.shows(pilot, "Not stopped: force-stop lost")
             await self.plan_shows(pilot, "stopping")
@@ -798,8 +774,6 @@ class RecoverableNewAttemptTests(MilestoneShell):
                 self.assertEqual([b.label.plain for b in self.app.screen.query("#run-buttons Button")][:3],
                                  [catalog.label("failed_recoverable." + n) for n in ("resume", "new_attempt", "plan")])
                 await self.press_button(pilot, "new_attempt")
-                await self.shows(pilot, "The new attempt starts from HEAD main")
-                await self.press_button(pilot, "send")
                 await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
         self.assertEqual(resumed, [])
         self.assertEqual(len(self.driver.sent), 2)
@@ -1021,7 +995,7 @@ class QuitRaceTests(MilestoneShell):
 class StaleModalTests(MilestoneShell):
     @staticmethod
     def merge_it(app):
-        app.delivery.merge(app.delivery.latest("M1"))
+        app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True)
 
     async def test_b5_an_action_on_a_modal_whose_attempt_moved_is_rejected_and_re_rendered(self):
         self.approve(running=False)
@@ -1029,14 +1003,14 @@ class StaleModalTests(MilestoneShell):
             await self.loaded(pilot)
             await self.begin_run(pilot)
             await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
-            # The confirmation is opened on the attempt the modal shows now, and the world moves only afterwards:
-            # it carries that attempt's token, so the token is what goes stale. Pressing the key after the move
-            # raced the app's own refresh, which may already have re-rendered the modal and dropped «влить» altogether.
-            await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
+            # The action is taken on the modal built before the world moved: it carries that attempt's token, so
+            # the token is what goes stale. Pressing the button after the move would race the app's own refresh,
+            # which may already have re-rendered the modal and dropped «влить» altogether; so the modal's action
+            # is called directly, as the button's handler does.
+            modal = self.app.screen
             await self.post_and_wait(pilot, self.merge_it)  # what another window would have done
             head = self.head()
-            await self.press_button(pilot, "yes")
+            self.app.modal_action(modal, "merge")
             await self.shows(pilot, "The state changed while the screen was open")
             self.assertIn("— merged", self.flat())
             await self.until(pilot, lambda: not self.app.screen.query("#run-buttons-merge"))
@@ -1108,8 +1082,6 @@ class DetailsTests(MilestoneShell):
             await self.begin_run(pilot)
             await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
             await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            await self.press_button(pilot, "yes")
             await self.shows(pilot, "Merged: M1 → main.")
             await pilot.press("escape")
             await pilot.pause(0.3)
@@ -1197,9 +1169,9 @@ class SharedServiceTests(MilestoneShell):
                 await self.press_button(pilot, "diff")
                 await self.shows(pilot, "ПАТЧ-ДИФФ")
                 await pilot.press("escape")
-                await self.press_button(pilot, "merge")
-                await self.shows(pilot, "ВОПРОС ИЗ СЕРВИСА?")
-                await self.press_button(pilot, "no")
+                await self.press_button(pilot, "merge")  # u3: the TUI's button merges at once, the line UI asks
+                await self.shows(pilot, "Merged: M1 → main.")
+                self.assertNotIn("ВОПРОС ИЗ СЕРВИСА?", self.flat())
 
     def test_b1_the_service_has_no_terminal_or_widget_dependency(self):
         with open(delivery.__file__, encoding="utf-8") as handle:
@@ -1749,7 +1721,7 @@ class PaneTabTests(MilestoneShell):
                         region = self.app.query_one("#live-pane").scrollable_content_region
                         status = flow_draw.wrap_status(screen.live_status(True), region.width)
                         drawn = scheme.render(
-                            milestones.milestone_graph(1, known or milestones.TASK_ITERATIONS)["root"],
+                            milestones.milestone_graph()["root"],
                             scheme.observation_from_flow(data), region.width,
                             max(6, region.height - len(status) - 1),
                             limits={"review_loop": known} if known is not None else {})
@@ -1831,9 +1803,10 @@ class PaneTabTests(MilestoneShell):
                 async with self.shell(self.controller(), size=size, follow=True) as pilot:
                     await self.loaded(pilot)
                     self.assertEqual(self.tab(), self.ui.TAB_PLAN)  # nothing active at the first snapshot
+                    self.main().query_one("#right").active = self.ui.TAB_LIVE  # the app's own move, no owner choice
                     await self.begin_run(pilot)  # [g] [y]: the attempt starts and the app watches it
                     await self.until(pilot, lambda: self.app.run_watch is not None)
-                    self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # F9: a start shows «Сейчас» once, the owner chose none
+                    self.assertEqual(self.tab(), self.ui.TAB_PLAN)  # v3h: a start shows the Plan tab once, the owner chose none
                     self.driver.gate.set()
                     await self.until(pilot, lambda: self.app.run_watch is None)
                     await pilot.pause(0.2)
@@ -2025,8 +1998,8 @@ class ArrowTabTests(MilestoneShell):
             await self.loaded(pilot)
             self.assertEqual(self.tab(), self.ui.TAB_PLAN)
             self.assertEqual(self.focused(), "input")
-            for key, shown in (("right", self.ui.TAB_LIVE), ("right", self.ui.TAB_PLAN),
-                               ("left", self.ui.TAB_LIVE), ("left", self.ui.TAB_PLAN)):
+            for key, shown in (("right", self.ui.TAB_DRAFTS), ("right", self.ui.TAB_LIVE),
+                               ("left", self.ui.TAB_DRAFTS), ("left", self.ui.TAB_PLAN)):
                 await pilot.press(key)
                 await pilot.pause()
                 self.assertEqual(self.tab(), shown, key)
@@ -2036,7 +2009,7 @@ class ArrowTabTests(MilestoneShell):
             self.assertEqual(self.tab(), self.ui.TAB_PLAN)
             await pilot.press("right")
             await pilot.pause()
-            self.assertEqual(self.tab(), self.ui.TAB_LIVE)
+            self.assertEqual(self.tab(), self.ui.TAB_DRAFTS)
             await pilot.press("left")  # back to «План»: the pane that owned the focus keeps it
             await pilot.pause()
             self.assertEqual(self.tab(), self.ui.TAB_PLAN)
@@ -2073,7 +2046,7 @@ class ArrowTabTests(MilestoneShell):
             await pilot.press("right")
             await pilot.pause()
             self.assertEqual(field.cursor_position, 0)
-            self.assertEqual(self.tab(), self.ui.TAB_LIVE)  # План -> Сейчас: the two-tab cycle (I1c)
+            self.assertEqual(self.tab(), self.ui.TAB_DRAFTS)  # План -> Черновики: the three-tab cycle (v3d)
             # The no-switch condition reads the input, not the focus (A2): leave text in it, then focus the pane.
             await pilot.press(*"абв")
             await self.panel(pilot)  # Tab: the plan pane owns the focus (and shows «План»), the text stays typed
@@ -2170,7 +2143,7 @@ class ArrowTabTests(MilestoneShell):
                 return next(t for t in self.app.query(Tab) if t.id == ContentTab.add_prefix(tab_id))
 
             self.assertEqual([t.id for t in self.app.query(Tab)],
-                             [ContentTab.add_prefix(self.ui.TAB_LIVE), ContentTab.add_prefix(self.ui.TAB_PLAN)])
+                             [ContentTab.add_prefix(tab) for tab in (self.ui.TAB_LIVE, self.ui.TAB_PLAN, self.ui.TAB_DRAFTS)])
             await pilot.click(label(self.ui.TAB_LIVE))
             await pilot.pause()
             self.assertEqual(self.tab(), self.ui.TAB_LIVE)

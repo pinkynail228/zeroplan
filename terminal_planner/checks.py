@@ -11,6 +11,7 @@ leased checkout, removes it (M-1..M-5; R-C); `sweep` (R-4) reaps what a guard de
 
 import contextlib
 from collections import deque
+from datetime import datetime, timezone
 import fcntl, os, re, select, shutil, signal, socket, stat, subprocess, sys, threading, time
 from pathlib import Path
 
@@ -26,6 +27,7 @@ REAP = 15.0  # seconds `_reap` waits for the guard: it SIGKILLs group C before i
              # death (the guard's own `GONE` bound plus a margin, M-3)
 MAX_LINES = 200  # lines of the stored tail (R-4)
 MAX_BYTES = 32768  # UTF-8 bytes of the stored tail (R-4)
+MAX_CHANGED = 20  # tracked files a candidate_changed check names
 PREFIX = "checkout-"
 GUARD = str(Path(__file__).resolve().parent / "check_guard.py")  # the guard, always run by absolute path (M-1)
 LEASES = {}  # resolved checkout directory (str) -> the flock fd zplan and group C hold (M-5)
@@ -99,8 +101,13 @@ def checkout(project, commit, tree, root):
             _forget(key, directory, lock, key in ABANDONED)
 
 
-def run_check(check, cwd, env, popen=subprocess.Popen, clock=time.monotonic):
-    """One check's evidence dict (R-3): argv-only execution under the guard, deadline, group kill, bounded tail.
+def timestamp():
+    """UTC wall time for durable evidence; monotonic time remains the execution deadline clock."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def run_check(check, cwd, env, popen=subprocess.Popen, clock=time.monotonic, wall=timestamp):
+    """One check's deterministic evidence: its exact argv, cwd, environment identity, timing, exit and bounded output.
 
     `_refuse_nul` (R-A) runs before any descriptor is acquired, so a NUL argv element leaves the process untouched.
     `popen` then starts the guard in its own session with a lifeline and, for a leased `cwd`, the checkout's lock
@@ -112,16 +119,21 @@ def run_check(check, cwd, env, popen=subprocess.Popen, clock=time.monotonic):
     exception still reads `timeout` however `X` answered (R-C); the guard is `_settle`'s before any further access, so
     it is reaped even when a later caller-object access raises (R-2/R-X)."""
     _drain()  # the guards of earlier unconfirmed stops are reaped here, never waited on, never killed (R-C)
-    started = clock()
+    started, started_at = clock(), wall()
     _refuse_nul(check["argv"])  # R-A: a NUL element is a ValueError before any descriptor or process is created
     lease = _leased(cwd)
     lifeline = supervisor = None
     result = None
+
+    def evidence(status, window):
+        return _evidence(check, status, clock() - started, window, cwd=cwd, env=env,
+                         started_at=started_at, ended_at=wall())
+
     try:
         try:
             lifeline, guard_end = socket.socketpair()
         except OSError:
-            return _evidence(check, "spawn_failed", clock() - started, b"")
+            return evidence("spawn_failed", b"")
         fds = (guard_end.fileno(),)
         argv = [sys.executable, "-I", GUARD, "--lifeline", str(guard_end.fileno())]
         if lease is not None:
@@ -133,31 +145,38 @@ def run_check(check, cwd, env, popen=subprocess.Popen, clock=time.monotonic):
                             stderr=subprocess.STDOUT, start_new_session=True, pass_fds=fds)
             supervisor = _Supervisor(process, lifeline)  # `_settle`'s guard before any further access (R-2)
         except OSError:
-            return _evidence(check, "spawn_failed", clock() - started, b"")
+            return evidence("spawn_failed", b"")
         finally:
             _shut(guard_end)  # the parent's own copy: an `OSError` here never replaces an original (R-D/R-X)
         window, status = _read(supervisor, check["timeout_s"], clock)
-        result = _evidence(check, status, clock() - started, window)
+        result = evidence(status, window)
         return result
     finally:
         _settle(lifeline, supervisor, lease[0] if lease is not None else None, result)
 
 
-def run_checks(checks, cwd, env=None):
-    """Every check of the resolved profile, in order, sequentially, stopping at the first failure (R-5).
-
-    `env=None` means the sanitized environment of `export`; the checks after the first nonzero exit, timeout or
-    spawn failure are not run, each with `status="not_run"`, `duration_s=0`, an empty tail; the outcome is `failed`."""
+def run_checks(checks, cwd, env=None, candidate=None):
+    """Run every configured check in order, stopping after a failure; an empty list is never a passing result."""
     environment = export.environment() if env is None else env
     evidence, failed = [], False
     for check in checks:
         if failed:
-            evidence.append(_evidence(check, "not_run", 0, b""))
+            evidence.append(_evidence(check, "not_run", 0, b"", cwd=cwd, env=environment))
             continue
-        found = run_check(check, cwd, environment)
+        if candidate is not None and not _candidate_matches(cwd, *candidate):
+            stamp = timestamp()
+            found = _evidence(check, "candidate_changed", 0, b"Candidate changed before the check.",
+                              cwd=cwd, env=environment, started_at=stamp, ended_at=stamp)
+            found["changed_files"] = _changed_files(cwd)
+        else:
+            found = run_check(check, cwd, environment)
+            if candidate is not None and not _candidate_matches(cwd, *candidate):
+                found["status"] = "candidate_changed"
+                found["changed_files"] = _changed_files(cwd)
         evidence.append(found)
         failed = found["status"] != 0
-    return {"checks_digest": digest(checks), "checks": evidence, "outcome": "failed" if failed else "passed"}
+    return {"checks_digest": digest(checks), "checks": evidence,
+            "outcome": "failed" if failed or not checks else "passed"}
 
 
 def qualify(project, commit, tree, checks, root):
@@ -165,7 +184,7 @@ def qualify(project, commit, tree, checks, root):
     with checkout(project, commit, tree, root) as found:
         if isinstance(found, dict):
             return found
-        result = run_checks(checks, found)
+        result = run_checks(checks, found, candidate=(commit.lower(), tree.lower()))
     result["commit"], result["tree"] = commit, tree
     return result
 
@@ -685,6 +704,36 @@ def _git(project, *arguments):
     return subprocess.run(command, capture_output=True, timeout=export.TIMEOUT, start_new_session=True, env=export.environment())
 
 
+def _candidate_matches(directory, commit, tree):
+    """Checks may create untracked outputs, but must not change HEAD, index or tracked inputs."""
+    try:
+        for args, expected in ((("rev-parse", "HEAD"), commit), (("write-tree",), tree)):
+            result = _git(directory, *args)
+            if result.returncode or result.stdout.decode().strip() != expected:
+                return False
+        # Git diff trusts these index flags and can hide changed tracked inputs. Qualification
+        # uses a fresh checkout, so neither assume-unchanged nor skip-worktree is legitimate here.
+        flags = _git(directory, "ls-files", "-v", "-z")
+        if flags.returncode or any(entry[:1].islower() or entry[:1] == b"S"
+                                   for entry in flags.stdout.split(b"\0") if entry):
+            return False
+        return _git(directory, "diff", "--no-ext-diff", "--quiet", "HEAD", "--").returncode == 0
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
+        return False
+
+
+def _changed_files(directory):
+    """The tracked files that differ from HEAD, scrubbed and bounded; [] when git cannot say."""
+    try:
+        result = _git(directory, "diff", "--no-ext-diff", "--name-only", "--no-renames", "-z", "HEAD", "--")
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode:
+        return []
+    names = (" ".join(live._shown(name)) for name in result.stdout.split(b"\0"))
+    return [name for name in names if name][:MAX_CHANGED]
+
+
 def _prepare(directory, project, commit, tree):
     """The fresh clone detached at `commit` with its tree verified, or the refusal that stops the run (R-2)."""
     try:
@@ -707,8 +756,15 @@ def _prepare(directory, project, commit, tree):
     return None
 
 
-def _evidence(check, status, elapsed, window):
-    return {"name": check["name"], "argv_digest": digest(check["argv"]), "status": status, "duration_s": round(elapsed, 3), "tail": _tail(window)}
+def _evidence(check, status, elapsed, window, cwd=None, env=None, started_at=None, ended_at=None):
+    """Serializable evidence of one check; `tail` remains as a compatibility alias for older projections."""
+    output = _tail(window)
+    return {"name": check["name"], "argv": list(check["argv"]), "argv_digest": digest(check["argv"]),
+            "cwd": str(Path(cwd).resolve()) if cwd is not None else None,
+            "environment_digest": digest(dict(env)) if env is not None else None, "interpreter": sys.executable,
+            "started_at": started_at, "ended_at": ended_at, "status": status,
+            "exit_code": status if isinstance(status, int) and not isinstance(status, bool) else None,
+            "duration_s": round(elapsed, 3), "bounded_output": output, "tail": output}
 
 
 def _tail(window):

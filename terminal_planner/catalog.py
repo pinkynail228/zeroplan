@@ -108,7 +108,7 @@ PLAN_STATUS = _entries(
      "The goal is too broad or ambiguous, or the critic and the planner could not agree.",
      "[i] shows every round; [r] revise, [g] run the planner again, or [o] approve it over the rejection with a typed reason."),
     ("proposed", "A reviewed plan waits for the owner.", "The planner and verifier finished.",
-     "[a] approve, [r] revise, [x] decline."),
+     "[a] approve, [r] revise."),
     ("approved", "The owner approved this revision; milestones may run. A plan approved over a rejected plan check "
      "carries the owner's reason and is shown as approved despite the check.", "[a] on the proposed plan, or [o] on a plan the critic rejected.",
      "[g] start a milestone on the home screen; [r] to change the plan."),
@@ -125,6 +125,8 @@ MILESTONE_STATE = _entries(
     ("unknown", "The attempt's submission or an interrupted run is not confirmed.",
      "zplan or the engine stopped between submission and acknowledgement.",
      "[g] reconciles with Zeroshot without resubmitting."),
+    ("paused", "A provider limit paused the attempt; it continues by itself once, at the reset.",
+     "A provider limit or quota.", "Nothing; [o] shows the time. To continue earlier, ask in the chat."),
     ("needs_owner", "The steward needs an answer or an accepted proposal.", "The task list could not proceed alone.",
      "[o] then [t] answer or [a] accept."),
     ("blocked", "The attempt reported it cannot proceed.", "A missing fact, access or contradiction.",
@@ -180,6 +182,19 @@ DELIVERY = _entries(
 # Stable error families ------------------------------------------------------------------------------------------
 
 ERRORS = _entries(
+    ("operation.invalid_request", "The message operation request is invalid.",
+     "Missing identifiers, a wrong request type or a snapshot that cannot be serialized.",
+     "Send a valid typed message request with nonempty identifiers and a serializable snapshot."),
+    ("operation.project_mismatch", "The message belongs to another project; it was not sent.",
+     "The request's project id differs from the selected architect's project.",
+     "Open the intended project and create a request for that project."),
+    ("operation.conflict", "This operation id already names a different request; nothing was resent.",
+     "The text, snapshot or message identities changed while reusing an idempotency key.",
+     "Replay the original request unchanged, or use a new operation id for a distinct owner decision."),
+    ("operation.store_invalid", "The operation journal is damaged or has an incomplete final record.",
+     "An interrupted append, corruption or a hand edit; completed records before a torn tail remain replayable.",
+     "Preserve the journal and inspect the interrupted operation before repairing storage. Do not resend an "
+     "indeterminate operation automatically; new appends are blocked until recovery."),
     # Readiness items: the same IDs as the item ids of `zplan doctor` and the readiness screen.
     ("readiness.socket", "The Zeroshot socket path is too long.", "The native state directory path is long.",
      "Use a shorter --native-state-dir or ZPLAN data path."),
@@ -383,8 +398,10 @@ ERRORS = _entries(
      "Close the other session."),
     # Architect read tools
     ("read.outside_project", "The path or root is outside the selected project and its worktrees.",
-     "A `..` or absolute path, a link leading out, an untracked file, or a foreign root.",
+     "A `..` or absolute path, a link leading out, an ignored file, or a foreign root.",
      "Name a tracked file inside the project."),
+    ("read.uncommitted", "The file is not committed; zplan reads only the last commit.",
+     "A new or untracked file the last commit lacks.", "Commit it (the architect can offer it), then ask again."),
     ("read.credential", "The file looks like a credential file and is never read.",
      "Its name matches a credential pattern, or it lies under `.git/` or `.zplan/`.", "Nothing to fix: by design."),
     ("read.binary", "The file is binary.", "A NUL byte in its first 8 KB.", "Read a text file."),
@@ -480,8 +497,6 @@ SCREENS = {s.id: s for s in (
            "Viewing changes nothing."),
     Screen("tui_details", "Full-screen mode: details", "TUI scrollable plan record and diagnostics.",
            "The result first, then the plan; identifiers and commands come last under the mark “For diagnostics”."),
-    Screen("tui_attempt", "Full-screen mode: new attempt", "TUI form of a new attempt of a stopped or failed "
-           "milestone.", "A new attempt starts from the current HEAD; the note is optional. Esc closes the form."),
     Screen("tui_answer", "Full-screen mode: answer or note", "TUI text editor for an answer, a new-attempt note "
            "or a plan change request.", "An empty answer starts nothing."),
     Screen("tui_confirm", "Full-screen mode: confirmation", "TUI confirmation of a plan or milestone decision.", ""),
@@ -544,7 +559,6 @@ _a("plan", "watch", "w", "watch", "follow the planner", "Watch the planner.")
 _a("plan", "stop", "s", "stop planning", "stop the running planner", "Stop the running planner; the run is never resubmitted.")
 _a("plan", "approve", "a", "approve", "approve the plan; no implementation is started", "Approve this revision (starts nothing).")
 _a("plan", "revise", "r", "revise", "write what to change and re-plan", "Request a revision.")
-_a("plan", "reject", "x", "decline", "do not approve the proposal", "Decline the proposal.")
 _a("plan", "requirements", "i", "requirements and checks", "the full plan: requirements, tasks, checks", "Full plan with requirements and checks.")
 _a("plan", "override", "o", "approve despite the check", "approve a plan the check rejected; a reason is required",
    "Approve a plan the critic rejected, with a typed reason (starts nothing).")
@@ -606,16 +620,14 @@ _a("tui_panel", "answer_draft", "/answer", "answer draft",
    "A malformed identity, a still-running attempt and an end that offers no answer are refused as "
    "`draft.malformed`, `draft.active` and `draft.unavailable`, and a moved-on draft as `draft.stale`.",
    short="answer")
-_a("tui_panel", "run", "/run", "start", "start the selected ready milestone", "Start the selected ready milestone "
-   "after a confirmation.")
-_a("tui_panel", "resume", "/run", "continue", "continue the same attempt in its worktree", "Resume the failed attempt "
-   "after a confirmation.")
+_a("tui_panel", "run", "/run", "start", "start the selected ready milestone", "Start the selected ready milestone.")
+_a("tui_panel", "resume", "/run", "continue", "continue the same attempt in its worktree", "Resume the failed attempt in its worktree.")
 _a("tui_panel", "attempt", "/run", "new attempt", "a new attempt of a stopped or failed milestone",
-   "Open the new-attempt form of a stopped or failed milestone.", short="new att.")
+   "Start a new attempt of a stopped or failed milestone at once, without a note.", short="new att.")
 _a("tui_panel", "check", "/run", "check", "reconcile an unconfirmed submission or stop with Zeroshot",
    "Reconcile an unconfirmed submission or stop; nothing is sent again.")
 _a("tui_panel", "stop", "/stop", "stop", "stop the running run",
-   "Stop the running attempt after a confirmation.", short="stop")
+   "Stop the running attempt.", short="stop")
 _a("tui_panel", "open", "/attempt", "open", "the end result of a milestone run; a running run is watched again",
    "Open the end-of-run view of the selected milestone; a running attempt is observed again.")
 _a("tui_panel", "details", "/details", "details", "result, plan, diagnostics", "Outcome first, then the plan, "
@@ -631,15 +643,14 @@ _a("tui_panel", "help", "/help", "keys", "this help", "Key and command help.", s
 _a("tui_panel", "quit", "ctrl+q", "quit", "quit", "Quit.")
 _a("tui_run", "move", "tab", "to button", "move to the next button (Tab, ←/→ switch buttons)", "Move to the next button (Tab, Left/Right switch buttons).")
 _a("tui_run", "press", "enter", "press", "press the focused button; ↑↓ PgUp PgDn scroll the result", "Press the focused button; arrows and PgUp/PgDn scroll the end screen.")
-_a("tui_run", "merge", "enter", "merge", "merge the result into the destination branch", "Merge the exported result "
-   "after a confirmation.")
+_a("tui_run", "merge", "enter", "merge", "merge the result into the destination branch", "Merge the exported result into the destination branch.")
 _a("tui_run", "diff", "enter", "changes", "show the result's changes", "Show the result's diff.", short="")
 _a("tui_run", "accept", "enter", "accept", "accept the steward's proposal",
    "Accept the steward's proposal.")
 _a("tui_run", "answer", "enter", "answer", "answer in a note: a new attempt with it", "Answer in a note; a "
    "new attempt starts with it.")
-_a("tui_run", "attempt", "enter", "new attempt", "note optional",
-   "A new attempt from the destination HEAD.", short="new")
+_a("tui_run", "attempt", "enter", "new attempt", "starts at once, no note",
+   "A new attempt from the destination HEAD, started at once; new instructions go through the chat.", short="new")
 _a("tui_run", "plan", "enter", "to plan", "the request goes to plan revision", "Route a scope change back to "
    "plan revision.", short="plan")
 _a("tui_run", "resume", "enter", "continue", "continue the same attempt in its worktree", "Resume the same attempt.")
@@ -658,11 +669,6 @@ _a("tui_details", "close", "esc", "close", "return to the home screen", "Close t
 _a("tui_answer", "button", "tab", "to button", "from the text field move to the “send” button", "Move from the text field to the send button.", short="")
 _a("tui_answer", "send", "enter", "send", "Enter on the “send” button: send the text (an empty answer starts nothing)", "Press the send button: send the text.")
 _a("tui_answer", "back", "esc", "back", "close without changes", "Close without changes.", short="")
-_a("tui_attempt", "button", "tab", "to button", "from the text field move to the “start attempt” button", "Move from the text field to the start button.", short="")
-_a("tui_attempt", "send", "enter", "start attempt", "Enter on the “start attempt” button: start a new attempt (the note is optional)",
-   "Press the start button: start the new attempt with the note (may be empty).", short="start")
-_a("tui_attempt", "back", "esc", "back", "close without changes: the attempt does not start", "Close; nothing starts.",
-   short="")
 _a("tui_plan", "move", "tab", "to button", "move to the next button (Tab, ←/→ switch buttons)", "Move to the next button (Tab, Left/Right switch buttons).")
 _a("tui_plan", "press", "enter", "press", "press the focused button; ↑↓ PgUp PgDn scroll the plan", "Press the focused button; arrows and PgUp/PgDn scroll the plan.")
 _a("tui_plan", "run", "enter", "start the planner", "check readiness and submit the goal; a stale unsent plan is first rebuilt on the current project; an unconfirmed submission is sent again unchanged",
@@ -679,7 +685,6 @@ _a("tui_plan", "override", "enter", "approve despite the check", "approve a plan
    "Approve a plan the critic rejected, with a typed reason (starts nothing).", short="despite")
 _a("tui_plan", "revise", "enter", "revise", "write what to change and re-plan", "Request a revision.",
    short="revise")
-_a("tui_plan", "reject", "enter", "decline", "do not approve the proposal", "Decline the proposal.", short="decline")
 _a("tui_plan", "info", "enter", "details", "requirements and checks; for a failure, diagnostics", "Full requirements and "
    "checks, or the diagnostics of a failure.", short="det.")
 _a("tui_plan", "back", "esc", "back", "return to the home screen", "Back to the main screen.", short="")

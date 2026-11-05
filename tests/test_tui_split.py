@@ -154,8 +154,8 @@ CARD_MOVED = {
         "TAB_LIVE", "STATUS_SHARE", "NOT_STARTED_BELOW", "EMPTY_ANSWER", "MOVED", "FIX_KEY",
         "card_kind", "CARD_ROUTES", "CARD_SOURCES", "AUTO_END_CARDS", "card_route", "COMMAND_ACTIONS",
         "RUN_ERROR_PREFIXES", "blocked_note", "RunNote", "note_text", "CARD_KEY_SEP", "card_clock", "STAMP_HM",
-        "stamp_hm", "token_run_id", "draft_card_key", "reply_occurrence", "draft_card_of", "draft_reply_time", "draft_tab_text",
-        "DraftCardRequested", "MERGE_TASKS", "merge_key", "merge_stage", "merge_tasks_counts",
+        "stamp_hm", "token_run_id", "draft_key", "reply_occurrence", "newest_draft_of", "draft_tab_text",
+        "DraftSaved", "MERGE_TASKS", "merge_key", "merge_stage", "merge_tasks_counts",
         "merge_same_attempt", "merge_spec", "merge_card_source", "merge_card_open", "QUESTION_CHOICES",
         "QUESTION_LINES", "QUESTION_CARD_CHROME", "QUESTION_CARD_INSET", "QUESTION_BUTTON_CHROME",
         "QUESTION_BUTTON_MIN", "question_button_cells", "question_button_rows", "_QuestionButton",
@@ -173,8 +173,8 @@ CARD_MOVED = {
 # through `question_answered` of the old app.py, in their old order.
 CARD_HOST_METHODS = (
     "on_card_chosen", "show_card", "reveal_card", "close_card", "drop_card", "unmount_card", "newest_card_for",
-    "render_card_sources", "draft_card_open", "open_draft_card", "draft_card_ref", "plan_identity_now",
-    "action_plan", "action_decline", "refresh_draft_card", "on_draft_card_requested", "failed_cards",
+    "render_card_sources", "draft_sendable", "newest_sendable_draft", "draft_card_ref", "plan_identity_now",
+    "action_plan", "refresh_drafts", "on_draft_saved", "failed_cards",
     "failed_card_view", "failed_card_at", "failed_card_fetched", "failed_card_ref", "retry_failed_card",
     "retry_failed_plan", "show_failed_card", "merge_counts", "merge_counts_arrived", "merge_card_at",
     "merge_card_ref", "action_merge", "merge_exported", "merge_run", "action_merge_diff", "merge_diff_exported",
@@ -191,19 +191,19 @@ class CardSplitTests(unittest.TestCase):
     - The task names the block `MERGE_TASKS` to the end of app.py and "the module-level card helpers they need ...
       where moving them is needed to avoid an import cycle". The registries (`CARD_SOURCES`, `CARD_ROUTES`,
       `AUTO_END_CARDS`, `COMMAND_ACTIONS`), `card_kind`, `card_route`, the run-note helpers the readiness card reads
-      (`RunNote`, `note_text`, `blocked_note`), the draft-card helpers `CardHost` reads and `DraftCardRequested` moved
+      (`RunNote`, `note_text`, `blocked_note`), the draft helpers `CardHost` reads and `DraftSaved` moved
       with it, and so did the six constants both halves read (`TAB_LIVE`, `STATUS_SHARE`, `NOT_STARTED_BELOW`,
       `EMPTY_ANSWER`, `MOVED`, `FIX_KEY`): each is defined once, in `card_kinds`, and `app` imports it back.
       `CARD_REVEAL_TRIES` is only `CardHost.reveal_card`'s, so it lives in `card_host`.
     - `submit_verdict` stays in app.py, although it sits inside the task's block: it reads `screen_slash_state`, which
-      needs `MainScreen` (`draft_card_state`), so moving it would force `card_kinds` to import `app` -- the cycle the
+      needs `MainScreen` (`draft_state`), so moving it would force `card_kinds` to import `app` -- the cycle the
       task forbids. Its helper `merge_card_open` moved and is imported back.
     - `run_command` stays on `MainScreen`: the task's method ranges (`on_card_chosen` .. `show_failed_card`) start
       after it.
-    - Nothing on the Textual side needed a change for the mixin: `Card.Chosen` and `DraftCardRequested` reach their
+    - Nothing on the Textual side needed a change for the mixin: `Card.Chosen` and `DraftSaved` reach their
       `on_*` handlers through the class MRO, and `CardHost` holds no `BINDINGS` or `@on` handler.
     - `patch.object(app_module, "card_clock", ...)` in `test_tui_chat_scroll` and `test_tui_draft_card` now targets
-      `card_kinds`, where the readiness source and `draft_reply_time` read the clock; no other patch target changed.
+      `card_kinds`, where the readiness source reads the clock; no other patch target changed.
     """
 
     def test_app_py_defines_none_of_the_moved_card_names_and_each_new_module_holds_them(self):

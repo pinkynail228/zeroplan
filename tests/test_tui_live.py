@@ -339,6 +339,7 @@ class PanelTests(LiveShell):
             self.assertIn(", ".join((live.ROLES["acceptance_review"], live.ROLES["code_review"])), self.pane())
             self.assertIn(live.duration(0), self.pane())
             await self.step(pilot)  # the observation is lost: shown as such, no heartbeat claimed
+            await self.until_pane(pilot, live.clock(self.clock()))  # under load the redraw can trail the step
             self.assertIn(live.clock(self.clock()), self.pane())  # the detached stamp replaces the heartbeat
             self.assertTrue(self.reconnect_lines(), self.pane())
             await self.step(pilot)  # Zeroshot answers again: the heartbeat is back
@@ -432,9 +433,11 @@ class PendingTests(LiveShell):
             self.assertEqual(self.driver.sent, [])
             # the next step is the new attempt, not a stale start (the Plan tab drops the letter-key line, i10/P3)
             await self.until(pilot, lambda: any("[g] new attempt M1" in line for line in self.app.snapshot.lines))
-            await self.command(pilot, "/run")  # the owner can try again at once
-            await self.shows(pilot, "New attempt M1")
-            await pilot.press("escape")
+            self.driver.validate = lambda r, paths: None  # the engine accepts the retry
+            await self.command(pilot, "/run")  # the owner can try again at once: attempt 2 starts, no form opens
+            await self.until(pilot, lambda: "M1: new attempt started." in self.app.run_buffers.get("M1", ()))
+            self.assertNotEqual(type(self.app.screen).__name__, "NoteScreen")
+            await self.until(pilot, lambda: len(self.driver.sent) == 1)  # attempt 2 went to the engine
 
     async def test_la4_stop_shows_pending_and_while_stopping_g_checks_and_never_starts(self):
         self.approve(running=False)
@@ -442,9 +445,7 @@ class PendingTests(LiveShell):
             await self.start_held(pilot)
             await self.step(pilot)
             self.driver.stop_gate.clear()
-            await self.command(pilot, "/stop")
-            await self.shows(pilot, "Stop the run M1")
-            await self.press_button(pilot, "yes")
+            await self.command(pilot, "/stop")  # v3a: acts at once, no confirmation
             await self.plan_shows(pilot, "stopping M1…")
             await self.command(pilot, "/stop")  # repeated stop: refused while the first is pending
             await self.shows(pilot, "Already in progress: stopping M1…")
@@ -490,6 +491,10 @@ class NextStepTests(LiveShell):
                 self.assertNotIn(type(self.app.screen).__name__, ("ConfirmScreen", "EnterConfirmScreen"))
                 return
             await self.command(pilot, command)  # the command it names works from home
+            if outcome == "failed":  # v3c: the new attempt starts at once, no screen opens for it
+                await self.until(pilot, lambda: len(self.driver.sent) == 2)
+                self.assertEqual(type(self.app.screen).__name__, "MainScreen")
+                return
             await pilot.pause(0.5)
             self.assertNotEqual(type(self.app.screen).__name__, "MainScreen", self.flat())
 
@@ -627,25 +632,26 @@ class WordingTests(LiveShell):
             await self.command(pilot, "/attempt")
             await self.run_button(pilot, "merge")
             await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merge the result of M1 into main?")
-            self.assertNotIn(branch, self.flat())  # the confirmation names the result, not a branch
-            await self.press_button(pilot, "no")
+            await self.shows(pilot, "Merged: M1 → main.")
+            self.assertNotIn(branch, self.flat())  # the merge line names the result, not a branch
 
-    async def test_item8_new_attempt_form_explains_names_its_field_and_its_confirm_key(self):
-        self.driver.outcomes = ("failed",)
+    async def test_item8_new_attempt_starts_at_once_and_the_end_view_says_where_instructions_go(self):
+        """v3c A2/A3: the run screen's «new attempt» of a failed M1 starts attempt 2 with an empty note and no form,
+        and the end view tells once that new instructions go through the chat. Interpretation: the chat line is a
+        body line of the end view (the run screen's own text), not a wording pin on the other lines."""
+        self.driver.outcomes = ("failed", "failed")
         self.approve(running=False)
         self.driver.release()
         async with self.shell(size=(120, 40), follow=True) as pilot:
             await self.loaded(pilot)
             await self.to_end(pilot)
+            self.assertEqual(self.flat().count("To change the instructions, tell the architect in the chat."), 1)
             await self.press_button(pilot, "new_attempt")
-            await self.shows(pilot, "New attempt M1")
-            text = self.flat()
-            self.assertIn("This is a new run of the stage: the model will be started again.", text)
-            self.assertIn("Note for the new attempt (optional", text)
-            await pilot.press("escape")  # the form is left unchanged: no attempt starts
-            await pilot.pause(0.3)
-            self.assertEqual(len(self.driver.sent), 1)
+            await self.until(pilot, lambda: len(self.driver.sent) == 2)
+            self.assertNotEqual(type(self.app.screen).__name__, "NoteScreen")
+        runs = self.stored()["runs"]
+        self.assertEqual([r["attempt"] for r in runs], [1, 2])
+        self.assertEqual((runs[1]["context"] or {}).get("text", ""), "")
 
     async def test_item8_settings_without_a_log_say_what_to_press_and_escape_goes_one_level_back(self):
         self.approve(running=False)
@@ -783,23 +789,6 @@ class PlanScreenTests(PlanningShell):
             await pilot.press("escape")
             await pilot.pause(0.3)
             self.assertNotIn("The planner finished", self.flat())
-
-    async def test_item8_a_confirm_over_the_plan_screen_leaves_the_plan_text_visible(self):
-        self.propose()
-        for size in ((80, 24), (120, 40)):
-            async with self.shell(size=size) as pilot:
-                await self.loaded(pilot)
-                await self.panel(pilot)  # D4: the input has the start focus; [p]/[a] are pane keys
-                await self.command(pilot, "/view")
-                await self.shows(pilot, "r1 · 2")
-                await self.press_button(pilot, "reject")  # p4a: approve acts at once; reject still asks
-                await self.shows(pilot, "Reject proposal r1?")
-                text = screen_text(self.app)
-                for line in ("r1 · 2", planning.goal_line("", 100, "home.details") + "Add a README paragraph", "M1 First usable increment",
-                             "T1 Implement the agreed behavior", "M2 Independent verification",
-                             "T2 Acceptance and code review"):
-                    self.assertIn(line, text, size)  # the confirmation sits below the plan it asks about
-                await self.press_button(pilot, "no")
 
 
 if __name__ == "__main__":

@@ -4,17 +4,19 @@ cards need. A pure move: `class MainScreen(CardHost, Screen)` keeps every method
 
 Imports run one way (app -> card_host -> card_kinds); nothing here imports `app` at import time."""
 
+from rich.text import Text
 from textual.app import SuspendNotSupported
 from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 from ..authority import Blocked
 from ..cli import summary
 from . import cards, chat as chat_module, slash, strings
 from .card_kinds import (CARD_ROUTES, CARD_SOURCES, EMPTY_ANSWER, FAILED_CARD_RETRY, FIX_KEY, MOVED,
                          NOT_STARTED_BELOW, QUESTION_CARD_CHROME, QUESTION_CARD_INSET, QUESTION_CHOICES,
-                         QUESTION_LINES, STATUS_SHARE, DraftCardRequested, QuestionCard, QuestionNoteScreen,
-                         card_clock, card_kind, draft_card_of, draft_reply_time, draft_tab_text,
-                         failed_card_refusal, failed_plan_card_key, failed_plan_view, merge_same_attempt,
+                         QUESTION_LINES, STATUS_SHARE, TAB_DRAFTS, DraftSaved, QuestionCard, QuestionNoteScreen,
+                         card_clock, card_kind, newest_draft_of,
+                         failed_card_refusal, failed_plan_card_key, failed_plan_view, merge_key, merge_same_attempt,
                          merge_stage, merge_tasks_counts, question_body, question_button_rows, question_card_key,
                          token_run_id)
 
@@ -85,8 +87,10 @@ class CardHost:
                 scroll.mount(card)
             # A card that was not there before is a new block in the history: bring it into view (`reveal_card`).
             self.call_after_refresh(lambda: self.reveal_card(card))
-        if spec.done is None:
-            self.show_chat()  # I7: an open card is a decision; in narrow mode the chat pane that holds it is shown
+        if spec.done is None and old is None:
+            # A new decision reveals its pane. Refreshing an existing one (including
+            # its clock) must not undo the owner's tab choice and steal keyboard focus.
+            self.show_chat()
 
     def reveal_card(self, card, attempt=0):
         """Bring the card just mounted into view the way the scroll's own paging would: `#chat` aligns the card's own
@@ -120,15 +124,11 @@ class CardHost:
     def close_card(self, key, done_text):
         """Close the card `key`: the card stays where it was and shows only `done_text`, with no buttons.
 
-        A closed card is no decision any more: it no longer holds the `draft` state (a typed `/plan` is refused as
-        out of state then, and the palette offers the state's own commands). The receipt stays in the history where
-        the card stood; its key stays in `cards_seen`, so it is never shown again."""
+        A closed card is no decision any more. The receipt stays in the history where the card stood; its key stays
+        in `cards_seen`, so it is never shown again."""
         spec = self.card_specs.get(key)
         if spec is None:
             return
-        draft = self.draft_cards.pop(key, None)
-        if draft is not None:  # a sent draft: its «Goal draft» tab closes once its plan revision exists
-            self.sent_drafts[key] = draft
         self.show_card(cards.closed(spec, done_text))
 
     def drop_card(self, key):
@@ -138,12 +138,11 @@ class CardHost:
         self.unmount_card(key)
 
     def unmount_card(self, key):
-        """Take one card off the conversation and forget it everywhere: its widget, its spec and, for an open draft
-        card, the draft it stood for. The key's place in `cards_seen` is the caller's business (`drop_card` marks
-        it; a card a newer one replaces has been shown already)."""
+        """Take one card off the conversation and forget it everywhere: its widget and its spec. The key's place in
+        `cards_seen` is the caller's business (`drop_card` marks it; a card a newer one replaces has been shown
+        already)."""
         card = self.card_widgets.pop(key, None)
         self.card_specs.pop(key, None)
-        self.draft_cards.pop(key, None)
         if card is not None:
             self.query_one("#chat", VerticalScroll).remove_children([card])
 
@@ -181,14 +180,21 @@ class CardHost:
 
     def render_card_sources(self):
         """Show the cards `CARD_SOURCES` return for the current state and take off the open cards of a source's kind
-        it no longer returns. A dropped or closed card is not brought back, and an unchanged card is not remounted."""
+        it no longer returns. A dropped or closed card is not brought back, and an unchanged card is not remounted.
+
+        An open merge card whose milestone is `integrated` now was merged outside its own «merge» (the architect's
+        `zplan_merge`): it closes as the same receipt in its own place instead of leaving. Any other new state — a
+        conflict, a new attempt — still takes the card off."""
         for kind, source in CARD_SOURCES.items():
             wanted = {}
             for spec in source(self):
                 wanted[spec.key] = spec
             for key in [k for k, spec in self.card_specs.items()
                         if card_kind(k) == kind and spec.done is None and k not in wanted]:
-                self.unmount_card(key)
+                if kind == "merge" and self.merge_integrated(key):
+                    self.close_card(key, strings.text("card.merge_done", stage=merge_stage(key), time=card_clock()))
+                else:
+                    self.unmount_card(key)
             for key, spec in wanted.items():
                 shown = self.card_specs.get(key)
                 if shown is None and key in self.cards_seen:
@@ -196,27 +202,25 @@ class CardHost:
                 if shown is None or (shown.done is None and shown != spec):
                     self.show_card(spec)
 
-    def draft_card_open(self):
-        """i3a: whether the slot holds an open goal-draft card — the `draft` fact `screen_slash_state` reads. An open
-        card the owner has not decided on keeps the state `draft`; a closed (done) card is not a decision any more,
-        so it does not."""
-        return bool(self.draft_cards)
+    def draft_sendable(self):
+        """v3e: whether a goal draft can be sent now — the `draft` fact `screen_slash_state` reads. A draft stays
+        sendable until it is sent or the plan moves past it (`retire_stale_drafts`); it blocks nothing else."""
+        return bool(self.sendable_drafts)
 
-    def open_draft_card(self):
-        """`(key, draft)` of the open draft card of the slot — the newest card of that kind (an unrelated open card
-        never takes a draft card off, so more than one may be open), or None when no draft card is open."""
-        if not self.draft_cards:
+    def newest_sendable_draft(self):
+        """`(key, draft)` of the newest sendable draft, or None when there is none."""
+        if not self.sendable_drafts:
             return None
-        key = list(self.draft_cards)[-1]
-        return key, self.draft_cards[key]
+        key = list(self.sendable_drafts)[-1]
+        return key, self.sendable_drafts[key]
 
     def draft_card_ref(self, key):
-        """The `(key, draft)` a card command names: the open draft card `key` (a button carries its own card's key),
-        or — for a typed line, whose `key` is None — the open draft card of that kind. None when the key names no
-        open draft card: a closed or dropped card, or a command typed with no draft card at all."""
+        """The `(key, draft)` a `/plan` names: the newest sendable draft for a typed line (`key` None), or the
+        sendable draft `key` names. None when there is none: a draft that was sent or went stale, or a key that names
+        no draft. (The name is the older one of the card this replaced.)"""
         if key is None:
-            return self.open_draft_card()
-        draft = self.draft_cards.get(key)
+            return self.newest_sendable_draft()
+        draft = self.sendable_drafts.get(key)
         return None if draft is None else (key, draft)
 
     def plan_identity_now(self):
@@ -232,16 +236,15 @@ class CardHost:
         return [snapshot.version, snapshot.plan_state]
 
     def action_plan(self, argument, key):
-        """`/plan` — the draft card's «yes» or the command typed in the chat.
+        """`/plan` — the command typed in the chat.
 
-        A goal typed after the command (`/plan <text>`, no card button) is the goal: it starts planning through
-        `start_goal`, an open draft card or not. Otherwise the draft is the one the card names (a typed line names
-        the open draft card): a draft whose plan moved on since the reply (`chat.stale_reason` against the identity
-        this screen's snapshot names) is refused on the status line and the card stays; nothing is started then.
-        Otherwise the draft's own identity travels with the goal and the planner starts through `start_goal`; on
-        success the card becomes the sent receipt, on a failure the card stays. With no card and no text the unsent
-        revision is sent (`send_unsent_plan`); a button of a card that is gone says `note.not_now`. Like a typed
-        command, `/plan` ends the status note first (a refusal below sets its own)."""
+        A goal typed after the command (`/plan <text>`) is the goal: it starts planning through `start_goal`, a
+        sendable draft or not. Otherwise the draft is the newest sendable one (`draft_card_ref`): a draft whose plan
+        moved on since the reply (`chat.stale_reason` against the identity this screen's snapshot names) is refused on
+        the status line; nothing is started then. Otherwise the draft's own identity travels with the goal and the
+        planner starts through `start_goal`. With no draft and no text the unsent revision is sent
+        (`send_unsent_plan`); a `key` that names no sendable draft says `note.not_now`. Like a typed command, `/plan`
+        ends the status note first (a refusal below sets its own)."""
         self.app.chat_note = ""
         if argument and key is None:
             self.app.goal_identity = None
@@ -254,93 +257,68 @@ class CardHost:
             else:
                 self.status_note(strings.text("note.not_now", name="/plan"))
             return
-        card, draft = ref
+        draft_id, draft = ref
         reason = chat_module.stale_reason(draft.identity, self.plan_identity_now())
         if reason:
             self.status_note("%s: %s" % (chat_module.OUTDATED, reason))
             return
         self.app.goal_identity = draft.identity
-        self.app.start_goal(draft.text, card_key=card)
+        self.app.start_goal(draft.text, card_key=draft_id)
 
-    def action_decline(self, argument, key):
-        """`/decline` — the draft card's «no» or the command typed in the chat: the draft is not the plan.
-
-        The card leaves the pane and its key is not shown again, however often the history is refreshed; nothing is
-        written and no plan state changes (the draft itself stays in the transcript, copyable)."""
-        ref = self.draft_card_ref(key)
-        if ref is None:
-            self.status_note(strings.text("note.not_now", name="/decline"))
-            return
-        self.drop_card(ref[0])
-
-    def refresh_draft_card(self):
-        """i3a: put the newest actionable goal draft of the retained history on screen as a draft card, once.
+    def refresh_drafts(self):
+        """v3e: note the newest actionable goal draft of the retained history as saved, once.
 
         The draft is `chat.newest_goal_draft` (the one choice of the newest draft) and its key is the stable key of the
-        reply that carries it, with that reply's own occurrence in the transcript (`draft_card_of`); a key that was
-        shown or declined is skipped, so a refresh, a poll or a restart of the screen never brings a card back for
-        the same reply — while an identical reply stored later is its own occurrence and its own card. Showing the
-        card also opens the «Goal draft» canvas tab beside «Plan» with the draft's whole text, as the approved look
-        does (`canvas.draft_intro` + the text); the tab closes with esc like a file tab. Read from the chat state
-        alone, never from what the pane happens to show.
+        reply that carries it, with that reply's own occurrence in the transcript (`newest_draft_of`); a key already
+        noted is skipped, so a refresh, a poll or a restart of the screen never notes the same reply twice — while an
+        identical reply stored later is its own occurrence and its own note. A noted draft is sendable (`/plan`) until
+        it is sent or the plan moves past it. Read from the chat state alone, never from what the pane happens to show.
 
-        The decision is the *key*, never the draft value (acceptance finding 1 and code finding 1): a draft already
-        open under a different key is a decision of its own, so a repeated identical reply whose key was never shown
-        still gets its card. Only a key in `cards_seen` — shown or declined — is skipped; the key is built before
-        that check, so every refresh reads the reply's own occurrence (a store read under an open card, the price of
-        telling two equal drafts apart)."""
-        self.retire_stale_draft_cards()
+        The decision is the *key*, never the draft value: a repeated identical reply whose key was never noted still
+        gets its note, and the key is built before that check, so every refresh reads the reply's own occurrence (a
+        store read, the price of telling two equal drafts apart)."""
+        self.retire_stale_drafts()
         chat = self.app.chat
         if chat is None:
             return
-        found = draft_card_of(chat)
+        found = newest_draft_of(chat)
         if found is None:
             return
         key, draft = found
-        if key in self.cards_seen:
+        if key in self.drafts_noted:
             return
-        # A draft the plan moved past (a plan built from it, a newer revision) is history, not a decision: no card on
-        # mount or refresh. Undecided until the first snapshot names the plan, so the key stays unseen until then.
+        # A draft the plan moved past (a plan built from it, a newer revision) is history, not news: no note on mount
+        # or refresh. Undecided until the first snapshot names the plan, so the key stays unnoted until then.
         if self.app.snapshot is None or chat_module.stale_reason(draft.identity, self.plan_identity_now()):
             return
-        self.cards_seen.add(key)  # the key is decided now: a refresh before the message is handled posts nothing more
-        self.draft_cards[key] = draft
-        self.post_message(DraftCardRequested(key, draft, draft_reply_time(chat, draft)))
+        self.drafts_noted.add(key)  # the key is decided now: a refresh before the message is handled posts nothing more
+        self.sendable_drafts[key] = draft
+        self.post_message(DraftSaved(key, draft))
 
-    def retire_stale_draft_cards(self):
-        """RC4: close every open draft card whose draft the plan has moved past — a plan built from it and approved, a
-        newer revision. The card is a decision about a draft that is history now, and an open card keeps the `draft`
-        state, so `/run` would be refused while the panel says «Next: /run».
+    def retire_stale_drafts(self):
+        """RC4: forget every sendable draft the plan has moved past — a plan built from it and approved, a newer
+        revision. Such a draft is history now, and a sendable one keeps the `draft` state, so `/run` would be refused
+        while the panel says «Next: /run».
 
-        Same check as the creation (`chat.stale_reason` against `plan_identity_now`), but only against a snapshot
-        that names a plan: before the first snapshot, or while no plan exists, the identity has not moved (a refused
-        `/plan` writes nothing), so the card stays. The card is unmounted, its key stays in `cards_seen` and its
-        «Goal draft» canvas tab closes as esc closes it. D6: a draft that was sent (`close_card`) keeps its tab until the
-        snapshot names its plan revision, then the tab closes the same way."""
+        Same check as the note (`chat.stale_reason` against `plan_identity_now`), but only against a snapshot that
+        names a plan: before the first snapshot, or while no plan exists, the identity has not moved (a refused `/plan`
+        writes nothing), so the draft stays sendable. The Drafts tab is permanent and keeps the draft."""
         snapshot = self.app.snapshot
         if snapshot is None or snapshot.version is None:
             return
         current = self.plan_identity_now()
-        for key, draft in list(self.draft_cards.items()):
-            if not chat_module.stale_reason(draft.identity, current):
-                continue
-            self.cards_seen.add(key)
-            self.unmount_card(key)
-            self.close_draft_tab(key)
-        # A sent draft's card is its receipt already; once the snapshot names the plan built from it the tab goes too.
-        for key, draft in list(self.sent_drafts.items()):
+        for key, draft in list(self.sendable_drafts.items()):
             if chat_module.stale_reason(draft.identity, current):
-                del self.sent_drafts[key]
-                self.close_draft_tab(key)
+                del self.sendable_drafts[key]
 
-    def close_draft_tab(self, key):
-        """Close the «Goal draft» canvas tab opened for the draft `key`, as esc closes it."""
-        for tab_id in [tab for tab, opened in self.view_paths.items() if opened == key and tab in self.view_tabs]:
-            self.close_view_tab(tab_id)
+    def draft_sent(self):
+        """A `/plan` started the planner from a draft: that draft is sent, and so is every older one (the plan they
+        named is the one that just moved), so none is sendable any more; their keys stay in `drafts_noted`."""
+        self.sendable_drafts.clear()
 
     def draft_reply_widget(self, draft):
-        """The `#chat` entry widget of the newest reply that carries `draft` (the one `draft_card_of` keys the card
-        on), or None when that entry is not mounted (yet) or this screen tracks no entries."""
+        """The `#chat` entry widget of the newest reply that carries `draft` (the one `newest_draft_of` keys the
+        draft on), or None when that entry is not mounted (yet) or this screen tracks no entries."""
         chat = self.app.chat
         widgets = self.chat_entry_widgets
         entries = getattr(self, "chat_entry_entries", ())
@@ -349,16 +327,26 @@ class CardHost:
         return next((widgets[index] for index in range(len(entries) - 1, -1, -1) if draft in entries[index].drafts),
                     None)
 
-    def on_draft_card_requested(self, event):
-        """The `draft` state is already in place (`draft_cards`, set before the message was posted); this mounts the
-        card and opens the «Goal draft» canvas tab beside «Plan», once — the slot replaces a card of the same
-        key, and `cards_seen` keeps a key from being posted again. A card retired before this message was handled
-        (`retire_stale_draft_cards`) is not mounted at all."""
-        if event.key not in self.draft_cards:
+    def on_draft_saved(self, event):
+        """The draft is already sendable (`sendable_drafts`, set before the message was posted); this writes the one
+        zplan line into the conversation, right behind the reply that carries the draft, and brings the Drafts tab
+        forward — `move_tab` keeps the owner's own tab choice. The line says where the draft is and, while `/plan`
+        can send it now (`plan_possible`), how. A draft sent or retired before this message was handled is history
+        and gets no line."""
+        if event.key not in self.sendable_drafts:
             return
-        # The tab first: in narrow mode opening it shows the canvas, and the card then brings the chat back.
-        self.add_view_tab(strings.text("canvas.draft_tab"), draft_tab_text(event.draft), key=event.key)
-        self.show_card(cards.draft_card(event.key, at=event.at), after=self.draft_reply_widget(event.draft))
+        self.app.move_tab(TAB_DRAFTS)
+        line = strings.text("chat.draft_saved")
+        if self.plan_possible():
+            line += " " + strings.text("chat.draft_send")
+        scroll = self.query_one("#chat", VerticalScroll)
+        after = self.draft_reply_widget(event.draft)
+        note = Static(Text(line, style="dim"), classes="draft-note", markup=False)
+        if after is not None and after in scroll.children:
+            scroll.mount(note, after=after)
+        else:
+            scroll.mount(note)
+        self.call_after_refresh(self.scroll_chat_end)
         self.call_after_refresh(self.render_chat)
 
     # The failure cards (i3e2) ---------------------------------------------------------------------
@@ -529,6 +517,11 @@ class CardHost:
         self.merge_view[key] = counts
         self.render_state()
 
+    def merge_integrated(self, key):
+        """Whether the milestone a merge card names is `integrated` now (the card's row left `awaiting_merge` that way)."""
+        stage = merge_stage(key)
+        return any(row.id == stage and row.state == "integrated" for row in self.app.rows())
+
     def merge_card_at(self, key):
         """The `HH:MM` a merge card's `at` carries: the clock read when the card was first drawn. A stage-done card
         has no stored stamp of its own (a goal draft carries its reply's), so this is the moment the decision
@@ -560,9 +553,14 @@ class CardHost:
         exactly as [o] reads the view — and the merge then carries the token that export produced, so one click
         still suffices. The pending guard comes first: a second `/merge` while the first is in flight is refused on
         the status line, and a card already decided is no card at all. Typed with no merge card open the command
-        keeps the run screen's own path (`[o]`'s end view holds merge and diff)."""
+        keeps the run screen's own path (`[o]`'s end view holds merge and diff), unless a merge landed here and the
+        refresh that moves its row is still unanswered: that row is merged, so the line is refused, not opened."""
         ref = self.merge_card_ref(key)
         if ref is None:
+            if any(row.state == "awaiting_merge" and row.token is not None
+                   and merge_key(row, self.app.snapshot.version) in self.merge_landed for row in self.app.rows()):
+                self.status_note(strings.text("note.not_now", name="/merge"))
+                return
             self.app.action_open_milestone()
             return
         card_key, milestone = ref
@@ -730,6 +728,7 @@ class CardHost:
         if error:
             self.status_note("Not done: " + error)
         elif outcome is not None and outcome.kind == "integrated":
+            self.merge_landed.add(key)
             receipt = strings.text("card.merge_done", stage=milestone, time=card_clock())
             self.status_note(outcome.lines[0] if outcome.lines else receipt)
             self.close_card(key, receipt)

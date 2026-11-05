@@ -13,7 +13,7 @@ and keeps every other action.
 
 ```
 ╭─ Conversation with the architect ╮╭─ my-project · nothing runs ───────────────────────╮
-│ CODEX_HOME … · openai         ││ Scheme  Plan                                      │
+│ CODEX_HOME … · openai         ││ Scheme  Plan  Drafts                              │
 │ architect · 21:01             ││ ◌ picking the first task · waiting                │
 │   here is the plan draft …    ││ ↻ tasks in turn                                   │
 │ you · 21:02                   ││ │ ◌ picking a task · waiting                      │
@@ -36,10 +36,13 @@ The bottom bar names the project, the branch, the job and the keys that always w
 file or diff tab is open). Decisions (merge, an answer, the plan, a failure) arrive as cards in the chat, answered
 by the card's buttons or the matching `/` command; every other action is a `/` command typed in the chat input.
 
-The right column is two tabs, «Scheme» and «Plan», over the always-visible «What's happening» pane. «Plan» is the
-plan of the current revision (the summary, one line per milestone, the live lines of an active attempt and the
-hint); the milestone row `↑`/`↓` select there is the one the `/run`, `/attempt`, `/answer`, `/log` and `/details`
-commands act on. «Scheme» is the
+The right column is three fixed tabs, «Scheme», «Plan» and «Drafts», over the always-visible «What's happening»
+pane. «Plan» is the last approved plan and its progress (the summary, one line per milestone, the live lines of an
+active attempt and the hint); before any approval it reads «No approved plan yet: the proposal is in Drafts.». The
+milestone row `↑`/`↓` select there is the one the `/run`, `/attempt`, `/answer`, `/log` and `/details`
+commands act on. «Drafts» lists the goal drafts of the chat history, newest first, each with its time and whole text,
+and above them the current plan revision whenever it is not approved (a proposal, a planner run, a failed or stale
+revision). «Scheme» is the
 live state: the live lines of the active attempt first, then the planner's or the run's lines the area above the
 chat shows (the same sources, in the same order), inside a frame whose border wraps the tab strip and whose border
 title names that state (`my-project · nothing runs` while nothing runs, `M2 <title> · running` while stage M2 runs);
@@ -50,8 +53,9 @@ window until it is toggled off): it keeps the observed attempt's own session log
 journal entries, one per line, oldest first, the newest lines that fit — with `last: … · m:ss ago` in its
 bottom border while a live run's quiet is measured, and the one line «nothing has happened yet» while nothing has
 been recorded. The tab shown at start is «Scheme» while a planner or a milestone attempt is active, else «Plan».
-Afterwards the app switches a tab by itself only twice: a newly approved plan revision shows «Plan» once, and a newly
-started run shows «Scheme» once, whoever approved or started it; whatever the first snapshot already held is not
+Afterwards the app switches a tab by itself only in these cases: a new goal draft and the planner's end (a plan
+proposed, or planning stopped) show «Drafts», and a newly approved plan revision and a newly started run show «Plan»
+once, whoever approved or started it; whatever the first snapshot already held is not
 new, and once you have chosen a tab since your last message or command (`←`/`→`, `Tab`, a click on a tab label,
 `/scheme`, `/status`, an opened file) the app moves none. `←`/`→` switch from anywhere on the main screen, and a
 click on a tab label switches too; the bottom row names the arrows (`←→ tabs`). While the chat input holds text the
@@ -62,7 +66,7 @@ exactly where they were.
 
 Below 100 columns (`app.NARROW_COLUMNS`) the shell no longer shows the chat and the canvas side by side — at 80x24
 both would be too narrow to read — and shows one pane at a time, full width. The tab cycle then gains «Conversation» in
-front of the canvas (`Conversation` -> `Scheme` -> `Plan` -> the open file/diff tabs -> `Conversation`), driven by the same
+front of the canvas (`Conversation` -> `Scheme` -> `Plan` -> `Drafts` -> the open file/diff tabs -> `Conversation`), driven by the same
 `←`/`→` (an input holding text still keeps its cursor). The first frame is «Conversation»: the chat alone, its pane
 titled `chat.title_narrow` with the arrow hint, and no canvas. The canvas strip — shown whenever the canvas page is
 — carries a «Conversation» label so the cycle's first page is named, and the canvas keeps the tab that was active;
@@ -85,10 +89,10 @@ not a command still goes to the chat as a message to the architect. A command th
 above the chat and keeps the text in the input. `Esc` closes the palette (clearing its input) before it cancels the
 turn.
 
-Two more kinds of read-only canvas tab open beside «Scheme» and «Plan», and only while no work runs (neither the
+Two more kinds of read-only canvas tab open after «Scheme», «Plan» and «Drafts», and only while no work runs (neither the
 planner nor a milestone): a project file and a finished stage's diff. `←`/`→` cycle every open tab, the file and
-diff tabs included, and `Esc` on such a tab closes it and returns to the tab that was active before it — «Scheme»
-and «Plan» themselves never close. A file tab is titled with the file's name and shows its first lines with line
+diff tabs included, and `Esc` on such a tab closes it and returns to the tab that was active before it — «Scheme»,
+«Plan» and «Drafts» themselves never close. A file tab is titled with the file's name and shows its first lines with line
 numbers; at most three file tabs stay open at once and opening a fourth closes the oldest. A stage's diff opens as
 one tab titled «Changes <stage>», replaced in place when another is asked for. While the planner or a stage runs
 both open nothing: the status line above the chat says so, and a tab already open stays. A name outside the project
@@ -104,7 +108,7 @@ either.
 | --- | --- | --- |
 | anywhere | `Ctrl+Q` | Quit; the terminal is restored. Runs and the plan are untouched. During a submission, start, merge or setup it first finishes the job («Finishing the operation without interrupting it. Exit right after.») and then exits. A running architect turn is cancelled at once and the exit follows within seconds (its process group goes with it); a watch slice is cut at once too, and the run it watched keeps going |
 | main | `Tab` | Move focus between the input line and the plan pane; the pane lives on the «Plan» tab, so the move shows that tab |
-| main | `←` / `→` | Show the previous / next canvas tab — cycling «Scheme» -> «Plan» -> «Scheme». The keys work with the focus anywhere on the main screen, the plan pane included; while the chat input holds text they move its cursor instead and switch no tab. A click on a tab label switches to it too |
+| main | `←` / `→` | Show the previous / next canvas tab — cycling «Scheme» -> «Plan» -> «Drafts» (-> the open file/diff tabs) -> «Scheme». The keys work with the focus anywhere on the main screen, the plan pane included; while the chat input holds text they move its cursor instead and switch no tab. A click on a tab label switches to it too |
 | main, plan pane | `↑` `↓` | Select a milestone: the row the `/run`, `/attempt`, `/answer`, `/log` and `/details` commands act on |
 | main, plan pane | `PgUp` / `PgDn` | Scroll the chat history up / down |
 | main, input line | `Enter` | Send the typed message to the architect as one turn, or run the typed `/` command. While the chat is preparing or a turn runs nothing is queued: the refusal stays on the chat line and the text is kept |
@@ -118,17 +122,17 @@ either.
 ### `/` commands
 
 Typing `/` in the chat input lists the commands the current state allows; the word after it narrows the list.
-Commands act in the screen's state: `idle` (nothing to decide), `draft` (a goal-draft card is open), `planning`
+Commands act in the screen's state: `idle` (nothing to decide), `draft` (a goal draft can be sent), `planning`
 (the planner runs), `plan_ready` (a plan is proposed), `running` (a stage runs), `merge` (a stage waits for its
 merge), `question` (a stage needs an owner answer) and `error` (a failure or a blocked start).
 
 | Command | Acts in | What it does |
 | --- | --- | --- |
-| `/plan GOAL` | `idle`, `draft`, `error` | Start the planner on the goal typed after it; readiness is re-checked first and a goal is never lost. With no text it decides the open goal-draft card (the same as its «yes, draft the plan») or sends the unsent revision |
+| `/plan GOAL` | `idle`, `draft`, `error` | Start the planner on the goal typed after it (a new goal); readiness is re-checked first and a goal is never lost. With no text it sends the newest sendable goal draft, or the unsent revision when there is none |
 | `/approve` | `plan_ready`, `question`, `error` | Approve the proposed plan (the plan card's «yes, approve»); on an owner-question card send the answer draft, or open the answer note when there is none, and `/approve simplify`, `/approve split` or `/approve skip` sends that quick answer. With no card it opens the plan screen, whose button «approve» approves |
-| `/decline` | `draft`, `plan_ready`, `question` | Say «no» to the open card: a goal draft is dropped from the conversation, a proposed plan opens the revision note, an owner question opens the answer note, where `Enter` sends |
-| `/run` | any | The «Next:» action of the selected milestone (else the first one that has an action): start a ready one at once (no confirmation), resume a recoverable failure, begin a new attempt, or check an unconfirmed submission or stop |
-| `/stop` | `running`, `planning` | The stop confirmation of the running milestone — it names that milestone even when another row is selected — or of the planner. The unfinished work of the attempt is not accepted |
+| `/decline` | `draft`, `plan_ready`, `question` | Say «no» to the open card: a proposed plan opens the revision note, an owner question opens the answer note, where `Enter` sends. A goal draft has no card and nothing to decline: with no card the command says so |
+| `/run` | any | The «Next:» action of the selected milestone (else the first one that has an action): start a ready one at once (no confirmation), resume a recoverable failure, begin a new attempt at once, or check an unconfirmed submission or stop |
+| `/stop [M1]` | `running`, `planning` | Stop the named running milestone at once, with no confirmation; bare, it stops the one running milestone at once (whichever row is selected), and with several running it names them (`/stop M1, /stop M2`) and stops nothing. With no milestone running it is the planner's stop, which asks «yes» / «no» first. The unfinished work of the attempt is not accepted |
 | `/merge` | `merge` | Merge the stage whose card is open, with no modal; with no card open it opens the run-end screen, which holds «merge» and «changes» |
 | `/diff` | `merge`, `idle` | Open the selected finished stage's diff as a canvas tab |
 | `/open PATH` | `idle`, `draft`, `plan_ready`, `merge`, `question`, `error` | Open the project file as a read-only canvas tab (`Esc` closes it) |
@@ -164,7 +168,6 @@ its button «start the planner» starts the planner. Its buttons follow the plan
 | «approve» | Approve the revision at once; nothing is started |
 | «approve despite the check» | Approve a plan the critic rejected, with a typed reason in a note |
 | «revise» | Open the revision note: describe the change, press «send revision»; a new revision is planned |
-| «decline» | Decline the proposal (asks «yes» / «no» first) |
 | «details» | Full requirements and checks; for a failed planning run the diagnostics |
 
 The planner is stopped with `/stop`. `Esc` closes an open note first, then goes back one level.
@@ -174,19 +177,22 @@ outcome and only the buttons the state allows:
 
 | State | Buttons |
 | --- | --- |
-| `done, waiting for merge` | «merge» (asks `Merge the result of M1 into main?`), «changes», «details» |
+| `done, waiting for merge` | «merge» (at once, no confirmation), «changes», «details» |
 | `conflict` | «retry the merge», «changes», «details»; or merge `zplan/...` by hand, commit, then `zplan` |
 | `needs an answer` | «accept» (when a proposal exists), «answer» (the answer note, then a new attempt), «leave» |
 | `blocked` | «answer» (answer and restart), «to plan» (a scope change becomes a plan revision) |
 | `failed · can continue` | «continue» (the same attempt in its worktree), «new attempt» (from the current HEAD), «plan», «back» |
-| `failed · cannot continue`, `stopped` | «new attempt» (from the current HEAD; the attempt note is optional), «to plan» |
+| `failed · cannot continue`, `stopped` | «new attempt» (from the current HEAD, at once, with no note), «to plan» |
 | `submission status unknown` | «check» (reconcile with Zeroshot, never a second submission) |
 
 Every run-end screen also has «log» (the tail of the Zeroshot log) when the attempt has a native run that failed
 or is still going, and «details» (the attempt's stored journal entries, a read-only screen); `Esc` closes it.
+A screen that offers «new attempt» adds the line «To change the instructions, tell the architect in the chat.»: a
+new attempt (this button, the panel's `/run`, a failure card's «try again») starts at once, and new instructions go
+through the architect.
 
-Notes are short text screens: the answer note, the revision note and the new-attempt note. Type in the text field,
-`Tab` to the send button («send», «send revision», «new attempt») and press `Enter`; `Esc` closes
+Notes are short text screens, such as the answer note and the revision note. Type in the text field,
+`Tab` to the send button («send», «send revision») and press `Enter`; `Esc` closes
 without changes, and an empty answer starts nothing. The owner-question card's answer note is the exception: `Enter` in
 its text field sends at once. Settings holds the readiness checks and the roles; its buttons
 are «install» (the pinned tools, the same as `zplan setup`, the output streams into the setup log), «log in»
@@ -198,7 +204,7 @@ start in a project: the process profile»); `Ctrl+Q` leaves without deciding.
 ### UI language
 
 0.8.0 ships an English-only interface: the shell's texts (the bottom bar, the chat pane's titles and status lines, the
-canvas tabs «Scheme»/«Plan» and the plan pane's own lines, the key hints and the input placeholder), the line UI, the
+canvas tabs «Scheme»/«Plan»/«Drafts» and the plan pane's own lines, the key hints and the input placeholder), the line UI, the
 modals and the plan and journal lines the engine produces are all English. The catalog (`terminal_planner/tui/strings.py`)
 keeps its Russian and Chinese columns for a later localisation release, but only English is offered: there is no
 language chooser and `/language` is not listed. The setting is kept in `ui.json` outside the project
@@ -212,14 +218,16 @@ The theme is `ZPLAN_THEME` (`dark`, `light` or `auto`) at start, else the stored
 
 The plan pane is the same overview as `zplan status`, refreshed every few seconds without starting or
 polling anything; a slow check or setup never blocks the keys. Planning (goal, planner progress, proposal,
-approve / revise / reject) works in the shell with the same rules as the line UI: the goal is typed as
-`/plan GOAL` (or an architect's goal draft is accepted on its card), readiness is re-checked right before the
+approve / revise) works in the shell with the same rules as the line UI: the goal is typed as
+`/plan GOAL` (or a bare `/plan` sends the architect's newest goal draft), readiness is re-checked right before the
 planner is called, a goal is never lost, a stale unsent revision is replaced only by the plan screen's button
 «new revision» (or rebuilt by «start the planner»), and a sent or unconfirmed submission is observed, never
 sent again. Planner progress goes to the left pane while you keep typing; `Ctrl+Q` leaves the planner running and
 reopening the shell resumes watching it.
 
-The architect chat is advisory and read-only: it never writes proposal, approval or run state, and its
+The architect chat writes no proposal, approval or run state itself: the architect acts only through zplan's own
+calls (start, stop, approve, plan edits and revisions, merge), and each such action shows as one zplan line on the
+status line above the chat. Its
 preparation (install, login and version checks, then the chat itself) runs off the event loop, so the pane shows
 «preparing chat…» until it is ready and every other key keeps working meanwhile. Its header shows the effective
 `CODEX_HOME`, provider, model and the session turn/token counters, refreshed after each turn. One message is one
@@ -242,11 +250,12 @@ line, `architect · goal draft: …` for a goal and `architect · answer draft M
 malformed or oversized block, a block past the fifth, an unknown milestone and a block inside another fenced block
 stay ordinary text. Every draft line is `<reply> · <label>: <text>`: the reply the draft comes from is named by
 its place among the replies the pane holds (`reply 1`, `reply 2`, …), so two replies that each carry a draft are
-told apart. A goal draft is a decision card: the newest actionable goal draft of the retained history — its entry on its own
-row, label first — shows as the card «Goal draft» in the chat (see «Decision cards»), and the whole draft opens
-as a canvas tab. Nothing is typed again and no form opens: the card's «yes, draft the plan» (or a typed `/plan`)
-starts the planner from the draft's own text and identity, and a goal the owner types as `/plan GOAL` is never
-overwritten by a draft. The draft keeps its original identity rather than the current view's, and `/plan` re-checks
+told apart. A goal draft opens no card and blocks nothing: a new actionable goal draft gets one zplan line in the
+chat right under its reply, «Draft saved in Drafts.» (followed by «Use /plan to send the latest draft to planning.»
+while `/plan` can act), is listed whole in the «Drafts» tab, and that tab comes forward. Nothing is typed again and
+no form opens: a bare `/plan` starts the planner from the newest sendable draft's own text and identity (a sent
+draft, and every older one, is not sendable any more), and a goal the owner types as `/plan GOAL` is a new goal,
+never overwritten by a draft. The draft keeps its original identity rather than the current view's, and `/plan` re-checks
 it against the current plan before the planner starts: a stale draft is refused with «draft is outdated» and its
 reason — a new revision, or the plan state changing, including `no plan` that became a plan — writing nothing and
 starting nothing; the draft's text stays copyable. An answer draft is opened by `/answer`: it opens the newest
@@ -285,33 +294,26 @@ the milestone resends it. A scope change (the button «to plan» of a blocked or
 
 A decision the chat leads to is a card *in the conversation*: the card mounts into the chat's own history right
 after its newest entry at the moment it is shown, and it keeps that place — a card that just appeared is scrolled
-into view with its own buttons, the view resting at the conversation's bottom (a goal draft followed by the
-proposed plan fits with both cards at 80x24: in the narrow pane a card sits flush in the conversation — no indent
+into view with its own buttons, the view resting at the conversation's bottom (two cards fit at 80x24: in the
+narrow pane a card sits flush in the conversation — no indent
 and no drop below it, like the history's own entries — and leaves out the dim command line under its buttons, the
 very commands those buttons stand for, so two cards and every button fit the view at once). A card re-read on a live render (a source whose own `HH:MM` moved on
 with the clock) is that card replaced in place: it stays where it stood and the view the owner scrolled is left
 alone — only a card that was not in the history yet is scrolled to. A card the owner closes stays where it stood as
 its own receipt (the `✓` line, no buttons); only a dropped card — or one whose source stops returning it — leaves
-the history, and a dropped key is never shown again. Its first card is the goal draft: the newest actionable goal draft of a reply,
-while it has not been decided yet, shows «Goal draft» in the chat — the card text asks
-whether to draft the plan from that draft and points to the full text, its two buttons are «yes, draft the plan» and
-«no» (they run `/plan` and `/decline`, and typing either line in the chat does the same), it carries its own
-`HH:MM` — the time of the reply the draft came from, not the moment the card is drawn — and the whole draft opens
-beside «Plan» as the «Goal draft» canvas tab (`Esc` closes it like a file tab). While that card is open the
-state is `draft` — a card is a decision of its own, so it stays
-`draft` even while a proposed plan, a failed planning run or a running stage would otherwise be the screen's state,
-and the typed `/plan` reaches it exactly as the button does. A card belongs to the reply it came from: its key
-carries that reply's own place in the stored transcript, so two identical replies are two cards, a refresh and a
-poll of the same history never bring a decided card back, and a newer card mounts below the open ones (a closed
-receipt keeps its place for good; a reopened shell shows the newest undecided draft again).
+the history, and a dropped key is never shown again. A newer card mounts below the open ones, and a closed receipt
+keeps its place for good.
 
-The card's «yes» — or a typed `/plan` — re-checks the draft against the current plan first: a stale draft
-(`draft is outdated` and its reason) is refused on the status line, nothing starts and the card stays; otherwise
-the planner starts from the draft's own text and identity with nothing typed in between, and the card becomes
-`✓ sent to the planner HH:MM` with no buttons (a second `/plan` finds no open decision then). A submission the
-planner did not start — a readiness refusal, a revision that turned stale before it reached the planner, or an
-error from the controller — writes no receipt: the card stays an open decision and the reason shows on the status
-line above the chat, for the button and the typed line alike.
+A goal draft is not a card (see above): it is saved in «Drafts» with its one chat line. While a draft can be sent
+the state is `draft`, unless a running stage, a shown error or a failed, blocked or stopped stage, an owner
+question, a merge wait or the planner ranks above it (a failed planning run does not: `/plan` redoes it from the
+draft). A bare `/plan` re-checks the newest sendable draft against the current plan first: a stale draft
+(`draft is outdated` and its reason) is refused on the status line and nothing starts; otherwise the planner
+starts from the draft's own text and identity with nothing typed in between, and no draft is sendable any more. A
+submission the planner did not start — a readiness refusal, a revision that turned stale before it reached the
+planner, or an error from the controller — leaves the draft sendable, and the reason shows on the status line
+above the chat.
+
 A stage that is `done, waiting for merge` has the card of its own: «M1 ready» shows in the chat with the
 numbers of the attempt's own tasks line («2 of 3 tasks accepted, the final check passed. Merge into main?»; while
 that line is not read yet the same card asks without the counts), the buttons «merge» and «see the changes»,
@@ -327,14 +329,11 @@ closes, the branch is kept) and «show the differences» (`/diff`). A refusal, o
 leaves the card where it is — a conflict also moves the stage to `conflict`, so the card goes with the state that no
 longer asks for a merge and the run screen (or the hand merge it names) remains. A second `/merge` while the first
 is in flight is refused with `Already in progress: …`. The typed `/merge` reaches that card even when another decision
-card is open beside it (a goal-draft card sets the screen's `draft` state): the merge card a typed command names
+card is open beside it: the merge card a typed command names
 answers it exactly as its own button does, while the other card's commands stay in reach. «see the changes»
 selects that stage in the panel and opens its diff as a canvas tab (`Esc` closes it like any other).
-«no» — or a typed `/decline` — drops the card from the history, and that reply's draft never brings a card back
-(an identical reply stored later is a card of its own); a decision the owner did make keeps its card as the receipt
-where it stood.
 
-Its second card is the owner question. A milestone whose attempt stopped on `needs_owner` (the row reads
+Another card is the owner question. A milestone whose attempt stopped on `needs_owner` (the row reads
 `needs an answer`) shows the end screen's own question body in the chat — its `Question:` and task lines, fetched once
 for that attempt — titled «Your decision is needed · <milestone>» and carrying its three quick answers «simplify»,
 «split», «skip» (each answers the attempt with that word and watches the new one). The card sizes that body
@@ -348,11 +347,11 @@ owner's own words at once (`Esc` keeps the card); `/approve` with no argument se
 `/approve simplify`, `/approve split` or `/approve skip` sends that choice's word, and any other argument is refused. A started answer turns the card into `✓ answer sent
 HH:MM`; a refusal (a stale draft, an unready start, an error) keeps it an open decision and shows the reason on the
 status line. The card key names the attempt (`question:<milestone>:<attempt>`), so each new attempt gets its own card,
-and a closed one keeps its place like the draft's receipt.
+and a closed one keeps its place like any other receipt.
 
 The proposed plan is the next card: while a plan is proposed (its revision is the current one and its status is
 `proposed`) the chat holds a card «Plan · N stages · M tasks», the counts taken verbatim from the plan summary
-line the «Plan» tab shows (a proposed plan whose line carries no counts shows just «Plan»), with the buttons
+line the «Drafts» tab shows (a proposed plan whose line carries no counts shows just «Plan»), with the buttons
 «yes, approve» and «no, revise». «yes, approve» — or a typed `/approve` — approves in one click, with no
 plan screen and no confirmation modal: the decision runs once and the card becomes `✓ approved HH:MM` with no
 buttons. A refusal — the plan is no longer the current proposed one — keeps the card open and shows the reason on
@@ -414,7 +413,7 @@ While a planner or milestone run is active the panel below the milestone rows is
   are listed; no verdict is invented. The run-end screen's button «details» opens the same stored entries.
 - **Activity tail** (`/log`): the last ~40 lines of the Zeroshot log, masked for secrets, read when you ask; an empty
   log says so. A slow log never blocks the keys.
-- **Pending actions**: a confirmed start or stop shows `starting M1…` / `stopping M1…` at once and a repeated
+- **Pending actions**: a start or stop shows `starting M1…` / `stopping M1…` at once and a repeated
   press answers `Already in progress: …`. While a stop is unconfirmed `/run` only checks, never starts.
 
 Every home and plan screen ends with «Next:» for the selected state, taken from the same table as the end
@@ -454,7 +453,7 @@ exits from the home screen. Installation: [INSTALLATION.md](INSTALLATION.md).
 | --- | --- |
 | `zplan` | Interactive session for the Git project in the current directory (`--project PATH` selects another) |
 | `zplan status` | Prints the home screen once; no prompts, nothing started |
-| `zplan setup` | Installs the pinned Zeroshot 10.16.0 and Codex 0.162.1 (the readiness screen offers it as `u`) |
+| `zplan setup` | Installs the pinned Zeroshot 11.0.0 and Codex 0.162.1 (the readiness screen offers it as `u`) |
 | `zplan login` | Codex device login into zplan's own Codex home (file store); a login already there is kept. In your own `$CODEX_HOME` it runs no Codex (sign in with `codex login`) |
 | `zplan logout` | `codex logout` of zplan's own Codex home only; refused while a run or the architect is live there |
 | `zplan doctor` | Checks tools, Codex home/provider/login, Git identity, socket path, roles and the current project |
@@ -472,10 +471,10 @@ Project checks need a commit, an attached branch and a GitHub `origin`; uncommit
 
 `zplan --fixture ID` walks the whole flow against a deterministic fixture in its own namespace: the planner,
 milestones, driver and the process profile all come from fixture stores, and milestone work uses local Git refs,
-worktrees, merges and checker runs only — nothing is fetched, pushed or sent over the network. The demo has no
-architect chat: the full-screen chat pane says «The architect chat is unavailable in the demo (--fixture).», makes no provider
-call and runs no tool probe, and accepting the profile keeps the snapshot in the fixture state without creating or
-changing `<project>/zplan.process.json`. `--fixture` needs a nonempty id of letters, digits, `-` or `_`; an empty
+worktrees, merges and checker runs only — nothing is fetched, pushed or sent over the network. The demo's
+chat has a scripted architect, with no model: it writes one plan for the first goal you type, never approves, starts
+or merges, so you approve the plan yourself; it makes no provider call and runs no tool probe. Accepting the profile keeps
+the snapshot in the fixture state without creating or changing `<project>/zplan.process.json`. `--fixture` needs a nonempty id of letters, digits, `-` or `_`; an empty
 or invalid id is refused before anything runs. The rest of this document describes the native flow; a fixture
 session is the same screens over the fixture stores.
 
@@ -531,7 +530,7 @@ explicit `CODEX_HOME` (your own Codex, signed in with `codex login`) overrides i
 The check runs again right before every planner submission and milestone start. If something is missing then,
 the same screen appears (`q` goes back) and nothing is sent; a goal you have typed is already saved.
 
-Why zplan keeps its own tools: the planner and milestone graphs are qualified against exactly Zeroshot 10.16.0
+Why zplan keeps its own tools: the planner and milestone graphs are qualified against exactly Zeroshot 11.0.0
 and Codex 0.162.1, so zplan installs those checksum-verified under its data directory and never uses or changes
 a global `zeroshot` or `codex`.
 
@@ -584,7 +583,7 @@ Milestone states: `waiting for M1` (dependency not merged yet), `ready`, `runnin
    Goal: Add a README paragraph about installation
      M1 Installation paragraph  (after: —)
        T1 Write the installation paragraph in README.md · 2 checks
-   [a] approve  [r] revise  [x] decline  [i] requirements and checks  [q] back
+   [a] approve  [r] revise  [i] requirements and checks  [q] back
    ```
 
    `i` shows every requirement, slice and check and how the plan was argued: the critic's verdict, rounds used of
@@ -592,7 +591,13 @@ Milestone states: `waiting for M1` (dependency not merged yet), `ready`, `runnin
    checked under. A plan the critic did not accept within the rounds cannot be approved with `a`; `r` revises it,
    `g` plans again, and `o` approves it anyway (below).
 5. `a` approves (`Plan r1 approved. Nothing was started; start with [g] on the home screen.`),
-   `r` asks for changes (type the feedback; a new revision is planned), `x` declines. Enter and `q` only go back.
+   `r` asks for changes (type the feedback; a new revision is planned). Enter and `q` only go back.
+
+**Plans the architect writes.** When you ask the architect for a plan in the chat, it writes the plan itself and
+zplan checks it without the planner: a fresh plan reader retells the plan and a critic judges it, side by side, once.
+The plan card shows `How a fresh reader understood it: "…"`: if it is not what you asked for, say so. When the critic
+rejects the plan the architect fixes it or disputes each finding (`Architect's answer: "…"`), within `plan_rounds`
+revisions of its own; then you decide. The scheme draws the plan reader and the plan check as two blocks.
 
 Plans contain product work only: the milestone driver already runs independent reviews, repairs and resume
 for every task, so those never appear as tasks or checks unless your goal asks for them. A small goal gets a
@@ -745,7 +750,7 @@ A resumed attempt is a successor run: it is labelled `continuation of <root run 
    and any successor run; copy them as printed (they carry `ZEROSHOT_STATE_DIR` / `ZEROSHOT_CONFIG_DIR` and the
    exact executable). `failed · can continue` → «continue» (line UI: `g`) resumes; otherwise «new attempt»
    (`t`) starts a new attempt or «to plan» (`p`) changes the plan.
-5. **Stop safely.** In the full-screen shell type `/stop` and answer «yes»; in the line UI use `k` + Enter while
+5. **Stop safely.** In the full-screen shell type `/stop` (`/stop M1` when several run); it stops at once. In the line UI use `k` + Enter while
    observing, then `y`. The stop is recorded first; if zplan exits before Zeroshot confirms, the milestone shows
    `stopping`, and `/run` (line UI: `g`, check) resends the stop. `Ctrl+Q`, Ctrl-C, closing the
    terminal or `q` only detach — the run continues and costs tokens until it ends or is stopped. Do not delete

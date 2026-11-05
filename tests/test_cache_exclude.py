@@ -39,7 +39,24 @@ class CacheExcludeTest(RunsTest):
     def test_missing_exclude_file_is_created(self):
         self.exclude().unlink(missing_ok=True)
         self.start()
-        self.assertEqual(self.exclude().read_text().splitlines(), LINES)
+        self.assertEqual(self.exclude().read_text().splitlines(), LINES + ["/.zplan/"])
+
+    # u9a A1, A2: prepare excludes the run's own files from the start, once, and writes no tracked file.
+    def test_prepare_excludes_zplan_once_and_the_worktree_shows_no_run_files(self):
+        """Interpretation: `/.zplan/` is written by `prepare` before the worktree exists, via project_state.ensure_excluded."""
+        self.exclude().write_text("mine\n")
+        before = self.git("status", "--porcelain")
+        r = self.start()
+        worktree = Path(r["worktree"])
+        self.assertTrue((worktree / ".zplan" / "baseline.json").is_file())
+        status = subprocess.run(["git", "-C", str(worktree), "status", "--porcelain", "--untracked-files=all"], check=True,
+                                capture_output=True, text=True).stdout
+        self.assertNotIn(".zplan", status)
+        self.assertEqual(self.exclude().read_text().splitlines().count("/.zplan/"), 1)
+        with self.fixture_authority() as a:
+            self.fixture_runs(a).prepare(dict(r, status="preparing"))  # idempotent: a second preparation repeats nothing
+        self.assertEqual(self.exclude().read_text().splitlines().count("/.zplan/"), 1)
+        self.assertEqual(self.git("status", "--porcelain"), before)
 
     # C2
     def test_untracked_cache_does_not_block_start_and_worker_cache_is_not_staged(self):

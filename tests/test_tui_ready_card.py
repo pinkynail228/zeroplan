@@ -123,6 +123,17 @@ def unsent_start(checks):
     return start
 
 
+def refusing_while_failing(slices, calls):
+    """A `Controller.start_planning` that records each goal it is given and answers the readiness gate by `slices`:
+    `unsent` while a check fails, `sent` once every check passes."""
+    def start(controller, goal, done, draft=None, card=False):
+        calls.append(goal)
+        failing = [c for c in slices.checks if not c.ok]
+        done(Outcome("unsent", checks=tuple(failing)) if failing else Outcome("sent"), None)
+        return True
+    return start
+
+
 def _app(checks=(), run_note="", goal_block=(), plan_block=()):
     """The app side `ready_source` reads: only `checks`, the blocked note and the two refused-submission blocks."""
     class App:
@@ -372,13 +383,19 @@ class ReadyGoalStartRepairTests(ReadyShell):
         goal callback*, with the card's own key — answering the readiness gate's `unsent` sets the blocked marker
         (`goal_block`) and asks for the automatic recheck. `got_checks` used to clear that marker on *any* successful
         slice, so the card vanished while the origin check still failed; the marker must survive a recheck that
-        still fails (one card, the same key) and clear only once readiness passes."""
+        still fails (one card, the same key) and clear only once readiness passes.
+
+        u1a (A1, A2): the refused submission is remembered; the passing recheck sends that same goal once (the
+        card and the "Not started" note are gone), a further passing check sends nothing, and of two refused goals
+        only the newer one is sent. Interpretations: the draft identity travels with the remembered goal; a draft
+        card that was declined or closed in the meantime forgets the submission (`draft_card_closed`)."""
         slices = Slices(self.slices())
         self.approve(running=False)
+        calls = []
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
             with patch.object(Controller, "check", injected_check(slices)), \
-                    patch.object(Controller, "start_planning", unsent_start(self.slices())):
+                    patch.object(Controller, "start_planning", refusing_while_failing(slices, calls)):
                 self.app.start_goal("цель", card_key="draft:k")  # the real callback, the goal-card refusal path
                 # The automatic recheck (started on the refusal) still fails with the very same set: wait for its
                 # fresh failing slice, then the marker must still be there (the defect cleared it here).
@@ -387,14 +404,38 @@ class ReadyGoalStartRepairTests(ReadyShell):
                 await self.until(pilot, lambda: self.app.checking is False)
                 await pilot.pause(0.3)
                 self.assertTrue(self.app.goal_block)  # the marker survived the failing recheck
+                self.assertEqual(calls, ["цель"])     # a check that still fails sends nothing more
+                self.assertIn("Not started", self.app.chat_note)  # and keeps today's note
                 card = await self.card_shown(pilot)
                 self.assertEqual(card.spec.key, "ready:origin")
                 self.assertEqual([shown.spec.key for shown in self.cards_shown()], ["ready:origin"])
-                # A recheck that passes clears the block and the card leaves.
+                # A recheck that passes clears the block and the card leaves; the refused goal goes to planning.
                 slices.checks = self.slices(fixed=True)
                 await self.press(pilot, "/retry")
-                await self.until(pilot, lambda: self.card() is None)
+                await self.until(pilot, lambda: self.card() is None and len(calls) == 2)
                 self.assertFalse(self.app.goal_block)
+                self.assertEqual(self.app.goal_message, "")
+                self.assertNotIn("Not started", self.app.chat_note)  # the drawn status note is gone too
+                self.assertEqual(calls, ["цель", "цель"])
+                # A2, once: another passing recheck starts nothing more.
+                self.app.request_check()
+                await self.until(pilot, lambda: self.app.checking is False)
+                await pilot.pause(0.3)
+                self.assertEqual(calls, ["цель", "цель"])
+                # A2, only that goal: a goal refused, then another one refused: the fix sends the new one only.
+                del calls[:]
+                slices.checks = self.slices()
+                self.app.start_goal("первая")
+                await self.until(pilot, lambda: self.app.refused_goal is not None)
+                await self.until(pilot, lambda: self.app.checking is False)
+                self.app.start_goal("вторая")
+                await self.until(pilot, lambda: self.app.refused_goal is not None and self.app.refused_goal[0] == "вторая")
+                await self.until(pilot, lambda: self.app.checking is False)
+                slices.checks = self.slices(fixed=True)
+                self.app.request_check()
+                await self.until(pilot, lambda: len(calls) == 3)
+                await pilot.pause(0.3)
+                self.assertEqual(calls, ["первая", "вторая", "вторая"])
 
     async def test_a_removed_ready_card_never_comes_back(self):
         """A4 regression (the acceptance review's repair): a readiness card its source stopped returning is gone

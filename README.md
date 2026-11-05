@@ -19,12 +19,16 @@
   <a href="#install">Install</a> · <a href="#try-it-free">Try it free</a> · <a href="#use-it-on-your-project">Use it</a> · <a href="docs/USER_FLOW.md">Guide</a>
 </p>
 
-Early release (0.9), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
+Early release (0.11), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
 
 ## Why zeroplan
 
-- **You see the plan before any code changes.** A planner splits the goal into milestones and tasks, an independent
-  critic checks that the plan covers it, and you approve it.
+- **You see the plan before any code changes.** You agree on the goal with the architect, and the architect writes
+  the plan. A fresh reader with no context retells it, so you can see it was understood; an independent critic checks
+  it once; you approve it once.
+- **It does not stop to ask.** Questions come before the start, each with the default the architect will take. The
+  project's checks run on the base before work begins. A worker's question or a blocked task is decided by the
+  architect within the plan you approved, and you get one report at the end.
 - **Every task is reviewed twice.** A worker writes it; an acceptance review and a code review must both pass, or
   the task goes back for another round.
 - **Your checkout stays yours.** Each milestone runs in its own Git worktree and ends as a
@@ -42,9 +46,9 @@ before and after a run (a conversation, a checked plan, the merge) and shows the
 flowchart TD
   subgraph P [zplan: the plan]
     A([You describe a goal]) --> B[Architect chat]
-    B --> C[Planner: milestones and tasks]
-    C <-->|up to 3 rounds| D[Critic: does the plan cover the goal?]
-    C --> E{The plan is approved: by zplan at autonomy auto, else by you}
+    B --> C[The architect writes milestones and tasks]
+    C --> D[A fresh reader retells the plan; a critic checks it once]
+    D --> E{You approve the plan once; later revisions follow the autonomy level}
   end
   subgraph Z [Zeroshot: one run per milestone, in its own Git worktree]
     G[Worker implements a task] --> H[Acceptance review and code review, in parallel]
@@ -101,8 +105,9 @@ asks "Merge into main?", `/merge`. The demo plan's M2 can wait. The architect ch
 > - **It spends your Codex tokens**, with no estimate up front, and a run keeps going after you close the terminal.
 > - **Agents have full access.** They run as your user without approval prompts and can read or change any file
 >   your user can. Use a machine where that is acceptable.
-> - **It acts on its own by default.** At autonomy `auto` zplan approves a checked plan, starts milestones and merges
->   each milestone once its reviews pass; without a test check it merges without one and says so. On the first
+> - **It acts on its own by default.** You approve the first revision of every plan; at autonomy `auto` zplan then
+>   approves its later checked revisions, starts milestones and merges each milestone only after at least one project check passes on the exact candidate. Without a configured check,
+>   automatic merge is refused; only an explicit owner merge can proceed and is labelled unverified. On the first
 >   start choose `supervised` to approve plans and high-risk merges yourself, or `manual` to approve everything.
 > - **`/stop` stops a run.** Quitting zplan only detaches.
 

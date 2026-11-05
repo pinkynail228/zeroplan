@@ -816,7 +816,7 @@ class ResultModalTests(LiveShell):
 
 def merge_elsewhere(app):
     """The merge another window would have done while the result modal is open."""
-    app.delivery.merge(app.delivery.latest("M1"))
+    app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True)
 
 
 class ResultReadiness:

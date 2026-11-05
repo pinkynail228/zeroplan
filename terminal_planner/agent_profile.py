@@ -18,6 +18,8 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import threading
+import time
 
 from . import setup
 from .authority import Blocked
@@ -40,8 +42,11 @@ EXPECTED = {
 _MARKER_PREFIX = b"# zplan-agent-profile: "
 _NUMBER = re.compile(rb"[1-9][0-9]{0,8}")
 LOCK_NAME = ".zplan-profile.lock"
+LOCK_WAIT_SECONDS = 5.0  # the update under the lock takes milliseconds: a second start waits this long for it
+LOCK_POLL_SECONDS = 0.1
 _BAK_PREFIX = ".config.toml.bak-"
 _NEW_PREFIX = ".config.toml.new-"
+_PROCESS_LOCK = threading.Lock()  # flock is per open file description: threads of one process need their own turn
 
 
 def packaged():
@@ -80,7 +85,8 @@ def ensure(home):
     Returns `"written"` (no config), `"current"` (already this N, even if hand-edited) or `"replaced"` (another N,
     no marker, undecodable bytes or a symlink). Refuses with ValueError a home other than
     `setup.private_codex_home()`, and with `setup.agent_home` a held lock, a non-file entry or an OSError; a refusal
-    removes its own temp and never writes the target of a `config.toml` symlink."""
+    removes its own temp and never writes the target of a `config.toml` symlink. Threads of one process take turns
+    (the later one finds the profile current); only another process holding the flock past LOCK_WAIT_SECONDS is refused."""
     home = Path(home)
     if home.resolve() != setup.private_codex_home().resolve():
         raise ValueError("agent_profile.ensure writes only zplan's own home: " + str(home))
@@ -92,22 +98,28 @@ def ensure(home):
         _make_home(home)  # F1
     except OSError as error:
         raise _refuse(home, error) from error
-    try:
-        lock = _open_lock(home / LOCK_NAME)  # F2
-    except OSError as error:
-        raise _refuse(home, error) from error
-    try:
+    with _PROCESS_LOCK:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise Blocked("Another zplan is updating the profile in %s; try again." % home,
-                          family="setup.agent_home") from error
-        try:
-            return _apply(home, data, current)
+            lock = _open_lock(home / LOCK_NAME)  # F2
         except OSError as error:
             raise _refuse(home, error) from error
-    finally:
-        lock.close()
+        try:
+            deadline = time.monotonic() + LOCK_WAIT_SECONDS
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as error:
+                    if time.monotonic() >= deadline:
+                        raise Blocked("Another zplan is updating the profile in %s; try again." % home,
+                                      family="setup.agent_home") from error
+                time.sleep(LOCK_POLL_SECONDS)
+            try:
+                return _apply(home, data, current)
+            except OSError as error:
+                raise _refuse(home, error) from error
+        finally:
+            lock.close()
 
 
 def _apply(home, data, current):

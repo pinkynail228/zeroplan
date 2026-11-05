@@ -57,7 +57,8 @@ Interpretations this run had to make (the worker's summary never reaches the rev
   is open beside it — `screen_slash_state` reads `draft` then, and the palette used to refuse the line as out of
   state although the card's own button merged. `test_regression_a_typed_merge_reaches_the_card_beside_an_open_goal_draft`
   (`MergeCardDraftShell`, the third whole-app walk, the repair's own regression) drives Enter in the real chat input
-  with both cards open; `submit_verdict` judges the open card as its own state.
+  with both facts there (v3e: the goal draft is a sendable draft with one line in the chat, no card);
+  `submit_verdict` judges the open card as its own state.
 """
 
 import re
@@ -70,7 +71,7 @@ from unittest.mock import patch
 import tui_support  # noqa: F401
 from tui_support import HAVE_TEXTUAL, screen_text
 
-from test_tui_draft_card import DraftCardShell, GOAL_DRAFT, MISSING_REASON, _main_method, _Screen
+from test_tui_draft_card import DraftShell, GOAL_DRAFT, MISSING_REASON, _main_method, _Screen
 from test_tui_chat import chat_band
 from test_tui_milestones import MilestoneShell
 
@@ -230,6 +231,7 @@ class _Merge(_Screen):
     merge_counts = _main_method("merge_counts")
     merge_counts_arrived = _main_method("merge_counts_arrived")
     merge_card_at = _main_method("merge_card_at")
+    merge_integrated = _main_method("merge_integrated")
     merge_later = _main_method("merge_later")
     merge_card_ref = _main_method("merge_card_ref")
     action_merge = _main_method("action_merge")
@@ -246,6 +248,7 @@ class _Merge(_Screen):
         self.merge_view = {}
         self.merge_times = {}
         self.merge_overlap = {}
+        self.merge_landed = set()
         self.diffs = 0
 
     def render_state(self):
@@ -383,6 +386,38 @@ class MergeCardTests(unittest.TestCase):
                     else:
                         self.assertIsNone(screen.card_specs[MERGE_KEY].done)
                         self.assertEqual(app.chat_note, verdict.lines[0])
+
+    def test_a1_a2_a_merge_the_owner_did_not_press_leaves_one_receipt_where_the_card_stood(self):
+        """A1/A2 (u2a): the architect's `zplan_merge` moves M1 to `integrated` with the card still open; the next render
+        closes the card as `card.merge_done` in its own place instead of dropping it. A conflict, or a row that left
+        `awaiting_merge` for another state, still takes the card off. The owner's own «merge» is unchanged: one receipt,
+        and a render after it keeps that receipt. Interpretation: none."""
+        app = _App([awaiting_row()])
+        screen = self.show(_Merge(app), answer=(Outcome("end", data=TASKS), None))
+        self.assertIsNone(screen.card_specs[MERGE_KEY].done)
+        app._rows = (Row(id="M1", title="M1", state="integrated", text="merged"),)  # merged by the architect
+        screen.render_card_sources()
+        self.assertRegex(screen.card_specs[MERGE_KEY].done, "^%s$" % receipt_pattern())
+        self.assertEqual(screen.box.after[-1], (screen.box.mounted[-1], screen.box.mounted[-2]))  # the receipt replaces the card in its place
+        receipt = screen.card_specs[MERGE_KEY].done
+        screen.render_card_sources()
+        self.assertEqual(screen.card_specs[MERGE_KEY].done, receipt)
+        for state in ("conflict", "running"):
+            with self.subTest(state=state):
+                other = _App([awaiting_row()])
+                gone = self.show(_Merge(other), answer=(Outcome("end", data=TASKS), None))
+                other._rows = (Row(id="M1", title="M1", state=state, text=state),)
+                gone.render_card_sources()
+                self.assertNotIn(MERGE_KEY, gone.card_specs)
+        owner = _App([awaiting_row()])
+        owner.answer_merge(Outcome("integrated", lines=("Merged: M1 → main.",)))
+        mine = self.show(_Merge(owner), answer=(Outcome("end", data=TASKS), None))
+        ui.COMMAND_ACTIONS["/merge"](mine, "", MERGE_KEY)
+        owner.flush()
+        owner._rows = (Row(id="M1", title="M1", state="integrated", text="merged"),)
+        mine.render_card_sources()
+        self.assertRegex(mine.card_specs[MERGE_KEY].done, "^%s$" % receipt_pattern())
+        self.assertEqual(len(owner.merges), 1)
 
     def test_d4b_an_overlap_refusal_turns_the_card_red_naming_the_files_and_later_closes_it_without_merging(self):
         """D4b: the engine's `overlap` verdict (lines = the refusal, then the files in the way) leaves the card open as
@@ -632,57 +667,52 @@ class MergeCardShell(MilestoneShell):
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)
-class MergeCardDraftShell(DraftCardShell):
-    """The input-submission regression (code-review finding P2): a goal-draft card and the stage-done merge card are
-    open at once, so `screen_slash_state` reads `draft` (the i3a precedence) while the merge card waits. The typed
-    `/merge` must still reach that card — the failure this repair fixes — while the draft's own commands stay in
-    reach and `guard_pending` keeps its refusal.
+class MergeCardDraftShell(DraftShell):
+    """The input-submission regression (code-review finding P2): a sendable goal draft and the stage-done merge card
+    are there at once, so `screen_slash_state` read `draft` (the i3a precedence) while the merge card waited. The typed
+    `/merge` must still reach that card — the failure this repair fixes — while the draft stays sendable and
+    `guard_pending` keeps its refusal.
 
     Interpretation: the button/typed-line divergence of the i3a repair is the same class of bug, so the fix is
-    judged as its own state (`submit_verdict`) rather than by moving the single `draft` precedence; the draft card
-    staying open with `screen_slash_state` still `draft` is what pins "draft commands preserved" (the palette the
-    input uses submits `/plan`), and a second typed `/merge` before the first answers is the guard's own refusal."""
+    judged as its own state (`submit_verdict`) rather than by moving the single `draft` precedence; the draft staying
+    sendable is what pins "draft commands preserved", and a second typed `/merge` before the first answers is the
+    guard's own refusal."""
 
     def merge_card(self):
-        """The merge card in the conversation (a draft card may sit beside it)."""
+        """The merge card in the conversation (the draft's line may sit beside it)."""
         cards = self.main().card_widgets
         return next((card for key, card in cards.items() if key.startswith("merge:r1:M1:")), None)
 
-    def draft_card(self):
-        """The goal-draft card in the conversation, or None."""
-        cards = self.main().card_widgets
-        return next((card for key, card in cards.items() if key.startswith("draft:")), None)
-
     async def both_cards(self, pilot, timeout=20.0):
-        """Both decisions of the walk: the goal-draft card (from the retained history) and the stage-done merge card
-        with the counts of M1's own attempt (the fixture plan's M1 carries one task, «Tasks: 1/1 done»)."""
+        """Both facts of the walk: the sendable goal draft (from the retained history, its line in the chat) and the
+        stage-done merge card with the counts of M1's own attempt (the fixture plan's M1 carries one task, «Tasks:
+        1/1 done»)."""
         text = strings.text("card.merge_text", done="1", total="1")
-        await self.until(pilot, lambda: (self.draft_card() is not None and self.merge_card() is not None
+        await self.until(pilot, lambda: (self.main().draft_sendable() and self.merge_card() is not None
                                          and self.merge_card().spec.text == text), timeout)
         await pilot.pause(0.3)
 
     counting_merge = staticmethod(MergeCardShell.counting_merge)
 
     async def test_regression_a_typed_merge_reaches_the_card_beside_an_open_goal_draft(self):
-        """P2: with a goal-draft card open, `screen_slash_state` is `draft` and the typed `/merge` was refused by
+        """P2: with a sendable goal draft, `screen_slash_state` was `draft` and the typed `/merge` was refused by
         the palette's state gate before it ever reached the merge card, while the card's own button merged. Here the
         typed line (Enter in the real chat input) merges the card's own attempt exactly once with no modal, the
-        card becomes the receipt, the draft card is still an open decision (`draft` stays the state, so the palette
-        still submits `/plan`), and a second `/merge` typed while the first is still in flight is refused by the
+        card becomes the receipt, the draft is still sendable (it is only outranked by the merge wait), and a second `/merge` typed while the first is still in flight is refused by the
         merge's own `guard_pending` (one `controller.merge` call)."""
         calls = []
-        # a draft written after the plan exists names plan r1 in its identity (R-A: a stale draft opens no card)
+        # a draft written after the plan exists names plan r1 in its identity (R-A: a stale draft is not noted)
         store = self.seed_goal_draft(identity=[1, {"status": "approved", "override": False}])
         self.approve(running=False)
         async with self.shell(size=(120, 40), follow=True, store=store) as pilot:
             await self.settled(pilot)
-            await self.card_shown(pilot)
-            await self.begin_run(pilot)  # K1a: a typed `/run` starts M1 beside the open draft card, as `g` did
+            await self.note_shown(pilot)
+            await self.begin_run(pilot)  # K1a: a typed `/run` starts M1 beside the sendable draft, as `g` did
             await self.until(pilot, lambda: (self.app.selection() is not None
                                              and self.app.selection().state == "awaiting_merge"), 20.0)
             await self.both_cards(pilot)
             state = ui.screen_slash_state(self.app)
-            self.assertEqual(state, "merge")  # R-B: the merge wait outranks the open draft card...
+            self.assertEqual(state, "merge")  # R-B: the merge wait outranks the sendable draft...
             self.assertIsInstance(ui.palette.submit("/merge", state), ui.palette.Submitted)  # ...so `/merge` is
             with patch.object(Controller, "merge", self.counting_merge(calls)):
                 await self.send(pilot, "/merge")
@@ -691,7 +721,7 @@ class MergeCardDraftShell(DraftCardShell):
                 self.assertEqual(len(calls), 1)
                 self.assertEqual((calls[0].milestone, calls[0].attempt), ("M1", 1))
                 self.assertRegex(self.merge_card().spec.done, "^%s$" % receipt_pattern())
-                self.assertIsNotNone(self.draft_card())  # the other decision is untouched
+                self.assertTrue(self.main().draft_sendable())  # the draft is untouched
                 # the merge answered: a second typed /merge finds no open card and keeps today's refusal
                 await self.send(pilot, "/merge")
                 self.assertEqual(len(calls), 1)

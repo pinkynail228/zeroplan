@@ -4,8 +4,9 @@ The architect's Codex runs the stdio MCP server (`architect_tools.py`) in its ow
 is locked to the running TUI process (`authority.py`), so an action the architect asks for must reach that
 process's Controller and its gates. This module is the one boundary: the Controller serves an AF_UNIX socket in a
 fresh 0700 directory under `/tmp` (a short path, under macOS' 104-byte limit), removed on stop. One JSON line
-request `{"id", "tool", "args"}` gets one JSON line reply `{"id", "ok"}` or
-`{"id", "error": family, "message"}`; both the read and the write are bounded.
+request `{"id", "tool", "args"}` (plus `"turn"`, the owner-turn token the MCP server was started with, when it has
+one) gets one JSON line reply `{"id", "ok"}` or `{"id", "error": family, "message"}`; both the read and the write
+are bounded.
 
 Nothing here imports Textual, the delivery service or the lifecycle modules: the Controller owns the tools and
 passes `dispatch(request) -> (ok, error)` in. `publish`/`path_for` hand the socket path to the chat in the same
@@ -95,9 +96,11 @@ class Registry:
         self._lock = threading.Lock()
         self._items = {}
 
-    def open(self, rid, tool):
+    def open(self, rid, tool, binding="events", message=None):
         """Register `rid`; False (nothing registered) when the id is already known or every kept entry is still
-        unfinished. Bounded so the status reply fits one line: only finished entries are dropped, oldest first."""
+        unfinished. Bounded so the status reply fits one line: only finished entries are dropped, oldest first.
+        `binding` ("owner" or "events") and, for owner, `message` (the owner's message reference) are fixed here, at
+        admission, and stay with the entry however late its job runs."""
         with self._lock:
             if rid in self._items:
                 return False
@@ -106,7 +109,8 @@ class Registry:
                 if old is None:
                     return False
                 del self._items[old]
-            self._items[rid] = {"id": rid, "tool": tool, "state": "queued", "done": False, "ok": None, "error": None}
+            self._items[rid] = {"id": rid, "tool": tool, "state": "queued", "done": False, "ok": None, "error": None,
+                                "binding": binding, "message": message}
             return True
 
     def running(self, rid):
@@ -123,11 +127,14 @@ class Registry:
             item["state"], item["ok"], item["error"], item["done"] = "done", ok, error, True
 
     def snapshot(self):
-        """Plain entries, in registration order: `{id, tool, state}` plus `ok` or `error` once done."""
+        """Plain entries, in registration order: `{id, tool, state, binding}` plus `message` for an owner binding and
+        `ok` or `error` once done."""
         with self._lock:
             found = []
             for item in self._items.values():
-                entry = {"id": item["id"], "tool": item.get("tool"), "state": item["state"]}
+                entry = {"id": item["id"], "tool": item.get("tool"), "state": item["state"], "binding": item["binding"]}
+                if item["message"] is not None:
+                    entry["message"] = dict(item["message"])
                 if item.get("done"):
                     if item.get("error") is not None:
                         entry["error"] = item["error"]

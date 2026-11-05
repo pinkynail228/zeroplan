@@ -312,6 +312,8 @@ class VocabularyTests(unittest.TestCase):
                     for delivery in runs.DELIVERIES:
                         reached.add(runs.run_state({"status": status, "outcome": outcome, "recoverable": recoverable,
                                                     "delivery": delivery}))
+        reached.add(runs.run_state({"status": "failed", "outcome": None, "recoverable": True, "delivery": "none",
+                                    "resume_at": "2026-11-04T15:12:00Z"}))
         self.assertEqual(reached, set(runs.MILESTONE_STATES) - {"waiting", "ready"})
         self.assertTrue({"waiting", "ready"} <= set(runs.MILESTONE_STATES))
 
@@ -462,7 +464,7 @@ class ActionTests(unittest.TestCase):
                 if isinstance(node, ast.Call) and call_name(node) in ("help_lines", "key_lines", "variants",
                                                                      "help_text", "HelpScreen", "keys_bar", "bar"):
                     listed_screens |= {literal(a) for a in node.args if literal(a)}
-                if isinstance(node, ast.Call):  # `NoteScreen(..., bar="tui_attempt")`
+                if isinstance(node, ast.Call):  # `NoteScreen(..., bar="tui_answer")`
                     listed_screens |= {literal(k.value) for k in node.keywords if k.arg == "bar" and literal(k.value)}
             for node in ast.walk(tree):  # `self.bar = "tui_diff" if diff else "tui_details"`: a modal's key bar
                 if isinstance(node, ast.Assign) and any(getattr(t, "attr", getattr(t, "id", "")) == "bar"
@@ -490,7 +492,7 @@ class ActionTests(unittest.TestCase):
                      # (and the `press` line of the bar) is one Enter, told apart by the focus.
                      ("tui_plan", "enter"): {"tui_plan.%s" % n for n in (
                          "press", "run", "renew", "login", "watch", "tail", "approve", "override", "revise",
-                         "reject", "info")},
+                         "info")},
                      # RS2: the confirmation's Enter is `press`, or `start` where “yes” is the focused button
                      ("tui_confirm", "enter"): {"tui_confirm.press"},
                      ("tui_confirm_run", "enter"): {"tui_confirm_run.start"},

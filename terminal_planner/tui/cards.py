@@ -1,14 +1,14 @@
-"""Decision cards of the chat: the main-path decisions (draft -> plan, approve plan, merge, owner question, error)
+"""Decision cards of the chat: the main-path decisions (approve plan, merge, owner question, error)
 as the card widget the approved lab draws (`devtools/ui-lab/work.py`, `_card`, and the `.card*` rules of
 `devtools/ui-lab/work.tcss`).
 
-A `CardSpec` is the data of one decision: the opaque `key` the caller set (a draft id, an end token — never shown),
+A `CardSpec` is the data of one decision: the opaque `key` the caller set (a plan version, an end token — never shown),
 the maybe-translated `title`/`text`, the `buttons` as `(label, command line)` pairs (`command line` is a slash
 command such as "/approve"), the optional `hint` (None means the shared `card.hint` line built from the commands),
 the `at` time shown as the border subtitle, the `done` receipt line of a closed card, and the `alarm` flag. The
-builders (`draft_card`, `plan_card`, `merge_card`, `question_card`, `error_card`) take that data and resolve every
-id through `terminal_planner/tui/strings.py` (the frozen catalog); `closed(spec, done_text)` turns a spec into a
-done card. A builder never touches the project, the controller or the network.
+builders (`plan_card`, `merge_card`, `question_card`, `error_card`) take that data and resolve every id through
+`terminal_planner/tui/strings.py` (the frozen catalog); `closed(spec, done_text)` turns a spec into a done card.
+A builder never touches the project, the controller or the network.
 
 `Card(Vertical)` is the widget built from a spec: border title = title, subtitle = at; an open card shows the text,
 one row of compact buttons and the dim hint, a done card is one dim row (`done_row`) with no border and no
@@ -67,13 +67,6 @@ def _default_hint(buttons: Iterable[ButtonSpec]) -> str:
     return strings.text("card.hint", commands=" · ".join(command for _, command in buttons))
 
 
-def draft_card(key: str, at: str) -> CardSpec:
-    """The goal-draft card: draft the plan from this goal? yes -> "/plan", no -> "/decline"."""
-    return CardSpec(key=key, title=strings.text("card.draft_title"), text=strings.text("card.draft_text"),
-                    buttons=((strings.text("card.plan_yes"), "/plan"), (strings.text("card.no"), "/decline")),
-                    hint=None, at=at, done=None, alarm=False)
-
-
 def plan_card(key: str, at: str, stages: str, tasks: str) -> CardSpec:
     """The plan-approval card: the caller passes ready words such as "3 stages"; approve -> "/approve"."""
     return CardSpec(key=key, title=strings.text("card.plan_title", stages=stages, tasks=tasks),
@@ -109,8 +102,8 @@ def error_card(key: str, at: str, task: str, text: str, buttons: Iterable[Button
 
 
 def closed(spec: CardSpec, done_text: str) -> CardSpec:
-    """`spec` as the closed card that shows only `done_text` (callers pass `strings.text("card.draft_sent", time=...)`
-    or `strings.text("card.plan_done", time=...)`): a frozen-spec copy with the done line set."""
+    """`spec` as the closed card that shows only `done_text` (callers pass `strings.text("card.plan_done", time=...)`):
+    a frozen-spec copy with the done line set."""
     return replace(spec, done=done_text)
 
 

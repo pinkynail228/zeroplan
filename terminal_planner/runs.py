@@ -16,7 +16,7 @@ A dependent milestone is ready only when every dependency is integrated into its
 """
 
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -35,7 +35,7 @@ from .authority import (NATIVE_EFFORTS, Blocked, Rejected, atomic_state, canonic
                         nonempty, normalize_origin_upstream, require, require_workspace_outside_state,
                         require_terminal_result, validate_projection, validate_receipt)
 from .engine import (CAUSE_NAMES, CAUSE_UNKNOWN, LOG_LIMIT, NativeEngine, ObservationDetached,
-                     SliceEnded, binding_identity, check_socket_path, observed_cause, reset_value)
+                     SliceEnded, binding_identity, check_socket_path, observed_cause, reset_moment, reset_value)
 from .export import IDENTITY, OPTIONS, create_branch, environment, tracked
 from .export import run_git as export_git
 from .process import RISK_TIERS, ProfileChanged, risk_of
@@ -46,7 +46,7 @@ STATUSES = ("preparing", "submission_unknown", "submitted", "running", "stopping
             "finished", "failed", "stopped")
 # What the home screen shows per milestone: run_state() of its latest attempt, or waiting/ready before one exists.
 MILESTONE_STATES = ("waiting", "ready", "running", "stopping", "unknown", "stopped", "conflict", "integrated",
-                    "awaiting_merge", "needs_owner", "blocked", "failed_recoverable", "failed")
+                    "awaiting_merge", "needs_owner", "blocked", "paused", "failed_recoverable", "failed")
 ACTIVE = frozenset(STATUSES[:6])
 UNDISPATCHED = frozenset({"preparing", "submission_unknown", "resume_pending"})
 TERMINAL = frozenset({"finished", "failed", "stopped"})
@@ -109,7 +109,13 @@ EXTENSION = {"context": None, "bootstrap": None, "delivery": "none", "result": N
 # The diagnosis of a failed attempt (R-2/R-4): written on a failed conclude and absent -- unknown, no reset -- in
 # every record made before it, so the store accepts both shapes. `gate` is the merge gate's record (A7a): absent
 # until a merge with `gates.merge: required` built a candidate.
-OPTIONAL = frozenset({"cause", "reset", "gate"})
+OPTIONAL = frozenset({"cause", "reset", "gate", "resume_at"})
+# A provider limit pauses a recoverable attempt until its reset plus this margin; a reset that is unusable or more than
+# the horizon away pauses it for the fallback instead.
+PAUSE_MARGIN = timedelta(seconds=120)
+PAUSE_FALLBACK = timedelta(minutes=30)
+PAUSE_HORIZON = timedelta(days=8)
+PAUSE_CAUSES = ("limit", "quota")
 # Seconds the one read of a failed run's logs may take (R-6).
 LOG_DEADLINE = 30.0
 # C3a: at most one execution-log read per this many seconds per run, and the reader's own deadline.
@@ -136,6 +142,7 @@ HEX = re.compile(r"[0-9a-f]{64}")
 KEY = re.compile(r"zplan-run-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 FIXTURE_OUTCOMES = ("done", "needs_owner", "blocked", "failed_recoverable", "failed")
+FIXTURE_LIMIT = "failed_limit"  # a scripted provider limit: not an outcome of the reference journeys
 FIXTURE_CURSOR = "fixture:terminal"
 # One observation slice: short enough for the UI to react to keys between slices.
 SLICE = 3
@@ -144,6 +151,20 @@ INVALID = "Invalid milestone run record; the store is rejected."
 
 def now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stamp_time(stamp):
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def pause_until(reset, anchor):
+    """The stamp a limit-paused attempt resumes at: the first moment of the `reset` after `anchor` plus the margin;
+    without a usable reset, or when that is over the horizon from now, the fallback from now."""
+    current = stamp_time(now())
+    moment = reset_moment(reset, anchor) if reset else None
+    if moment is not None and stamp_time(moment) + PAUSE_MARGIN - current <= PAUSE_HORIZON:
+        return (stamp_time(moment) + PAUSE_MARGIN).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (current + PAUSE_FALLBACK).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def clock():
@@ -311,7 +332,9 @@ def run_state(r):
         return {"conflict": "conflict", "integrated": "integrated"}.get(extended(r)["delivery"], "awaiting_merge")
     if r["outcome"] in ("needs_owner", "blocked"):
         return r["outcome"]
-    return "failed_recoverable" if r["status"] == "failed" and r["recoverable"] else "failed"
+    if r["status"] == "failed" and r["recoverable"]:
+        return "paused" if r.get("resume_at") else "failed_recoverable"
+    return "failed"
 
 
 def outdated(r, revision):
@@ -438,9 +461,9 @@ def review_rounds(revision):
 
 def build_documents(proposal, milestone_id, plan_revision, roles, checker, rounds=milestone.TASK_ITERATIONS):
     baseline, _ = milestone.build_manifest(proposal, milestone_id, plan_revision)
-    return {"graph": milestone.milestone_graph(len(baseline["tasks"]), rounds=rounds, tool=checker),
+    return {"graph": milestone.milestone_graph(tool=checker),
             "runtime": milestone.milestone_runtime(roles),
-            "input": milestone.milestone_input(baseline, tool=checker), "baseline": baseline}
+            "input": milestone.milestone_input(baseline, tool=checker, rounds=rounds), "baseline": baseline}
 
 
 def validate_terminal(value):
@@ -473,6 +496,9 @@ def validate_run(authority, r, earlier):
     require("reset" not in r or (r.get("cause") == "limit" and isinstance(r["reset"], str)
                                  and reset_value(r["reset"]) == r["reset"]),
             INVALID)
+    require("resume_at" not in r or (isinstance(r["resume_at"], str) and TIME.fullmatch(r["resume_at"])
+                                     and r["status"] == "failed" and r["recoverable"] is True
+                                     and r.get("cause") in PAUSE_CAUSES), INVALID)
     require("live" not in r or live.valid(r["live"]), INVALID)
     revisions = authority.state["revisions"]
     require(type(r["plan_revision"]) is int and 1 <= r["plan_revision"] <= len(revisions), INVALID)
@@ -592,10 +618,46 @@ def validate_extension(revision, r, earlier):
         validate_gate(r)
 
 
+CHECK_EVIDENCE_LEGACY = frozenset({"name", "argv_digest", "status", "duration_s", "tail"})
+CHECK_EVIDENCE = CHECK_EVIDENCE_LEGACY | frozenset({
+    "argv", "cwd", "environment_digest", "interpreter", "started_at", "ended_at", "exit_code", "bounded_output"})
+CHECK_EVIDENCE_CHANGED = CHECK_EVIDENCE | {"changed_files"}
+
+
+def changed_text(check):
+    """The tracked files a candidate_changed check named, as a clause for a refusal; "" when it named none."""
+    names = check.get("changed_files")
+    return "; changed tracked files: " + ", ".join(names) if names else ""
+
+
+def valid_check_evidence(entry, frozen):
+    """One old or current check result, bound to its frozen argv; current evidence also binds its execution context."""
+    if not isinstance(entry, dict) or set(entry) not in (CHECK_EVIDENCE, CHECK_EVIDENCE_CHANGED, CHECK_EVIDENCE_LEGACY):
+        return False
+    if (entry.get("name"), entry.get("argv_digest")) != (frozen["name"], digest(frozen["argv"])):
+        return False
+    if set(entry) == CHECK_EVIDENCE_LEGACY:
+        return True
+    if "changed_files" in entry:
+        names = entry["changed_files"]
+        if not (entry.get("status") == "candidate_changed" and isinstance(names, list)
+                and len(names) <= checks.MAX_CHANGED and all(nonempty(n) for n in names)):
+            return False
+    common = (entry.get("argv") == frozen["argv"] and nonempty(entry.get("cwd"))
+              and isinstance(entry.get("environment_digest"), str) and HEX.fullmatch(entry["environment_digest"])
+              and nonempty(entry.get("interpreter")) and entry.get("bounded_output") == entry.get("tail")
+              and ((entry.get("status") == "candidate_changed"
+                    and (entry.get("exit_code") is None or type(entry.get("exit_code")) is int))
+                   or entry.get("exit_code") == (entry.get("status") if type(entry.get("status")) is int else None)))
+    if not common:
+        return False
+    if entry.get("status") == "not_run":
+        return entry.get("started_at") is None and entry.get("ended_at") is None
+    return all(isinstance(entry.get(key), str) for key in ("started_at", "ended_at"))
+
+
 def validate_gate(r):
-    """The merge gate's record of the candidate it tested (A7a): only on an exported result, naming that result and
-    its destination, with the frozen checks, their evidence and the risk. A record from before A7b2 carries no
-    `critic` and still loads; `critic` is the id of the merge-critic record that judged this candidate, or None."""
+    """The merge gate's record of the candidate it tested, including legacy five-field check evidence on read."""
     gate, result = r["gate"], extended(r)["result"]
     require(isinstance(gate, dict) and set(gate) in (GATE, GATE_LEGACY) and result is not None
             and result["commit"] is not None
@@ -605,17 +667,15 @@ def validate_gate(r):
             and (gate.get("critic") is None
                  or isinstance(gate["critic"], str) and merge_critic.ID.fullmatch(gate["critic"]))
             and isinstance(gate["risk"], dict) and gate["risk"].get("tier") in RISK_TIERS, INVALID)
-    # The evidence is of exactly this candidate and these checks: one entry per frozen check, in order, and the
-    # outcome follows from their statuses.
     frozen, evidence = gate["checks"], gate["evidence"]
     require(isinstance(frozen, list) and frozen and all(isinstance(c, dict) and isinstance(c.get("name"), str)
                                                         and isinstance(c.get("argv"), list) for c in frozen)
             and isinstance(evidence, dict) and set(evidence) == {"checks_digest", "checks", "outcome", "commit", "tree"}
             and (evidence["commit"], evidence["tree"], evidence["checks_digest"]) == (gate["candidate"], gate["tree"], digest(frozen))
             and isinstance(evidence["checks"], list) and len(evidence["checks"]) == len(frozen)
-            and all(isinstance(e, dict) and (e.get("name"), e.get("argv_digest")) == (c["name"], digest(c["argv"]))
-                    for e, c in zip(evidence["checks"], frozen))
-            and evidence["outcome"] == ("passed" if all(e.get("status") == 0 for e in evidence["checks"]) else "failed"),
+            and all(valid_check_evidence(e, c) for e, c in zip(evidence["checks"], frozen))
+            and evidence["outcome"] == ("passed" if evidence["checks"]
+                                        and all(e.get("status") == 0 for e in evidence["checks"]) else "failed"),
             INVALID)
 
 
@@ -630,12 +690,18 @@ def critic_identity(r, gate, paths, names, briefs):
 
 
 def reusable_gate(gate, ref, head, result, pinned):
-    """The stored gate record a gated merge may reuse (C1): it names this destination, head, result and configuration
-    digest and its evidence `passed`, so its candidate commit and check evidence are exactly this merge's. Any other
-    head, result, config or evidence is not this candidate and a new one is built."""
-    return gate if (isinstance(gate, dict) and gate.get("destination") == ref and gate.get("head") == head
-                    and gate.get("result") == result and gate.get("config_digest") == pinned
-                    and isinstance(gate.get("evidence"), dict) and gate["evidence"].get("outcome") == "passed") else None
+    """Reuse only passing evidence bound to this exact candidate, tree, frozen checks and merge configuration."""
+    if not isinstance(gate, dict):
+        return None
+    evidence, frozen = gate.get("evidence"), gate.get("checks")
+    verified = (isinstance(evidence, dict) and evidence.get("outcome") == "passed"
+                and evidence.get("commit") == gate.get("candidate") and evidence.get("tree") == gate.get("tree")
+                and isinstance(frozen, list) and bool(frozen) and evidence.get("checks_digest") == digest(frozen)
+                and isinstance(evidence.get("checks"), list) and len(evidence["checks"]) == len(frozen)
+                and all(valid_check_evidence(e, c) and e.get("status") == 0
+                        for e, c in zip(evidence["checks"], frozen)))
+    return gate if (verified and gate.get("destination") == ref and gate.get("head") == head
+                    and gate.get("result") == result and gate.get("config_digest") == pinned) else None
 
 
 def gate_paths(project, head, tree):
@@ -1008,6 +1074,7 @@ class MilestoneRuns:
         paths = self.frozen(r, regenerate=True)
         worktree = Path(r["worktree"])
         project = self.authority.project
+        project_state.ensure_excluded(project, (project_state.EXCLUDE,))  # the run's own .zplan/ files are never its changes
         if not worktree.exists():
             worktree.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             tip = resolve_ref(project, "refs/heads/" + r["branch"])
@@ -1142,6 +1209,7 @@ class MilestoneRuns:
         require(r["run_id"] is not None and r["status"] in {"submitted", "running", "stopping"},
                 "Only a submitted active milestone run can be watched.")
         detached = None
+        anchor = r["updated"]  # the last moment the run was known alive: a limit's reset is read after it
         try:
             for value in self.driver().watch(r, r["cursor"], seconds):
                 status = validate_projection(value, r["run_id"])
@@ -1155,7 +1223,7 @@ class MilestoneRuns:
                     self.record(r, status)
                     self.read_verdict(r)
                     self.save(r)
-                    self.conclude(r, status["terminalResult"])
+                    self.conclude(r, status["terminalResult"], anchor)
                     return r
                 # A cursor the watch already delivered is a replay: it moves nothing back and is no new event.
                 known = r.get("live", {}).get("cursors", []) + [r["cursor"]]
@@ -1223,7 +1291,7 @@ class MilestoneRuns:
         at, verdict, text = found
         live.bounded(r["live"].setdefault("verdicts", []),
                      {"at": at, "task": entry["task"], "round": entry["round"], "role": entry["role"],
-                      "verdict": verdict, "text": text}, live.VERDICT_LIMIT)
+                      "execution": reference, "verdict": verdict, "text": text}, live.VERDICT_LIMIT)
         # A6b1: the same save also carries the architect's feed event for this verdict, identified by the reviewer's
         # execution reference; the bounded display list above never bounds the feed.
         feed.verdict(self.authority, r, reference, entry, verdict, text)
@@ -1335,7 +1403,8 @@ class MilestoneRuns:
         the store and the surfaces apply the same predicate): a value the language does not carry is dropped whole
         and the cause alone is kept."""
         if r["engine"] != "native" or r["run_id"] is None:
-            return None, None
+            scripted = getattr(self.engine, "scripted_cause", None) if r["run_id"] is not None else None
+            return scripted(r["run_id"]) if scripted is not None else (None, None)
         try:
             lines, complete = self.driver().log_records(r["binding"], r["run_id"], r["worktree"],
                                                         deadline=LOG_DEADLINE, buffer=LOG_LIMIT)
@@ -1346,7 +1415,7 @@ class MilestoneRuns:
         cause, reset = observed_cause(lines)
         return cause, reset_value(reset)
 
-    def conclude(self, r, terminal):
+    def conclude(self, r, terminal, anchor=None):
         # Persist the native terminal result and root output first; manifest evaluation can be redone.
         if r["status"] == "stopping":
             r.update(status="stopped", terminal=copy.deepcopy(terminal),
@@ -1355,7 +1424,6 @@ class MilestoneRuns:
             return
         if terminal["status"] == "failed":
             r.update(status="failed", terminal=copy.deepcopy(terminal), diagnostic=terminal["reason"])
-            self.save(r)
             try:
                 recovery = self.status(r).get("workspaceRecovery") or {}
                 r["recoverable"] = recovery.get("recoverable") is True
@@ -1366,6 +1434,10 @@ class MilestoneRuns:
             r["cause"] = cause or CAUSE_UNKNOWN
             if reset is not None:
                 r["reset"] = reset
+            if r["recoverable"] is True and r["cause"] in PAUSE_CAUSES and not self.paused_before(r):
+                # One save for the whole diagnosis: the feed must see the pause, not a failure, to leave the
+                # architect asleep. Only the attempt's first such failure pauses; the second goes to the architect.
+                r["resume_at"] = pause_until(r.get("reset"), anchor or r["updated"])
             self.save(r)
             return
         try:
@@ -1377,6 +1449,12 @@ class MilestoneRuns:
         r.update(status="finished", terminal=copy.deepcopy(terminal), output=copy.deepcopy(output))
         self.save(r)
         self.evaluate(r)
+
+    def paused_before(self, r):
+        """Whether an earlier record of this milestone, revision and attempt already failed recoverably on a limit."""
+        return any(e is not r and (e["milestone"], e["plan_revision"], e["attempt"])
+                   == (r["milestone"], r["plan_revision"], r["attempt"])
+                   and e.get("cause") in PAUSE_CAUSES and e["recoverable"] is True for e in self.runs)
 
     def evaluate(self, r):
         """done needs a baseline-consistent manifest with no open tasks; needs_owner/blocked keep diagnostics."""
@@ -1651,7 +1729,8 @@ class MilestoneRuns:
             paths = gate_paths(project, head, gate["tree"])
         if gate["evidence"]["outcome"] != "passed":
             failed = next(c for c in gate["evidence"]["checks"] if c["status"] != 0)
-            raise Blocked("The check '%s' failed (%s); the merge was not done." % (failed["name"], failed["status"]),
+            raise Blocked("The check '%s' failed (%s%s); the merge was not done." % (
+                failed["name"], failed["status"], changed_text(failed)),
                           family="merge.checks_failed")
         if vet is not None:  # the caller's last word on the candidate's own paths, before the critic and the landing
             vet(paths)
@@ -1699,6 +1778,35 @@ class MilestoneRuns:
         self.save(r)
         return r["gate"], paths
 
+    def base_checks(self, listed):
+        """D1: the evidence of the `listed` checks run on the project's HEAD and its tree, as `gate_candidate` runs
+        them on a candidate. A passed evidence is kept under the authority directory by (tree, checks) and not run
+        again; a failed one is never kept; a refusal is a failed evidence."""
+        project = self.authority.project
+        head = git(project, "rev-parse", "HEAD").decode().strip()
+        tree = git(project, "rev-parse", "HEAD^{tree}").decode().strip()
+        path, key = self.authority.directory / "base-checks.json", digest({"tree": tree, "checks": listed})
+        try:
+            kept = decode(path.read_bytes().decode("utf-8"))
+        except (OSError, ValueError):
+            kept = {}
+        if not isinstance(kept, dict):
+            kept = {}
+        if isinstance(kept.get(key), dict) and kept[key].get("outcome") == "passed":
+            return kept[key]
+        from .setup import data_root
+        try:
+            evidence = checks.qualify(project, head, tree, listed, data_root() / "checkouts")
+        except ValueError as error:
+            evidence = {"refused": str(error)}
+        if "outcome" not in evidence:
+            evidence = {"outcome": "failed", "refused": evidence.get("refused", "checkout"), "checks": [],
+                        "commit": head, "tree": tree}
+        if evidence["outcome"] == "passed":
+            kept[key] = evidence
+            atomic_state(path, kept)
+        return evidence
+
     def refresh(self):
         """Integration is ancestry now: record manual merges and branch resets for the current revision's results
         and for the older results of the milestones the current revision still carries -- a carried attempt is
@@ -1728,11 +1836,11 @@ class MilestoneRuns:
                 r["integration"]["commit"] = None
                 self.save(r)
 
-    def waiting(self, milestone_id, base=None, memo=None):
+    def waiting(self, milestone_id, base=None, memo=None, revision=None):
         """Dependencies of `milestone_id` not yet delivered into `base` (default HEAD) under the current approved
-        revision; an older revision's result counts only when carried forward unchanged."""
+        revision (or `revision`); an older revision's result counts only when carried forward unchanged."""
         a = self.authority
-        revision = a.current
+        revision = revision or a.current
         base = base or run_git(a.project, "rev-parse", "HEAD")
         memo = {} if memo is None else memo
         found = next(m for m in revision["proposal"]["milestones"] if m["id"] == milestone_id)
@@ -1810,8 +1918,9 @@ class MilestoneRuns:
         lines = git(self.authority.project, "status", "--short", "--untracked-files=all").decode(errors="replace").splitlines()
         return lines[:limit] + (["… %s more" % (len(lines) - limit)] if len(lines) > limit else [])
 
-    def overview(self, live=True):
-        """Home screen view of the current approved revision, one entry per milestone in plan order.
+    def overview(self, live=True, revision=None):
+        """Home screen view of the current approved revision (or of the approved `revision`, e.g. the last approved
+        one while a newer revision is only proposed), one entry per milestone in plan order.
 
         Only integration is detected (refresh); nothing is dispatched, resumed, stopped or exported. Each entry
         holds the record the current revision selects for the milestone (`record` = `current_record`: its latest
@@ -1819,10 +1928,13 @@ class MilestoneRuns:
         attempt); `carried` names a record of an older revision; `state` is one of MILESTONE_STATES.
         `live=False` never asks native Zeroshot for the active node (the manifest progress is used instead)."""
         a = self.authority
-        if not (a.state and a.state["revisions"]) or a.current["status"] != "approved":
+        if not (a.state and a.state["revisions"]):
+            return []
+        revision = revision or a.current
+        if revision["status"] != "approved":
             return []
         self.refresh()
-        revision, memo, items = a.current, {}, []
+        memo, items = {}, []
         head = resolve_ref(a.project, "HEAD")
         for m in revision["proposal"]["milestones"]:
             record = self.current_record(m["id"], revision, memo)
@@ -1830,7 +1942,7 @@ class MilestoneRuns:
                     "carried": record is not None and record["plan_revision"] != revision["version"],
                     "waiting": [], "task": None, "phase": None}
             if record is None:
-                item["waiting"] = self.waiting(m["id"], head, memo) if head else list(m["depends_on"])
+                item["waiting"] = self.waiting(m["id"], head, memo, revision) if head else list(m["depends_on"])
                 item["state"] = "waiting" if item["waiting"] else "ready"
             else:
                 item["state"] = run_state(record)
@@ -1838,6 +1950,12 @@ class MilestoneRuns:
                 item.update(self.activity_now(record, live))
             items.append(item)
         return items
+
+    def due(self):
+        """The paused records of the current revision whose moment has come: what the app resumes by itself."""
+        stamp = now()
+        return [item["record"] for item in self.overview(live=False)
+                if item["state"] == "paused" and not item["carried"] and stamp >= item["record"]["resume_at"]]
 
     def activity_now(self, r, live=True):
         """Current task (i, n, id) and phase of an active attempt: the native active node (read-only status),
@@ -1913,21 +2031,38 @@ class MilestoneRuns:
 
     # Owner actions -----------------------------------------------------------
 
-    def check_followup(self, r):
-        """A fresh attempt or revision follows only the latest, unsuccessful attempt of the current revision."""
+    def merge_failed(self, r):
+        """True for a done attempt whose merge failed: delivery `conflict`, a gate whose checks did not pass, or a
+        stored merge-critic `block` for the gate's candidate; never one that was integrated."""
+        x = extended(r)
+        if r["outcome"] != "done" or x["delivery"] not in ("awaiting_merge", "conflict"):
+            return False
+        if x["delivery"] == "conflict":
+            return True
+        gate = r.get("gate")
+        if not isinstance(gate, dict):
+            return False
+        if gate["evidence"]["outcome"] != "passed":
+            return True
+        return any(c.get("verdict") == "block" and c["identity"]["candidate"] == gate["candidate"]
+                   for c in self.authority.state.get("critics", []))
+
+    def check_followup(self, r, after_merge=False):
+        """A fresh attempt or revision follows only the latest, unsuccessful attempt of the current revision; with
+        `after_merge`, also a done attempt whose merge failed."""
         revision = self.check_current(r)
         # check_current also passes the carried attempt; a follow-up never does (it starts work of its own).
         require(r["plan_revision"] == revision["version"], outdated(r, revision))
-        require(r["status"] in TERMINAL and r["outcome"] != "done", "A new attempt is needed only after an unsuccessful attempt.", family="action.refused")
+        require(r["status"] in TERMINAL and (r["outcome"] != "done" or after_merge and self.merge_failed(r)), "A new attempt is needed only after an unsuccessful attempt.", family="action.refused")
         later = [e for e in self.runs if e["plan_revision"] == r["plan_revision"] and e["milestone"] == r["milestone"]
                  and (e["attempt"] > r["attempt"] or r["run_id"] is not None and e["predecessor"] == r["run_id"])]
         require(not later, "Attempt %s is no longer the last; act on the last attempt." % r["attempt"])
         return revision
 
-    def answer(self, r, text, roles=None):
+    def answer(self, r, text, roles=None, after_merge=False):
         """Owner answer → fresh attempt from destination HEAD; the answer is a note on every (re)opened task."""
         require(nonempty(text), "The text of the answer is required.", family="action.refused")
-        self.check_followup(r)
+        self.check_followup(r, after_merge)
         return self.start(r["milestone"], r["plan_revision"], roles or r["roles"],
                           {"kind": "answer", "source": r["attempt"], "text": text, "candidate": None},
                           destination=r["destination"]["branch"])
@@ -2045,7 +2180,9 @@ class FixtureDriver:
 
     def __init__(self, state_root, outcome="done", proposal="Fixture: split the first task.", rejections=0, delay=0):
         outcomes = (outcome,) if isinstance(outcome, str) else tuple(outcome)
-        require(outcomes and all(o in FIXTURE_OUTCOMES for o in outcomes), "Unknown fixture outcome.")
+        require(outcomes and all(o in FIXTURE_OUTCOMES + (FIXTURE_LIMIT,) for o in outcomes), "Unknown fixture outcome.")
+        # A scripted limit: the cause and reset its log would give, and the outcome of its resume.
+        self.cause, self.reset, self.after_resume = "limit", None, "done"
         self.state_root = Path(state_root).expanduser().resolve()
         self.outcomes = outcomes
         self.proposal = proposal
@@ -2146,7 +2283,7 @@ class FixtureDriver:
         atomic_state(worktree / milestone.MANIFEST, manifest)
         state["terminal"] = ({"status": "failed", "reason": "fixture_failed"} if outcome.startswith("failed")
                              else {"status": "succeeded", "output": output})
-        state["recoverable"] = outcome == "failed_recoverable"
+        state["recoverable"] = outcome in ("failed_recoverable", FIXTURE_LIMIT)
 
     @staticmethod
     def projection(state, watch=True):
@@ -2197,6 +2334,10 @@ class FixtureDriver:
     def status(self, r, run_id):
         return self.projection(self.load(run_id), watch=False)
 
+    def scripted_cause(self, run_id):
+        """(cause, reset) a scripted limit failure gives, with no log read; (None, None) for any other outcome."""
+        return (self.cause, self.reset) if self.load(run_id)["outcome"] == FIXTURE_LIMIT else (None, None)
+
     def log_tail(self, binding, run_id, cwd, lines=live.TAIL_LINES, **options):
         """Deterministic stand-in for `zeroshot logs`: one line per executed step of the scripted run."""
         state = self.load(run_id)
@@ -2237,5 +2378,5 @@ class FixtureDriver:
         state["successorRunId"] = successor
         self.store(state)
         self.checkpoint(Path(r["worktree"]))
-        self.begin(r, successor, "done", run_id)
+        self.begin(r, successor, self.after_resume, run_id)
         return {"runId": successor, "resumedFrom": run_id}

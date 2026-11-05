@@ -30,7 +30,7 @@ def strip(node):
 
 
 if __name__ == "__main__":
-    for name, graph in (("milestone", milestone.milestone_graph(3)), ("planner", engine.planner_graph_v2(3))):
+    for name, graph in (("milestone", milestone.milestone_graph()), ("planner", engine.planner_graph_v2(3))):
         path = Path(__file__).with_name("fixtures") / f"{name}-graph.json"
         path.write_text(json.dumps(strip(graph["root"]), ensure_ascii=False, indent=1) + "\n")
         print(path, path.stat().st_size)

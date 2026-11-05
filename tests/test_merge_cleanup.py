@@ -38,12 +38,14 @@ from terminal_planner.authority import Blocked
 import test_process as tpr
 
 CHECKS = [{"name": "unit", "argv": ["true"], "timeout_s": 60}]
+MERGED = "Merged: M1 → main."
+UNVERIFIED = MERGED + " Unverified merge: no project checks or merge critic ran."
 
 
 class MergeCleanupTests(tpr.ProfileTest):
     def merge(self):
         with self.app() as app:
-            return app.delivery.merge(app.delivery.latest("M1"))
+            return app.delivery.merge(app.delivery.latest("M1"), allow_unverified=True)
 
     def gated(self):
         """An accepted profile that requires the merge gate, written after the attempt awaits the merge."""
@@ -80,7 +82,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
         self.assertIsNotNone(self.branch(result["branch"]))
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertFalse(worktree.exists())
         self.assertIsNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(result["branch"]))
@@ -98,7 +100,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.assertIn("?? ZPLAN_FIXTURE.md", status)
         with self.app() as app:
             self.assertEqual(app.delivery.runs.product_tree(app.delivery.latest("M1")), r["result"]["tree"])
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertFalse(worktree.exists())
         self.assertIsNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -112,7 +114,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         (worktree / "__pycache__" / "deep").mkdir(parents=True)
         (worktree / "__pycache__" / "deep" / "m.pyc").write_bytes(b"cache")
         self.assertTrue((worktree / ".zplan").is_dir())
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertFalse(worktree.exists())
         self.assertIsNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -121,7 +123,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.awaiting_merge()
         r = self.record()
         shutil.rmtree(r["worktree"])
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertIsNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
         # The stale administration entry of the gone worktree is pruned, not merely abandoned.
@@ -131,7 +133,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.gated()
         r = self.record()
         worktree = Path(r["worktree"])
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, MERGED)
         self.assertFalse(worktree.exists())
         self.assertIsNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -144,7 +146,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         r = self.record()
         worktree = Path(r["worktree"])
         (worktree / ".env.local").write_text("secret\n", encoding="utf-8")
-        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -153,7 +155,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         subprocess.check_call(["git", "-C", str(worktree), *args], stdout=subprocess.DEVNULL)
 
     def kept(self, worktree, r):
-        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
 
@@ -189,7 +191,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         r = self.record()
         worktree = Path(r["worktree"])
         (worktree / "extra.txt").write_text("more work\n", encoding="utf-8")
-        self.wt(worktree, "add", "-A", "--", ":!.zplan")
+        self.wt(worktree, "add", "-A")
         self.wt(worktree, "commit", "-qm", "extra")
         tip = self.branch(r["branch"])
         (worktree / "extra.txt").unlink()
@@ -202,7 +204,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.awaiting_merge()
         r = self.record()
         worktree = Path(r["worktree"])
-        self.wt(worktree, "add", "-A", "--", ":!.zplan")
+        self.wt(worktree, "add", "-A")
         self.wt(worktree, "commit", "-qm", "product")
         (worktree / "extra.txt").write_text("more work\n", encoding="utf-8")
         self.wt(worktree, "add", "extra.txt")
@@ -219,7 +221,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         r = self.record()
         worktree = Path(r["worktree"])
         self.wt(worktree, "add", "ZPLAN_FIXTURE.md")
-        self.assertEqual(self.merged().line, "Merged: M1 → main.")
+        self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertFalse(worktree.exists())
         self.assertIsNone(self.branch(r["branch"]))
 
@@ -228,7 +230,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         r = self.record()
         worktree = Path(r["worktree"])
         (worktree / "leftover.txt").write_text("unmerged work\n", encoding="utf-8")
-        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(self.merged().line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertEqual((worktree / "leftover.txt").read_text(), "unmerged work\n")
 
@@ -239,7 +241,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         with patch.object(runs.MilestoneRuns, "product_tree", side_effect=Blocked("not read", family="project.unreadable")):
             result = self.merge()
         self.assertEqual(result.kind, "integrated")
-        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
 
@@ -252,7 +254,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         with patch.object(runs.MilestoneRuns, "product_tree", side_effect=OSError(errno.ENOSPC, "No space left on device")):
             result = self.merge()
         self.assertEqual(result.kind, "integrated")
-        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -270,7 +272,7 @@ class MergeCleanupTests(tpr.ProfileTest):
         finally:
             parent.chmod(0o755)
         self.assertEqual(result.kind, "integrated")
-        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s." % (worktree, r["branch"]))
+        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s. Unverified merge: no project checks or merge critic ran." % (worktree, r["branch"]))
         self.assertTrue(worktree.is_dir())
         self.assertIsNotNone(self.branch(r["branch"]))
         self.assertIsNone(self.branch(r["result"]["branch"]))
@@ -290,8 +292,8 @@ class MergeCleanupTests(tpr.ProfileTest):
         with patch.object(delivery, "git_call", side_effect=blocked):
             result = self.merge()
         self.assertEqual(result.kind, "integrated")
-        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s."
-                         % (r["branch"], r["result"]["branch"]))
+        self.assertEqual(result.line, "Merged: M1 → main; left in place: %s, %s. "
+                         "Unverified merge: no project checks or merge critic ran." % (r["branch"], r["result"]["branch"]))
         self.assertFalse(worktree.exists())
         self.assertIsNotNone(self.branch(r["branch"]))
         self.assertIsNotNone(self.branch(r["result"]["branch"]))

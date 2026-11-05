@@ -168,7 +168,7 @@ class HomeCase(unittest.TestCase):
         helpers the profile resolution runs are not turns."""
         return [call for call in self.spy.calls
                 if call["argv"][0] == str(self.codex) and "--help" not in call["argv"]
-                and call["argv"][1:3] != ["mcp", "list"]]
+                and call["argv"][1:3] != ["mcp", "list"] and call["argv"][1:2] != ["sandbox"]]
 
     def argv_of(self, call):
         """A recorded launch's codex argv without its executable: the flags the fake itself would see."""

@@ -1,7 +1,7 @@
 """P1: the first start and /setup offer the preset or the owner's own settings (the profile editor).
 
-Engine tests run `Profile` over real temporary Git repositories in production mode (the file is written and
-committed); two Pilot tests drive the whole app, one for the first start (P1, P2) and one for /setup (P3, P4); a
+Engine tests run `Profile` over real temporary Git repositories in production mode (v4a: the profile is a snapshot
+in zplan's own state; the project's file is never written or committed); two Pilot tests drive the whole app, one for the first start (P1, P2) and one for /setup (P3, P4); a
 small host app shows the editor on forms the whole-app tests do not reach. No provider, no network, isolated HOME/XDG.
 
 Interpretations (the reviewers never see the worker's summary):
@@ -9,11 +9,11 @@ Interpretations (the reviewers never see the worker's summary):
 - The editor sends only what the owner changed (`ProfileScreen.changes`), not the whole form: a value the owner did not
   touch is never rewritten, so an edit made to the file elsewhere meanwhile is kept.
 - «configure» is offered where «later» is (a proposal): a project whose own `zplan.process.json` already exists is
-  only recorded by «accept», so its file stays the owner's; /setup «profile» edits it afterwards.
-- Saving with nothing changed from the bootstrap editor accepts the proposal as it is; from /setup it writes nothing
-  (no file replace, no commit).
-- «profile» on a «later» profile edits the snapshot in effect (not a new proposal); saving writes it, with the
-  owner's values, as the accepted file.
+  only recorded by «accept», so its file stays the owner's; /setup «profile» refuses a change to it.
+- Saving with nothing changed from the bootstrap editor accepts the proposal as it is; from /setup it records
+  nothing new.
+- «profile» on a «later» profile edits the snapshot in effect (not a new proposal); saving records it, with the
+  owner's values, as the accepted snapshot.
 - Without a check the merge gate offers only «no check before merging» (a stored `required` stays as it is until the owner presses it).
 - `tui_settings.profile` and `tui_bootstrap.configure` carry the key `right`: `tests/test_reference.py` lets a screen
   share one key only for the action sets it lists, and the buttons are reached by Tab or the arrows.
@@ -55,8 +55,9 @@ class ProfileEditTest(tp.ProjectTest):
     def document(self):
         return json.loads(self.file.read_text(encoding="utf-8"))
 
-    def head(self):
-        return self.git("log", "-1", "--format=%s").decode().strip(), self.git("show", "--name-only", "--format=", "HEAD").decode().split()
+    @staticmethod
+    def document_of_snapshot(status):
+        return process.document_of(status.resolved.config)
 
     @property
     def directory(self):
@@ -75,31 +76,42 @@ class ProfileEditTest(tp.ProjectTest):
 
 
 class ChoiceEngineTests(ProfileEditTest):
-    def test_p1_accept_with_changes_writes_them_and_the_rest_as_proposed_in_one_commit(self):
-        """P1: «configure», «ask for everything», 1, «save» -> level manual, max_runs 1, all else as proposed."""
-        proposal = process.propose(self.project, {})
+    def settled(self):
+        """The accepted profile as a reopen resolves it, with nothing in the project to read it from."""
+        status = Profile(self.project, self.directory).status(write=False)
+        self.assertEqual((status.state, status.present), ("accepted", False))
+        return status
+
+    def test_p1_accept_with_changes_keeps_them_and_the_rest_as_proposed_in_a_snapshot(self):
+        """P1/v4a A1: «configure», «ask for everything», 1, «save» -> level manual, max_runs 1, all else as proposed;
+        recorded as a snapshot: no file, no commit, the digest recorded."""
+        proposal = process.resolve(process.propose(self.project, {}), {}, self.project, "proposal").config
         before = self.git("rev-parse", "HEAD")
         status = self.profile("accept", {"level": "manual", "max_runs": 1})
         self.assertEqual((status.state, status.notice), ("accepted", ""))
         expected = json.loads(json.dumps(proposal))
         expected["autonomy"].update(level="manual", max_runs=1)
-        self.assertEqual(self.document(), expected)
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
-        self.assertEqual(self.git("rev-parse", "HEAD~1"), before)
+        self.assertEqual(self.settled().resolved.config, expected)
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertEqual(self.git("status", "--porcelain"), b"")
         self.assertEqual(self.record()["digest"], status.resolved.digest)
+        self.assertEqual(self.settled().digest, status.resolved.digest)
 
-    def test_p1_a_role_changed_in_the_editor_is_written_whole(self):
+    def test_p1_a_role_changed_in_the_editor_is_kept_whole(self):
         self.profile("accept", {"roles": {"worker": {"model": "other-model", "effort": "max"}}})
-        self.assertEqual(self.document()["roles"]["worker"], {"model": "other-model", "effort": "max"})
-        self.assertEqual(self.document()["roles"]["planner"], process.propose(self.project, {})["roles"]["planner"])
+        roles = self.settled().resolved.config["roles"]
+        self.assertEqual(roles["worker"], {"model": "other-model", "effort": "max"})
+        self.assertEqual(roles["planner"], process.propose(self.project, {})["roles"]["planner"])
 
     def test_p1_the_merge_gate_needs_a_check(self):
-        """No check: «checks before merging» is refused with the reason, nothing is written."""
+        """No check: «checks before merging» is refused with the reason, nothing is recorded."""
         with self.assertRaisesRegex(Blocked, "gates.merge"):  # the reason's words are the services' (process.py)
             self.profile("accept", {"merge": "required"})
+        self.assertIsNone(self.record())
         (self.project / "package.json").write_text(json.dumps(CHECKS))
         self.profile("accept", {"merge": "off"})
-        self.assertEqual(self.document()["gates"]["merge"], "off")
+        self.assertEqual(self.settled().resolved.config["gates"]["merge"], "off")
 
     def test_p2_an_invalid_model_is_refused_with_the_reason_and_writes_nothing(self):
         """P2: model «a b» -> reason, no file, no record, the profile still undecided."""
@@ -113,55 +125,77 @@ class ChoiceEngineTests(ProfileEditTest):
         self.assertEqual(self.git("rev-parse", "HEAD"), before)
         self.assertEqual(self.profile("status").state, "never")
 
-    def test_p3_revise_changes_only_the_edited_value_and_keeps_everything_else(self):
-        """P3: level auto -> supervised: the file differs only in that value; unknown-to-the-editor keys and other
-        sections stay; the file is replaced, committed alone, and the new digest is recorded."""
-        document = process.propose(self.project, {})
-        document["limits"]["plan_rounds"] = 2
-        document["rules"] = []
-        document["risk"] = {"rules": [{"paths": ["src/**"], "tier": "low"}]}
-        document["autonomy"]["wakeups_per_hour"] = 7
-        self.file.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-        self.git("add", process.PROFILE_FILE)
-        self.git("commit", "-qm", "profile")
-        self.profile("accept")
+    def test_p3_revise_changes_only_the_edited_value_of_the_snapshot_and_writes_nothing(self):
+        """P3/v4a A2: level auto -> supervised: the snapshot differs only in that value; the new digest is recorded;
+        the project's tree and HEAD are as they were (an owner's draft included)."""
+        (self.project / "package.json").write_text(json.dumps(CHECKS))
+        self.git("add", "package.json")
+        self.git("commit", "-qm", "checks")
+        accepted = self.profile("accept", {"max_runs": 2, "roles": {"critic": {"model": "m-1", "effort": "low"}}})
         (self.project / "notes.txt").write_text("draft\n")
         before = self.git("rev-parse", "HEAD")
         status = self.profile("revise", {"level": "supervised"})
-        expected = json.loads(json.dumps(document))
+        expected = json.loads(json.dumps(accepted.resolved.config))
         expected["autonomy"]["level"] = "supervised"
-        self.assertEqual(self.document(), expected)
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
-        self.assertEqual(self.git("rev-parse", "HEAD~1"), before)
-        self.assertEqual(self.git("status", "--porcelain").decode().split(), ["??", "notes.txt"])
+        self.assertEqual(self.settled().resolved.config, expected)
+        self.assertNotEqual(status.digest, accepted.digest)
         self.assertEqual(self.record()["digest"], status.resolved.digest)
-        self.assertEqual(status.resolved.config["autonomy"]["level"], "supervised")
-        self.assertEqual([p.name for p in self.project.iterdir() if p.name.startswith(".zplan-process-")], [])
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertEqual(self.git("status", "--porcelain").decode().split(), ["??", "notes.txt"])
 
-    def test_p3_revise_adds_a_section_the_file_left_to_the_preset(self):
+    def test_p3_a_revision_of_the_owners_file_is_refused_and_the_file_stays(self):
+        """v4a A3: the file is the source; a change is refused naming it and the proposed value."""
         self.file.write_text('{"preset": "zplan.default/2"}\n', encoding="utf-8")
         self.profile("accept")
-        self.profile("revise", {"max_runs": 2, "roles": {"critic": {"model": "m-1", "effort": "low"}}})
-        self.assertEqual(self.document(), {"preset": "zplan.default/2", "autonomy": {"max_runs": 2},
-                                           "roles": {"critic": {"model": "m-1", "effort": "low"}}})
+        before, record = self.file.read_bytes(), self.record()
+        with self.assertRaises(Blocked) as raised:
+            self.profile("revise", {"max_runs": 2, "roles": {"critic": {"model": "m-1", "effort": "low"}}})
+        self.assertEqual(raised.exception.family, "action.refused")
+        self.assertIn("zplan.process.json is the source: set max_runs to 2 there; set roles to", str(raised.exception))
+        self.assertEqual((self.file.read_bytes(), self.record()), (before, record))
 
-    def test_p2_a_refused_revision_and_an_unchanged_one_leave_the_file_and_the_record_alone(self):
+    def test_v4a_export_writes_the_snapshot_once_and_the_file_becomes_the_source(self):
+        """v4a (`profile init`): the accepted snapshot is exported to the file and committed alone; from then on the
+        file is the source (a revision is refused); an existing file is never overwritten; the same document and
+        digest as the snapshot."""
+        accepted = self.profile("accept", {"level": "manual"})
+        self.assertFalse(self.file.exists())
+        (self.project / "notes.txt").write_text("draft\n")
+        before = self.git("rev-parse", "HEAD")
+        exported = self.profile("export")
+        self.assertEqual(self.document(), process.document_of(accepted.resolved.config))
+        self.assertEqual((exported.state, exported.present, exported.digest), ("accepted", True, accepted.digest))
+        self.assertEqual(self.git("log", "-1", "--format=%s").decode().strip(), "zplan profile")
+        self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD").decode().split(), [process.PROFILE_FILE])
+        self.assertEqual(self.git("rev-parse", "HEAD~1"), before)
+        self.assertEqual(self.git("status", "--porcelain").decode().split(), ["??", "notes.txt"])
+        written = self.file.read_bytes()
+        with self.assertRaises(Blocked) as raised:
+            self.profile("revise", {"level": "supervised"})
+        self.assertEqual(raised.exception.family, "action.refused")
+        with self.assertRaises(Blocked):
+            self.profile("export")
+        self.assertEqual(self.file.read_bytes(), written)
+
+    def test_p2_a_refused_revision_and_an_unchanged_one_leave_the_record_alone(self):
         """P2/P4: a refused value, or nothing changed («cancel» sends nothing, a save without edits sends {})."""
         self.profile("accept")
-        text, record, head = self.file.read_text(encoding="utf-8"), self.record(), self.git("rev-parse", "HEAD")
+        record, head = self.record(), self.git("rev-parse", "HEAD")
         with self.assertRaises(Blocked):
             self.profile("revise", {"roles": {"worker": {"model": "a b", "effort": "low"}}})
         self.profile("revise", {})
         self.profile("revise", {"level": process.propose(self.project, {})["autonomy"]["level"]})
-        self.assertEqual((self.file.read_text(encoding="utf-8"), self.record(), self.git("rev-parse", "HEAD")),
-                         (text, record, head))
+        self.assertEqual((self.record(), self.git("rev-parse", "HEAD")), (record, head))
+        self.assertFalse(self.file.exists())
 
     def test_p4_a_postponed_profile_is_accepted_by_saving_its_edited_values(self):
         """P4: «later» keeps the profile unsaved; the editor on it starts from the snapshot in effect and its save
-        writes the file with the owner's value and accepts it."""
+        records it with the owner's value as accepted; no file is written."""
         (self.project / "package.json").write_text(json.dumps(CHECKS))
         self.git("add", "package.json")
         self.git("commit", "-qm", "checks")
+        before = self.git("rev-parse", "HEAD")
         with Authority(None, self.project) as authority:
             profile = Profile.of(authority)
             self.assertEqual(profile.defer().state, "later")
@@ -170,9 +204,10 @@ class ChoiceEngineTests(ProfileEditTest):
         self.assertFalse(self.file.exists())
         status = self.profile("accept", {"max_runs": 2})
         self.assertEqual(status.state, "accepted")
-        self.assertEqual(self.document()["autonomy"]["max_runs"], 2)
-        self.assertEqual(self.document()["gates"]["merge"], "required")
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
+        config = self.settled().resolved.config
+        self.assertEqual((config["autonomy"]["max_runs"], config["gates"]["merge"]), (2, "required"))
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
 
     def test_a_fixture_session_never_writes_the_targets_file_but_records_the_edit(self):
         with Authority(self.state, self.project, fixture_id="test") as authority:
@@ -256,7 +291,7 @@ class EditorFormTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ShellProfileTest(tt.ShellTest, ProfileEditTest):
-    """The whole app in production mode (not a fixture session): the profile file is written and committed."""
+    """The whole app in production mode (not a fixture session): the profile is a snapshot, the file is never written."""
 
     def setUp(self):
         super().setUp()
@@ -289,7 +324,8 @@ class FirstStartTests(ShellProfileTest):
     async def test_p1_p2_configure_refuses_an_invalid_model_then_saves_the_owners_values(self):
         """P1/P2: «configure» sits between «accept» and «later» with the focus on «accept»; the editor opens on the
         proposal; a model «a b» keeps it open with the reason and writes nothing; «ask for everything», 1, «save» writes
-        level manual and max_runs 1, committed «zplan profile»; «cancel» before that wrote nothing."""
+        level manual and max_runs 1 as a snapshot (no file, no commit); «cancel» before that wrote nothing."""
+        head = self.git("rev-parse", "HEAD")
         async with self.drive() as pilot:
             await self.until_screen(pilot, "BootstrapScreen")
             self.assertEqual([b.id for b in self.app.screen.query("#bootstrap-buttons Button")],
@@ -318,21 +354,25 @@ class FirstStartTests(ShellProfileTest):
             await self.press(pilot, "#profile-save")
             await self.until_screen(pilot, "MainScreen")
             await self.until(pilot, lambda: self.app.snapshot.profile.state == "accepted")
-        proposal = process.propose(self.project, {})
-        proposal["autonomy"].update(level="manual", max_runs=1)
-        self.assertEqual(self.document(), proposal)
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
+        status = Profile(self.project, self.directory).status(write=False)
+        self.assertEqual(status.state, "accepted")
+        autonomy = status.resolved.config["autonomy"]
+        self.assertEqual((autonomy["level"], autonomy["max_runs"]), ("manual", 1))
+        self.assertFalse(self.file.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, "Textual (or ZPLAN_TEST_WHEELHOUSE) is required for Pilot tests")
 class SetupTests(ShellProfileTest):
     async def test_p3_p4_setup_profile_on_a_postponed_then_an_accepted_profile(self):
         """P4: a «later» profile shows «profile» too, «cancel» and Esc write nothing, and saving accepts it. P3: on the
-        accepted profile «profile» starts on the file's values and a save changes only the edited value (level auto ->
-        supervised), committed alone, the new digest recorded, a hand-written key and section kept."""
+        accepted profile «profile» starts on the snapshot's values and a save changes only the edited value (level auto
+        -> supervised), the new digest recorded, nothing written or committed. A file the owner then writes is the
+        source: the editor's save is refused naming it, and the file stays."""
         (self.project / "package.json").write_text(json.dumps(CHECKS))
         self.git("add", "package.json")
         self.git("commit", "-qm", "checks")
+        head = self.git("rev-parse", "HEAD")
         async with self.drive() as pilot:
             await self.until_screen(pilot, "BootstrapScreen")
             await self.press(pilot, "#bootstrap-later")
@@ -354,24 +394,23 @@ class SetupTests(ShellProfileTest):
             await self.press(pilot, "#profile-save")
             await self.until_screen(pilot, "SettingsScreen")
             await self.until(pilot, lambda: self.app.snapshot.profile.state == "accepted")
-            self.assertEqual(self.document()["autonomy"]["level"], "supervised")
-            self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
-            document = self.document()  # a hand edit made while the screen is open: the save keeps it
-            document["limits"]["plan_rounds"] = 2
-            self.file.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+            settled = Profile(self.project, self.directory).status(write=False)
+            self.assertEqual(settled.resolved.config["autonomy"]["level"], "supervised")
+            self.assertEqual(self.record()["digest"], settled.resolved.digest)
+            self.assertEqual((self.file.exists(), self.git("rev-parse", "HEAD")), (False, head))
+            owners = self.document_of_snapshot(settled)  # the owner writes the file: it is the source now
+            owners["limits"]["plan_rounds"] = 2
+            self.file.write_text(json.dumps(owners, indent=2) + "\n", encoding="utf-8")
+            written = self.file.read_bytes()
             await self.press(pilot, "#settings-buttons-profile")
             await self.until_screen(pilot, "ProfileScreen")
-            self.assertTrue(self.app.screen.query_one("#profile-level-supervised", Button).has_class("-chosen"))
-            await self.press(pilot, "#profile-level-auto")
+            editor = self.app.screen
+            await self.press(pilot, "#profile-level-manual")
             await self.press(pilot, "#profile-save")
-            await self.until_screen(pilot, "SettingsScreen")
-            await self.until(pilot, lambda: self.document()["autonomy"]["level"] == "auto")
-            await self.until(pilot, lambda: self.record()["digest"] == Profile(self.project, self.directory).status(
-                write=False).resolved.digest)
-        document["autonomy"]["level"] = "auto"
-        self.assertEqual(self.document(), document)
-        self.assertEqual(self.head(), ("zplan profile", [process.PROFILE_FILE]))
-        self.assertEqual(self.git("status", "--porcelain").decode().split(), [])
+            await self.until(pilot, lambda: "zplan.process.json is the source" in editor.problem)
+            self.assertIs(self.app.screen, editor)
+        self.assertEqual(self.file.read_bytes(), written)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
 
 
 if __name__ == "__main__":

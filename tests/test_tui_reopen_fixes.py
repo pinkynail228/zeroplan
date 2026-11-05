@@ -1,14 +1,14 @@
-"""R-A: high defects of the 0.5.2 bug hunt — a stale draft card after a restart and the focus after Esc. One
+"""R-A: high defects of the 0.5.2 bug hunt — a stale draft after a restart and the focus after Esc. One
 regression test per criterion; each fails on the unfixed code. (C3, the dirty-tree line, went with the refusal itself:
 D4a, tests/test_dirty_head.py.)
 
 Interpretations (the worker's summary never reaches the reviewers):
 
-- C1: «never opens on mount or refresh» is checked where the decision is made, `MainScreen.refresh_draft_card` (the
+- C1: «never noted on mount or refresh» is checked where the decision is made, `MainScreen.refresh_drafts` (the
   real method on the card contract's stand-in screen). The draft is compared with the plan identity the screen's own
-  snapshot names (`chat.stale_reason`); until the first snapshot arrives the screen cannot tell, so it opens nothing
-  and the key stays unseen for the next refresh. A card already open when the plan moves on stays open (its `/plan`
-  is refused as stale, test_tui_draft_card A3).
+  snapshot names (`chat.stale_reason`); until the first snapshot arrives the screen cannot tell, so it notes nothing
+  and the key stays unnoted for the next refresh. A draft already sendable when the plan moves on stays so until the
+  next refresh retires it (its `/plan` is refused as stale, test_tui_draft_card A2).
 - C2: the goal form's retained text as a draft state went with the form (K1b); its test is removed.
 - C4 -> C1 (attempt 3): the focus goes back to the widget that had it when the plan screen (opened by the owner
   from the main screen, `PlanScreen.from_main`) or Settings opened — `ZplanApp.leave_to_input` hands the main
@@ -45,19 +45,20 @@ def goal_reply(identity):
 
 
 @unittest.skipUnless(ui is not None, "Rich and Textual are unavailable")
-class StaleDraftCardTests(unittest.TestCase):
-    def test_c1_a_draft_the_plan_moved_past_opens_no_card(self):
-        """Draft d1 (made with no plan), plan r1 exists, restart: no card request, so no draft card and no tab."""
+class StaleDraftTests(unittest.TestCase):
+    def test_c1_a_draft_the_plan_moved_past_is_not_noted(self):
+        """Draft d1 (made with no plan), plan r1 exists, restart: no note, so no line in the chat and no sendable
+        draft."""
         screen = _DraftScreen(draft_chat(goal_reply(NO_PLAN)))
         screen.app.snapshot = snapshot(1, "proposed")
-        screen.refresh_draft_card()
-        screen.refresh_draft_card()
+        screen.refresh_drafts()
+        screen.refresh_drafts()
         self.assertEqual(screen.posted, [])
-        self.assertEqual(screen.draft_cards, {})
-        # the draft made against that very plan is current: its card opens
+        self.assertEqual(screen.sendable_drafts, {})
+        # the draft made against that very plan is current: it is noted
         current = _DraftScreen(draft_chat(goal_reply([1, PROPOSED])))
         current.app.snapshot = snapshot(1, "proposed")
-        current.refresh_draft_card()
+        current.refresh_drafts()
         self.assertEqual(len(current.posted), 1)
 
 

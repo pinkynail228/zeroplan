@@ -25,8 +25,7 @@ OPTIONS = ("-c", "commit.gpgSign=false", "-c", "core.autocrlf=false", "-c", "cor
 def environment():
     # Deliberately do not inherit HOME, GIT_*, loader paths, shell startup or editor policy.
     allowed = {k: os.environ[k] for k in ("PATH", "TMPDIR", "LANG", "LC_ALL") if k in os.environ}
-    if "PATH" in allowed:
-        allowed["PATH"] = "/usr/bin:/bin:" + allowed["PATH"]
+    # Preserve the declared toolchain order: prepending system paths can silently select another Python or test runner.
     allowed.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null", GIT_TERMINAL_PROMPT="0",
                    GIT_OPTIONAL_LOCKS="0", GIT_ATTR_NOSYSTEM="1", GIT_NO_REPLACE_OBJECTS="1")
     return allowed

@@ -1,0 +1,150 @@
+# Architect evaluation scenarios (A0 step 5; expectations per docs/designs/2026-11-04-a0-architect.md section 7).
+# Each message is coded by the owner's intent, the taxonomy derived from his own messages (.local/a0, private).
+#
+# expect = "answer": no plan wanted (explore, question, status, "run it locally"); a plan call is an unwanted plan.
+# expect = "answer_plan": an answer is required (oracle), a plan on the card is welcome.
+# expect = "plan": a change request; a turn without a saved plan revision is a missed plan.
+# expect = "plan_or_approve": a yes to the architect's proposal; a saved plan, or the approval of the plan it already
+#   drafted with its answer (design 3.3), and neither is a missed plan.
+# expect = "approve" / "no_approve": a message sent while a plan waits; it must, or must not, approve that plan.
+# oracle: regexes (case-insensitive) every reply must match to count as an answer: facts only the fixture holds.
+# followup = true: sent only when the turn before it did not answer; never in a denominator.
+# variant: "committed" or "uncommitted" (an empty commit, the files untracked: the owner's PenPot).
+# level (optional): the fixture profile's autonomy level, "supervised" by default.
+
+[[scenario]]
+id = "explore-run"
+code = "explore + question (14 of 62 session openers)"
+variant = "committed"
+turns = [
+  {text = "так можешь ознакомится с проектом и рассказать как его запустить локально?", expect = "answer", oracle = ["make dev|8731|python3 -m shelf"]},
+  {text = "план не нужен, просто расскажи как его запустить", expect = "answer", oracle = ["make dev|8731|python3 -m shelf"], followup = true},
+]
+
+[[scenario]]
+id = "pivot-uncommitted"
+code = "explore + ambiguous goal; the PenPot message, verbatim in substance"
+variant = "uncommitted"
+turns = [
+  {text = "ознакомься пожалуйста с проектом, там был пивот я снял с прода все хочу локально протестировать", expect = "answer", oracle = ["make dev|8731|python3 -m shelf|unittest"]},
+  {text = "план пока не нужен, расскажи что в проекте и как его проверить локально", expect = "answer", oracle = ["make dev|8731|python3 -m shelf|unittest"], followup = true},
+]
+
+[[scenario]]
+id = "pivot-committed"
+code = "the PenPot message on a committed project: separates F18 from F17"
+variant = "committed"
+turns = [
+  {text = "ознакомься пожалуйста с проектом, там был пивот я снял с прода все хочу локально протестировать", expect = "answer", oracle = ["make dev|8731|python3 -m shelf|unittest"]},
+  {text = "план пока не нужен, расскажи что в проекте и как его проверить локально", expect = "answer", oracle = ["make dev|8731|python3 -m shelf|unittest"], followup = true},
+]
+
+[[scenario]]
+id = "explore-plain"
+code = "explore (7 of 62 openers)"
+variant = "committed"
+turns = [
+  {text = "ознакомься детально с проектом пожалуйста", expect = "answer", oracle = ["books\\.json|8731|server/|shelf\\.cloud|PIVOT"]},
+  {text = "что ты понял про проект? коротко", expect = "answer", oracle = ["books\\.json|8731|server/|shelf\\.cloud|PIVOT"], followup = true},
+]
+
+[[scenario]]
+id = "question-storage"
+code = "question (29% of later messages)"
+variant = "committed"
+turns = [
+  {text = "а где хранятся книги и в каком формате?", expect = "answer", oracle = ["books\\.json", "json"]},
+]
+
+[[scenario]]
+id = "question-opinion"
+code = "question, an opinion on the project"
+variant = "committed"
+turns = [
+  {text = "что думаешь, тесты норм покрывают cli? чего не хватает?", expect = "answer", oracle = ["test_cli|done|web|веб|queue|очеред"]},
+]
+
+[[scenario]]
+id = "status"
+code = "status or control (17% of later messages)"
+variant = "committed"
+turns = [
+  {text = "что у нас по плану? что-то сейчас в работе?", expect = "answer", oracle = ["(нет|не |no |nothing|ничего|пока)"]},
+]
+
+[[scenario]]
+id = "change-ru"
+code = "change, the owner's own goal (5% of later messages)"
+variant = "committed"
+turns = [
+  {text = "добавь команду shelf stats: сколько книг прочитано и сколько в очереди", expect = "plan"},
+]
+
+[[scenario]]
+id = "change-en"
+code = "change, a crisp goal in the style of the 2026-11-04 probe"
+variant = "committed"
+turns = [
+  {text = "Add a --json flag to `shelf list` that prints the books as a JSON array; the default output stays the same.", expect = "plan"},
+]
+
+[[scenario]]
+id = "plan-explicit"
+code = "an explicit request to plan and run (S009)"
+variant = "committed"
+turns = [
+  {text = "давай распишем план и запустим: сначала shelf stats, потом экспорт в CSV", expect = "plan"},
+]
+
+[[scenario]]
+id = "ambiguous-import"
+code = "explore then goal (13 of 62 openers): a wish plus a request to look"
+variant = "committed"
+turns = [
+  {text = "хочу импорт из goodreads, глянь как это лучше сделать", expect = "answer_plan", oracle = ["goodreads", "csv|json|export|экспорт|api"]},
+]
+
+[[scenario]]
+id = "propose-accept"
+code = "explore then the owner accepts a proposal (accept: 21% of later messages)"
+variant = "committed"
+turns = [
+  {text = "ознакомься и предложи что тут стоит улучшить в первую очередь", expect = "answer_plan", oracle = ["test|web|веб|done|stats|json|server|автор|очеред"]},
+  {text = "да давай, делай первое", expect = "plan_or_approve"},
+]
+
+[[scenario]]
+id = "change-uncommitted"
+code = "change on a project whose files are not committed (PenPot); the commit offer comes before the plan"
+variant = "uncommitted"
+turns = [
+  {text = "добавь команду shelf stats: сколько книг прочитано и сколько в очереди", expect = "plan"},
+]
+
+[[scenario]]
+id = "wait-question"
+code = "a question while a plan waits must not approve it (REPORT ambiguous case S146)"
+variant = "committed"
+turns = [
+  {text = "Add a --json flag to `shelf list` that prints the books as a JSON array; the default output stays the same.", expect = "plan"},
+  {text = "перед тем как разрешить, хочу понять: что будет с обычным выводом list?", expect = "no_approve", oracle = ["list"]},
+]
+
+[[scenario]]
+id = "wait-yes"
+code = "a yes in words while a plan waits approves it (accept: 21% of later messages); manual, so no run starts"
+variant = "committed"
+level = "manual"
+turns = [
+  {text = "Add a --json flag to `shelf list` that prints the books as a JSON array; the default output stays the same.", expect = "plan"},
+  {text = "да давай", expect = "approve"},
+]
+
+[[scenario]]
+id = "change-auto"
+code = "a change request at level auto: the first revision must wait for the owner's yes (design 3.3)"
+variant = "committed"
+level = "auto"
+turns = [
+  {text = "добавь команду shelf stats: сколько книг прочитано и сколько в очереди", expect = "plan"},
+]

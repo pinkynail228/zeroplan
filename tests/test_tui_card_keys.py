@@ -1,8 +1,8 @@
 """D2 (0.6.3 newcomer defect 2): the open card is answered by keys, and the keys are shown at 80x24.
 
-One whole-app walk through the real shell, at 80x24 and at 140x40, covers K1-K4 with the draft, plan and merge cards:
-the newest open card draws one selected choice in reverse, starting on its first button (K1); ↑↓ move it (wrapping)
-and Enter on the empty input presses it through the card's own `Card.Chosen` path, the same `run_command` call a click
+One whole-app walk through the real shell, at 80x24 and at 140x40, covers K1-K4 with two plan cards and the merge
+card (a goal draft is no card since v3e): the newest open card draws one selected choice in reverse, starting on its
+first button (K1); ↑↓ move it (wrapping) and Enter on the empty input presses it through the card's own `Card.Chosen` path, the same `run_command` call a click
 makes, while text in the input keeps today's send (K2); the input's placeholder is the catalog's key line while a card
 is open and `chat.placeholder` otherwise, the card's hint row staying hidden at 80x24 (K3); Enter with no open card
 still says `architect.empty_message` and sends nothing (K4).
@@ -63,30 +63,30 @@ class CardKeysTests(ChatShell):
             self.assertIn("The empty message to the architect was not sent.", "\n".join(
                 line.text for line in app.screen._compositor.render_strips()))
             self.assertEqual(list(app.chat.state.entries), [])
-            # K1 + K3: the draft card opens; the first button is selected, the keys are in the placeholder
-            draft = cards.draft_card("draft:d", "12:00")
-            screen.show_card(draft)
+            # K1 + K3: a decision card opens; the first button is selected, the keys are in the placeholder
+            first = cards.plan_card("keyed:d", "12:00", "2 этапа", "4 задачи")
+            screen.show_card(first)
             await pilot.pause()
-            shown = screen.card_widgets["draft:d"]
-            self.assertEqual(self.selected(shown), [draft.buttons[0][0]])
+            shown = screen.card_widgets["keyed:d"]
+            self.assertEqual(self.selected(shown), [first.buttons[0][0]])
             self.assertEqual(field.placeholder, SHOWN)
-            self.assertEqual(self.reversed_labels([label for label, _ in draft.buttons]), [draft.buttons[0][0]])
+            self.assertEqual(self.reversed_labels([label for label, _ in first.buttons]), [first.buttons[0][0]])
             self.assertEqual(shown.query(".card-hint")[0].display, size[0] > 100)  # hidden at 80x24 (A1)
             # K2: Down moves to «нет» and wraps; Enter presses it through Card.Chosen -> run_command
             await pilot.press("down")
-            self.assertEqual(self.selected(shown), [draft.buttons[1][0]])
+            self.assertEqual(self.selected(shown), [first.buttons[1][0]])
             await pilot.press("down")
-            self.assertEqual(self.selected(shown), [draft.buttons[0][0]])
+            self.assertEqual(self.selected(shown), [first.buttons[0][0]])
             await pilot.press("up")
-            self.assertEqual(self.selected(shown), [draft.buttons[1][0]])
+            self.assertEqual(self.selected(shown), [first.buttons[1][0]])
             await pilot.press("enter")
             await pilot.pause()
-            self.assertEqual(ran, [("/decline", "", "draft:d")])
+            self.assertEqual(ran, [("/decline", "", "keyed:d")])
             # a click on the same button is the very same call
             shown.query("Button")[1].press()
             await pilot.pause()
             self.assertEqual(ran[-1], ran[0])
-            # the newest open card owns the keys: the plan card opens under the draft; the draft draws none
+            # the newest open card owns the keys: the plan card opens under the first; the first draws none
             plan = cards.plan_card("plan:1", "12:01", "3 этапа", "5 задач")
             screen.show_card(plan)
             await pilot.pause()
@@ -125,7 +125,7 @@ class CardKeysTests(ChatShell):
             merge = cards.merge_card("merge:1", "12:02", "этап 1", "3", "3")
             screen.show_card(merge)
             screen.drop_card("plan:1")
-            screen.drop_card("draft:d")
+            screen.drop_card("keyed:d")
             await pilot.pause()
             self.assertEqual(self.selected(screen.card_widgets["merge:1"]), [merge.buttons[0][0]])
             await pilot.press("down", "enter")
@@ -152,22 +152,22 @@ class CardKeysTests(ChatShell):
             await pilot.pause()
             screen, field = self.app.screen, self.query("#input")
             screen.run_command = lambda name, argument="", key=None: True
-            plan = cards.draft_card("draft:a", "12:01")  # a plan card is dropped by the next render of its source
+            plan = cards.plan_card("keyed:a", "12:01", "2 этапа", "4 задачи")  # a plan card is dropped by the next render of its source
             screen.show_card(plan)
             screen.add_view_tab("a", "a", key="a")
             screen.add_view_tab("b", "b", key="b")
             await pilot.pause()
-            key, right = "draft:a", screen.query_one("#right")
+            key, right = "keyed:a", screen.query_one("#right")
             first, second = screen.view_tabs
 
             async def cycled():
-                """Tab, →, →, →: the first arrow hands the focus back to the input; the next ones still switch tabs."""
+                """Tab, →, →, →, →: the first arrow hands the focus back to the input; the next ones still switch tabs."""
                 await pilot.press("tab")
                 active = []
-                for _ in range(3):
+                for _ in range(4):
                     await pilot.press("right")
                     active.append(right.active)
-                self.assertEqual(active, [first, second, "tab-live"])
+                self.assertEqual(active, ["tab-drafts", first, second, "tab-live"])
                 self.assertEqual(self.selected(screen.card_widgets[key]), [plan.buttons[0][0]])
                 self.assertIs(self.app.focused, field)
 
@@ -182,9 +182,9 @@ class CardKeysTests(ChatShell):
                     field.value = "x"
                     field.value = ""
                 elif end == "card":
-                    other = cards.draft_card("draft:b", "12:02")
+                    other = cards.plan_card("keyed:b", "12:02", "2 этапа", "4 задачи")
                     screen.show_card(other)
-                    key, plan = "draft:b", other
+                    key, plan = "keyed:b", other
                 else:
                     await pilot.press(end)
                 await pilot.pause()
@@ -204,12 +204,12 @@ class CardKeysTests(ChatShell):
             screen = self.app.screen
             right = screen.query_one("#right")
             screen.run_command = lambda name, argument="", key=None: True
-            plan = cards.draft_card("draft:a", "12:01")
+            plan = cards.plan_card("keyed:a", "12:01", "2 этапа", "4 задачи")
             screen.show_card(plan)
             screen.add_view_tab("a", "a", key="a")
             await pilot.pause()
             await pilot.press("tab", "right")
-            self.assertEqual(right.active, screen.view_tabs[0])
+            self.assertEqual(right.active, "tab-drafts")
             await between(screen, plan)
             await pilot.pause()
             return screen, right, plan, await self.arrow(pilot, screen, right)
@@ -217,11 +217,11 @@ class CardKeysTests(ChatShell):
     async def arrow(self, pilot, screen, right):
         before = right.active
         await pilot.press("right")
-        return before, right.active, self.selected(screen.card_widgets["draft:a"])
+        return before, right.active, self.selected(screen.card_widgets["keyed:a"])
 
     async def test_d3c_a_refresh_of_the_same_card_keeps_the_cycle(self):
         async def refresh(screen, plan):
-            screen.show_card(cards.draft_card("draft:a", "12:02"))  # same key, new widget
+            screen.show_card(cards.plan_card("keyed:a", "12:02", "2 этапа", "4 задачи"))  # same key, new widget
 
         screen, right, plan, (before, after, chosen) = await self.d3c_cycle(refresh)
         self.assertNotEqual(after, before)
@@ -229,9 +229,9 @@ class CardKeysTests(ChatShell):
 
     async def test_d3c_another_keyed_card_ends_the_cycle_for_good(self):
         async def other(screen, plan):
-            screen.show_card(cards.draft_card("draft:b", "12:02"))
+            screen.show_card(cards.plan_card("keyed:b", "12:02", "2 этапа", "4 задачи"))
             screen.sync_cards()
-            screen.unmount_card("draft:b")
+            screen.unmount_card("keyed:b")
             screen.sync_cards()
 
         screen, right, plan, (before, after, chosen) = await self.d3c_cycle(other)

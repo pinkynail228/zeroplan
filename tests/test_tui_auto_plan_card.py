@@ -53,10 +53,12 @@ def profile_view(level):
     return SimpleNamespace(state="accepted", note="", lines=tuple(lines), bootstrap=(), present=True, problem="")
 
 
-def snapshot_at(level, stale=False):
-    base = proposal()
+def snapshot_at(level, stale=False, chain_approved=False):
+    """The proposed plan under a profile of `level`; `chain_approved` is a later revision of a chain the owner
+    approved (the architect approves it at auto and supervised), the first revision is the owner's at every level."""
+    base = replace(proposal(), chain_approved=chain_approved)
     if stale:
-        base = replace(base, plan=PlanView("proposal", 1, "proposed", base.plan.lines, ("revise", "reject"),
+        base = replace(base, plan=PlanView("proposal", 1, "proposed", base.plan.lines, ("revise", "requirements"),
                                            family="plan.stale"))
     return replace(base, profile=profile_view(level))
 
@@ -95,12 +97,17 @@ class AutoPlanCardTests(unittest.TestCase):
     def test_c1_in_auto_the_card_does_not_ask_and_offers_revise_only(self):
         for narrow in (False, True):
             with self.subTest(narrow=narrow):
-                spec = card_of(snapshot_at("auto"), narrow)
+                spec = card_of(snapshot_at("auto", chain_approved=True), narrow)
                 self.assertEqual(spec.text, strings.text("card.plan_auto_text"))
                 self.assertEqual(spec.buttons, (REVISE_ONLY,))
                 self.assertTrue(spec.title.startswith("Plan · "), spec.title)  # the counts are the planning service's own text
                 self.assertNotIn("Approve?", spec.text)
                 self.assertNotIn("on the right", spec.text)
+        for narrow in (False, True):  # the first revision of a chain is the owner's, even at auto
+            with self.subTest(narrow=narrow, first=True):
+                spec = card_of(snapshot_at("auto"), narrow)
+                self.assertTrue(spec.text.startswith(strings.text("card.plan_text_narrow" if narrow else "card.plan_text")))
+                self.assertEqual(spec.buttons, (ASK, REVISE))
 
     def test_p4b_a1_the_card_lists_the_milestones_with_their_task_counts(self):
         """p4b A1/A2 at unit level, on the plan view's body as `Planning.proposal` writes it: «M1 <title> · N tasks»
@@ -117,10 +124,10 @@ class AutoPlanCardTests(unittest.TestCase):
                                                       family="plan.stale" if stale else None))
         for level in ("auto", "manual"):
             with self.subTest(level=level):
-                two = card_of(replace(view(2), profile=profile_view(level)))
+                two = card_of(replace(view(2), profile=profile_view(level), chain_approved=True))
                 head = strings.text("card.plan_auto_text" if level == "auto" else "card.plan_text")
                 self.assertEqual(two.text.split("\n"), [head, "M1 Add --lines · 2 tasks", "M2 Docs 2 · 1 task"])
-                seven = card_of(replace(view(7), profile=profile_view(level))).text.split("\n")
+                seven = card_of(replace(view(7), profile=profile_view(level), chain_approved=True)).text.split("\n")
                 self.assertEqual(seven[1:], ["M%d %s · %s" % (n, "Add --lines" if n == 1 else "Docs %d" % n,
                                                             "2 tasks" if n == 1 else "1 task") for n in range(1, 6)]
                                  + ["…and 2 more"])
@@ -131,9 +138,12 @@ class AutoPlanCardTests(unittest.TestCase):
 
     def test_c1_the_bar_job_follows_the_policy(self):
         """The bar says the architect approves in `auto`, and waits for the owner at the other levels."""
-        for level, job in (("auto", "approve_auto"), ("supervised", "approve"), ("manual", "approve"), (None, "approve")):
+        for level, job in (("auto", "approve_auto"), ("supervised", "approve_auto"), ("manual", "approve"), (None, "approve")):
             with self.subTest(level=level):
-                self.assertEqual(bar_job_of(snapshot_at(level)), job)
+                self.assertEqual(bar_job_of(snapshot_at(level, chain_approved=True)), job)
+        for level in ("auto", "supervised", "manual", None):  # the first revision is the owner's at every level
+            with self.subTest(level=level, first=True):
+                self.assertEqual(bar_job_of(snapshot_at(level)), "approve")
         from terminal_planner.tui.activity import bar_text
         text = bar_text("P", "main", "approve_auto", "", None, (), 200).plain
         self.assertIn(strings.text("bar.approving_plan"), text)
@@ -148,8 +158,8 @@ class AutoPlanCardTests(unittest.TestCase):
 
     def test_c3_the_pointer_follows_the_layout_and_an_open_card_follows_a_resize(self):
         wide, narrow = card_of(snapshot_at("manual")), card_of(snapshot_at("manual"), narrow=True)
-        self.assertIn("The “Plan” tab is on the right.", wide.text)
-        self.assertIn("The plan is on the “Plan” tab (→).", narrow.text)
+        self.assertIn("The “Drafts” tab is on the right.", wide.text)
+        self.assertIn("The plan is on the “Drafts” tab (→).", narrow.text)
         self.assertNotIn("on the right", narrow.text)
         self.assertEqual(narrow.buttons, (ASK, REVISE))
         screen = _NarrowScreen(snapshot_at("manual"))
@@ -236,20 +246,23 @@ class AutoPlanCardShell(ApproveCardShell):
         """Also p4b A1/A2 on the real app: seven milestones list five lines and «…and 2 more» above the buttons,
         and at 80x24 the single button is still drawn."""
         self.propose_at("auto", milestones=7)
-        async with self.shell(self.controller(profile=True), size=(80, 24)) as pilot:
-            await self.loaded(pilot)
-            card = await self.card_shown(pilot)
-            self.assertEqual(card.spec.text.split("\n"), [strings.text("card.plan_auto_text")]
-                             + ["M%d Milestone number %d · 1 task" % (n, n) for n in range(1, 6)] + ["…and 2 more"])
-            self.assertEqual(self.labels(), [strings.text("card.revise_only")])
-            shown = screen_text(self.app)
-            self.assertIn(strings.text("card.revise_only"), shown)  # the button row is on screen under the list
-            self.assertIn("…and 2 more", shown)
-            self.assertIn("M5 Milestone number 5 · 1 task", shown)
-            self.assertNotIn("Approve?", shown)
-            self.assertNotIn("on the right", shown)
-            self.assertIn(strings.text("bar.approving_plan"), shown)
-            self.assertNotIn(strings.text("bar.waiting_approve"), shown)
+        with patch("terminal_planner.tui.controller.chain_approved", return_value=True):  # a later revision of an approved chain
+            controller = self.controller(profile=True)
+            async with self.shell(controller, size=(80, 24)) as pilot:
+                await self.loaded(pilot)
+                card = await self.card_shown(pilot)
+                self.assertEqual(card.spec.text.split("\n"), [strings.text("card.plan_auto_text"),
+                                                              strings.text("card.plan_no_check")]
+                                 + ["M%d Milestone number %d · 1 task" % (n, n) for n in range(1, 6)] + ["…and 2 more"])
+                self.assertEqual(self.labels(), [strings.text("card.revise_only")])
+                shown = screen_text(self.app)
+                self.assertIn(strings.text("card.revise_only"), shown)  # the button row is on screen under the list
+                self.assertIn("…and 2 more", shown)
+                self.assertIn("M5 Milestone number 5 · 1 task", shown)
+                self.assertNotIn("Approve?", shown)
+                self.assertNotIn("on the right", shown)
+                self.assertIn(strings.text("bar.approving_plan"), shown)
+                self.assertNotIn(strings.text("bar.waiting_approve"), shown)
 
     async def test_c2_c3_supervised_keeps_the_question_and_its_pointer_follows_the_resize(self):
         self.propose_at("supervised")

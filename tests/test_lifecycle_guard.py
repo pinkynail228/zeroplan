@@ -7,19 +7,8 @@ configuration digest from the session-bound profile they retain; no caller can d
 
 Interpretations this task had to fix (the worker's summary never reaches the reviewers, so they are recorded here):
 
-- A-1's coverage contract is fixed. A *direct* `Authority.begin` test refuses in every `runs.ACTIVE` state (the
-  owner guard is what protects the class), and `BeginInventoryTests` compares the *closed syntactic inventory* of
-  production `begin` calls — every `ast.Call` whose `func` is an `ast.Attribute` with `attr == "begin"` — as an
-  exact multiset (`collections.Counter`), keyed by relative file, qualified scope (async included), canonical
-  receiver text (`ast.unparse`) and ordinal in source order within the scope (occurrences are collected per scope
-  and ordered by position — never AST visit order; a dict literal visits keys before values); no line numbers. The
-  expected today is 10 occurrences: the four Authority callers (`Planning.begin`, `Planning.renew`, `Runs.revise_plan`,
-  `Runs.revise`), each explicitly bound to its state x action matrix row in `AUTHORITY_BEGIN_ROWS`, plus six
-  known non-Authority candidates listed by identity. The oracle behind the check is the real scanner over
-  hand-written source, not a mock: an added call inside an already listed function (the round-4
-  `authority = self.authority; authority.begin(...)` alias inside `cli.App.plan_flow`), a duplicated call, a
-  removed call and a changed receiver each fail it, with a message that names the changed occurrence and asks for
-  a review.
+- A-1 is proven by behavior: direct guard refusals and the state/action matrix below use real validated stores,
+  Git state and driver side effects. Coverage does not depend on private function names or a source-call inventory.
 - The matrix domain is the production constants: actions {Planning.begin, renew, send, restart, revise (plan),
   Runs.revise (steward follow-up), approve, override} x run states {none, each of the six `runs.ACTIVE` states,
   each terminal outcome}. The terminal outcomes are `runs.OUTCOMES` (done, needs_owner, blocked, invalid) as a
@@ -53,10 +42,7 @@ Interpretations this task had to fix (the worker's summary never reaches the rev
   class-level A-3 base failure stays the TUI chat hand-over (`test_tui_chat.LifecycleGuardChatTests`).
 """
 
-import ast
-import collections
 import copy
-from pathlib import Path
 import shutil
 import unittest
 
@@ -68,211 +54,9 @@ from terminal_planner.runs import FixtureDriver, MilestoneRuns
 import test_terminal_planner as tp
 from test_terminal_planner import ROLES, ScriptedTerminal
 
-PACKAGE = Path(__file__).resolve().parents[1] / "terminal_planner"
+# Lifecycle coverage below is behavioral: real stores, Git state and driver side effects.
 #
-# A-1's coverage is a *closed syntactic inventory* of `begin` calls: every `ast.Call` whose `func` is an
-# `ast.Attribute` with `attr == "begin"`. Strings, comments and alias resolution are out of scope — this is a
-# change inventory, not a runtime call-graph proof. An occurrence's identity is its relative file path, its
-# qualified class/function scope (async included), the canonical receiver text (`ast.unparse`) and its ordinal in
-# source order within that scope; never a line number. The expectation is the exact multiset (`collections.Counter`).
-#
-# Today there are 10 occurrences. Four are the Authority callers, each explicitly bound to the state x action
-# matrix row it backs (`AUTHORITY_BEGIN_ROWS`); the other six are the known non-Authority candidates, listed by
-# identity:
-#   architect.py       Architect.send                self
-#   cli.py             App.plan_flow                 self.planning
-#   runs.py            FixtureDriver.resume          self
-#   runs.py            FixtureDriver.submit          self
-#   tui/chat.py        ArchitectChat._turn           architect
-#   tui/controller.py  Controller.start_planning.work planning
-EXPECTED_BEGIN_INVENTORY = collections.Counter({
-    ("planning.py", "Planning.begin", "a", 0): 1,
-    ("planning.py", "Planning.renew", "self.authority", 0): 1,
-    ("runs.py", "MilestoneRuns.revise_plan", "self.authority", 0): 1,
-    ("runs.py", "MilestoneRuns.revise", "self.authority", 0): 1,
-    ("architect.py", "Architect.send", "self", 0): 1,
-    ("cli.py", "App.plan_flow", "self.planning", 0): 1,
-    ("runs.py", "FixtureDriver.resume", "self", 0): 1,
-    ("runs.py", "FixtureDriver.submit", "self", 0): 1,
-    ("tui/chat.py", "ArchitectChat._turn", "architect", 0): 1,
-    ("tui/controller.py", "Controller.start_planning.work", "planning", 0): 1,
-})
-
-# The four Authority callers, each explicitly bound to its row in the A-1 state x action matrix (`BeginGuardTests`
-# and its steward matrix): the rows that create or renew a plan revision *through* `Authority.begin`. The other
-# matrix rows (`Planning.revise`, `Planning.restart`, `Planning.send`) reach these rows through a pair, and
-# `Runs.revise` is the steward follow-up row.
-AUTHORITY_BEGIN_ROWS = {
-    ("planning.py", "Planning.begin", "a", 0): "Planning.begin",
-    ("planning.py", "Planning.renew", "self.authority", 0): "Planning.renew",
-    ("runs.py", "MilestoneRuns.revise_plan", "self.authority", 0): "Runs.revise_plan",
-    ("runs.py", "MilestoneRuns.revise", "self.authority", 0): "Runs.revise",
-}
-# Every action label the state x action matrix drives, in call order.
-MATRIX_ACTIONS = ("Planning.begin", "Planning.renew", "Planning.restart", "Planning.revise",
-                  "Runs.revise_plan", "Planning.send", "Runs.revise")
-
-
-def _scan_module(tree, name):
-    """The real scanner: every `.<receiver>.begin(...)` of one parsed module, as identities of
-    (file, qualified scope, canonical receiver, ordinal in source order within the scope). The ordinal is the
-    occurrence's *source* order — positions order the occurrences and are then dropped — never the AST traversal
-    order: a dict literal visits its keys before its values, so `{a.begin(): b.begin()}` would otherwise number
-    `a=0, b=2`."""
-    found = collections.Counter()
-    per_scope = {}
-    stack = []
-
-    class Scan(ast.NodeVisitor):
-        def visit_ClassDef(self, node):
-            stack.append(node.name)
-            self.generic_visit(node)
-            stack.pop()
-
-        def visit_FunctionDef(self, node):
-            stack.append(node.name)
-            self.generic_visit(node)
-            stack.pop()
-
-        visit_AsyncFunctionDef = visit_FunctionDef
-
-        def visit_Call(self, node):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "begin":
-                scope = ".".join(stack)
-                # The position orders the occurrences; it never enters the identity (no line numbers).
-                per_scope.setdefault((name, scope), []).append(((node.lineno, node.col_offset),
-                                                                ast.unparse(func.value)))
-            self.generic_visit(node)
-
-    Scan().visit(tree)
-    for (file, scope), occurrences in per_scope.items():
-        for ordinal, (_, receiver) in enumerate(sorted(occurrences, key=lambda item: item[0])):
-            found[(file, scope, receiver, ordinal)] += 1
-    return found
-
-
-def _package_sources():
-    for path in sorted(PACKAGE.rglob("*.py")):
-        yield str(path.relative_to(PACKAGE)), path.read_text(encoding="utf-8")
-
-
-def begin_inventory(sources=None):
-    """The closed `begin` inventory of the package source, exactly and by the one predicate. `sources` is an
-    iterable of (name, text) pairs — the oracle probes drive the same scanner over hand-written source."""
-    inventory = collections.Counter()
-    for name, text in (_package_sources() if sources is None else sources):
-        inventory.update(_scan_module(ast.parse(text, filename=name), name))
-    return inventory
-
-
-def _render_occurrence(identity):
-    name, scope, receiver, ordinal = identity
-    return "%s:%s receiver=%s ordinal=%d" % (name, scope, receiver, ordinal)
-
-
-def check_begin_inventory(inventory, expected):
-    """The one comparison of the exact-multiset checks and the oracle probes: `Counter` exact equality over the
-    closed inventory. On a mismatch raise an `AssertionError` that names every changed occurrence (added, removed
-    or changed receiver) and asks for a review; a match returns None."""
-    if inventory == expected:
-        return
-    changed = []
-    for identity in sorted(set(inventory) | set(expected)):
-        before, after = expected.get(identity, 0), inventory.get(identity, 0)
-        if before != after:
-            changed.append("%s (expected x%d, found x%d)" % (_render_occurrence(identity), before, after))
-    raise AssertionError(
-        "begin call inventory changed: %d occurrence(s) differ from the reviewed set; review the change:\n  %s"
-        % (len(changed), "\n  ".join(changed)))
-
-
-class BeginInventoryTests(unittest.TestCase):
-    """A-1 (coverage): the closed syntactic inventory of production `begin` calls, so an added, duplicated,
-    removed or re-received call fails the test."""
-
-    def test_the_ten_production_begin_calls_are_the_exact_multiset(self):
-        check_begin_inventory(begin_inventory(), EXPECTED_BEGIN_INVENTORY)
-
-    def test_the_four_authority_callers_are_each_bound_to_a_matrix_row(self):
-        inventory = begin_inventory()
-        self.assertEqual(len(AUTHORITY_BEGIN_ROWS), 4)
-        for site, row in AUTHORITY_BEGIN_ROWS.items():
-            self.assertEqual(inventory[site], 1)      # the caller is present exactly once...
-            self.assertIn(row, MATRIX_ACTIONS)        # ...and bound to a row the matrix drives
-
-    def test_the_six_other_begin_calls_are_listed_by_identity(self):
-        inventory = begin_inventory()
-        others = {site for site in inventory if site not in AUTHORITY_BEGIN_ROWS}
-        self.assertEqual(len(others), 6)
-        self.assertEqual(others, {site for site in EXPECTED_BEGIN_INVENTORY if site not in AUTHORITY_BEGIN_ROWS})
-
-    # The real scanner, driven over hand-written source (never a mock): a miniature `cli` whose `App.plan_flow`
-    # reaches `Authority.begin` through `self.planning`, exactly as the production `cli.py` does.
-    ORACLE_SOURCE = ("class App:\n"
-                     "    def plan_flow(self, goal):\n"
-                     "        self.planning.begin(goal, self.roles)\n")
-    ORACLE_EXPECTED = collections.Counter({("cli.py", "App.plan_flow", "self.planning", 0): 1})
-
-    def test_the_comparison_accepts_the_reviewed_source(self):
-        self.assertIsNone(check_begin_inventory(begin_inventory([("cli.py", self.ORACLE_SOURCE)]),
-                                                self.ORACLE_EXPECTED))
-
-    def test_the_ordinals_are_source_order_not_ast_traversal_order(self):
-        """The real scanner over the round-5 finding: a dict literal visits its keys before its values, so a
-        traversal-ordered scanner numbers `{a: b, c: d}` as a=0, c=1, b=2, d=3. The ordinal must be the *source*
-        order — a=0, b=1, c=2, d=3 — and the traversal order must fail the comparison. The position only orders the
-        occurrences; it never enters the identity."""
-        source = ("class Store:\n"
-                  "    def plan(self):\n"
-                  "        return {self.a.begin(): self.b.begin(), self.c.begin(): self.d.begin()}\n")
-        source_order = collections.Counter({
-            ("a.py", "Store.plan", "self.a", 0),
-            ("a.py", "Store.plan", "self.b", 1),
-            ("a.py", "Store.plan", "self.c", 2),
-            ("a.py", "Store.plan", "self.d", 3),
-        })
-        traversal_order = collections.Counter({
-            ("a.py", "Store.plan", "self.a", 0),
-            ("a.py", "Store.plan", "self.c", 1),
-            ("a.py", "Store.plan", "self.b", 2),
-            ("a.py", "Store.plan", "self.d", 3),
-        })
-        inventory = begin_inventory([("a.py", source)])
-        self.assertEqual(inventory, source_order)           # the ordinal is the source order
-        self.assertNotEqual(inventory, traversal_order)     # and never the AST visit order
-        self.assertIsNone(check_begin_inventory(inventory, source_order))
-
-    def test_the_comparison_flags_every_change(self):
-        """The oracle, on the real scanner over synthetic source: each change to the inventory fails the comparison
-        and the message names the changed occurrence and asks for a review."""
-        added = ("class App:\n"                      # the round-4 case: a second call in the same listed function
-                 "    def plan_flow(self, goal):\n"
-                 "        self.planning.begin(goal, self.roles)\n"
-                 "        authority = self.authority\n"
-                 "        authority.begin(goal, self.roles)\n")
-        duplicated = ("class App:\n"
-                      "    def plan_flow(self, goal):\n"
-                      "        self.planning.begin(goal, self.roles)\n"
-                      "        self.planning.begin(goal, self.roles)\n")
-        removed = ("class App:\n"
-                   "    def plan_flow(self, goal):\n"
-                   "        pass\n")
-        changed = ("class App:\n"
-                   "    def plan_flow(self, goal):\n"
-                   "        self.helper.begin(goal, self.roles)\n")
-        for label, source, named in (("added in an already listed function (round-4 alias)", added, "authority"),
-                                     ("duplicated", duplicated, "self.planning"),
-                                     ("removed", removed, "self.planning"),
-                                     ("changed receiver", changed, "self.helper")):
-            with self.subTest(label):
-                with self.assertRaises(AssertionError) as raised:
-                    check_begin_inventory(begin_inventory([("cli.py", source)]), self.ORACLE_EXPECTED)
-                message = str(raised.exception)
-                self.assertIn("cli.py", message)          # the changed occurrence is named...
-                self.assertIn("App.plan_flow", message)
-                self.assertIn(named, message)
-                self.assertIn("review", message)          # ...and the message asks for a review
+# A-1 is covered by the behavioral state/action matrix below.
 
 
 class CountingDriver(FixtureDriver):

@@ -10,10 +10,18 @@ def run(project, state_root, fixture_id=None, driver_factory=None, worktrees=Non
     controller = Controller.for_project(project, state_root, fixture_id=fixture_id, driver_factory=driver_factory,
                                         worktrees=worktrees, readiness=readiness, install=install, login=login,
                                         role_preferences=role_preferences, engine_factory=engine_factory,
-                                        profile=profile)
-    # A `--fixture ID` session has no architect chat: no ArchitectChat/ArchitectStore, no provider or tool probe
+                                        profile=profile, scripted=fixture_id is not None)
+    # A `--fixture ID` session has a scripted architect over its own fixture store: no provider, no tool probe
     # (R-2). `fixture_id is not None` classifies the mode, never its truthiness (R-1).
-    app = ZplanApp(controller, architect=fixture_id is None)
+    if fixture_id is None:
+        app = ZplanApp(controller)
+    else:
+        from ..architect import FixtureArchitect, fixture_store
+        from .chat import ChatHeader
+        store = fixture_store(project, state_root, fixture_id)
+        app = ZplanApp(controller, chat_store=store, chat_prepare=lambda _: (FixtureArchitect(store), ChatHeader()),
+                       chat_binding=lambda _: ("", ""))
+        app.origin_told = True
     try:
         app.run()
         return app.return_code or 0

@@ -263,7 +263,7 @@ class IndependenceTests(ParallelRunsTest):
             self.assertEqual(r2["outcome"], "done")
             service.end(r2)
             self.assertEqual(runs.run_state(r2), "awaiting_merge")
-            service.merge(r2)
+            service.merge(r2, allow_unverified=True)
             self.assertEqual(r2["delivery"], "integrated")
             self.assertEqual(runs.run_state(r1), "running")
             service.stop(r1)

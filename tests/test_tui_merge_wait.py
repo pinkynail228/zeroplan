@@ -8,6 +8,10 @@ Interpretations: the wait lives in `Controller.merge`, so the end modal and the 
 pending critic is recognised by its catalog code in the refused verdict `Delivery.merge` returns. The status line is
 `App.pending_text()` (the plan view's `…` line). Only a second merge is refused while one waits; other actions run."""
 
+import asyncio
+from pathlib import Path
+import shutil
+import tempfile
 import threading
 import time
 import unittest
@@ -23,6 +27,13 @@ from test_tui_milestones import MilestoneShell
 from tui_support import HAVE_TEXTUAL
 
 
+def fake_app(case, delivery):
+    """The app a fake delivery stands in: a results directory of its own, for the results every merge leaves."""
+    directory = tempfile.mkdtemp(prefix="zs-merge-wait-")
+    case.addCleanup(shutil.rmtree, directory, True)
+    return SimpleNamespace(delivery=delivery, authority=SimpleNamespace(directory=Path(directory)))
+
+
 def pending():
     return Blocked("The merge check did not finish within its slice; repeat the merge.", family="merge.critic_pending")
 
@@ -35,6 +46,7 @@ class MergeWaitController(unittest.TestCase):
     while the wait pauses."""
 
     def run_merge(self, verdicts, slice=0.2):
+        case = self
         log, ran, answers, reached = [], [], [], threading.Event()
 
         class Delivery:
@@ -44,17 +56,22 @@ class MergeWaitController(unittest.TestCase):
             def latest(self, milestone):
                 return None
 
-            def merge(self, r):
+            def merge(self, r, *, allow_unverified=False):
+                case.assertTrue(allow_unverified)  # only the explicit owner's merge action opts in
                 log.append(time.monotonic())
                 if len(log) == 1:
                     controller.post("probe", lambda app: ran.append(len(log)))
-                return verdicts[len(log) - 1]
+                verdict = verdicts[len(log) - 1]
+                if isinstance(verdict, Exception):
+                    raise verdict
+                return verdict
 
-        controller = tui_controller.Controller(lambda stack: SimpleNamespace(delivery=Delivery()), "identity")
+        controller = self.controller = tui_controller.Controller(
+            lambda stack: fake_app(self, Delivery()), "identity")
         controller.start()
         self.addCleanup(controller.stop)
         with patch.object(tui_controller, "CRITIC_SLICE", slice):
-            controller.merge(SimpleNamespace(milestone="M1"), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
+            controller.merge(SimpleNamespace(milestone="M1", attempt=1), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
             self.assertTrue(reached.wait(10), "the merge never answered")
         return log, ran, answers
 
@@ -66,6 +83,20 @@ class MergeWaitController(unittest.TestCase):
         self.assertEqual(len(log), 1)
         self.assertEqual((answers[0][0].kind, answers[0][0].lines, answers[0][1]), ("refused", (quoted.line,), None))
 
+    def test_a_merge_that_raises_leaves_its_own_fate(self):
+        """V2h: the owner's merge result takes `_fate` of the exception, as the architect's does: a RuntimeError is
+        `failed`/unknown_error, a Blocked is `refused` with its own family; the caller's text is unchanged."""
+        _, _, answers = self.run_merge([RuntimeError("boom")])
+        self.assertEqual(answers, [(None, "RuntimeError: boom [code: unknown_error]")])
+        result = self.controller.results()[-1]
+        self.assertEqual((result["operation"], result["outcome"], result["family"], result["origin"], result["lines"]),
+                         ("merge", "failed", "unknown_error", "owner", ["RuntimeError: boom [code: unknown_error]"]))
+        _, _, answers = self.run_merge([Blocked("The attempt moved.", family="milestone.critic_blocked")])
+        self.assertIsNone(answers[0][0])
+        result = self.controller.results()[-1]
+        self.assertEqual((result["outcome"], result["family"]), ("refused", "milestone.critic_blocked"))
+        self.assertEqual(result["lines"], answers[0][1].split("\n"))
+
     def test_pending_calls_are_a_slice_apart_with_the_queue_served_between(self):
         """A pending refusal that returns at once does not spin: three calls take two slices (W3)."""
         pending = Merge("refused", "Not done: pending", False, family="merge.critic_pending")
@@ -75,6 +106,10 @@ class MergeWaitController(unittest.TestCase):
         self.assertTrue(all(b - a >= 0.2 for a, b in zip(log, log[1:])), [b - a for a, b in zip(log, log[1:])])
         self.assertEqual(ran[0], 1)  # the job queued during the first call ran before the second one
         self.assertEqual(answers[0][0].kind, "integrated")
+        # v2b A2: three calls, one result: the owner's, done, with the merge's own line, nothing for the waits
+        [result] = self.controller.results()
+        self.assertEqual((result["operation"], result["outcome"], result["origin"], result["subject"], result["lines"]),
+                         ("merge", "done", "owner", {"milestone": "M1", "attempt": 1}, ["Merged: M1 → main."]))
 
     def test_no_repeat_starts_once_a_quit_began(self):
         """C6c X2: a repeat that waited behind a watch longer than the slice and meets a begun quit does not call
@@ -90,23 +125,27 @@ class MergeWaitController(unittest.TestCase):
             def latest(self, milestone):
                 return None
 
-            def merge(self, r):
+            def merge(self, r, *, allow_unverified=False):
+                if not allow_unverified:
+                    raise AssertionError("explicit owner merge must carry its unverified decision")
                 calls.append(1)
                 controller.post("watch", lambda app: (queued.set(), release.wait(10)))
                 return Merge("refused", "Not done: pending", False, family="merge.critic_pending")
 
-        controller = tui_controller.Controller(lambda stack: SimpleNamespace(delivery=Delivery()), "identity")
+        controller = self.controller = tui_controller.Controller(
+            lambda stack: fake_app(self, Delivery()), "identity")
         controller.start()
         self.addCleanup(controller.stop)
         self.addCleanup(release.set)
         with patch.object(tui_controller, "CRITIC_SLICE", 0.1):
-            controller.merge(SimpleNamespace(milestone="M1"), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
+            controller.merge(SimpleNamespace(milestone="M1", attempt=1), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
             self.assertTrue(queued.wait(10))
             time.sleep(0.3)  # the repeat is queued behind the watch and is older than a slice when it runs
             controller.begin_closing()
             release.set()
             self.assertTrue(reached.wait(10), "the merge never answered")
         self.assertEqual((len(calls), answers), (1, [(None, "zplan is closing; the merge was not repeated.")]))
+        self.assertEqual(self.controller.results(), [])  # v2b: a closing wait leaves no result
 
 
     def run_repeat(self, quit_in):
@@ -124,18 +163,20 @@ class MergeWaitController(unittest.TestCase):
             def latest(self, milestone):
                 return None
 
-            def merge(self, r):
+            def merge(self, r, *, allow_unverified=False):
+                if not allow_unverified:
+                    raise AssertionError("explicit owner merge must carry its unverified decision")
                 calls.append(1)
                 if quit_in == "merge" and len(calls) == 2:
                     sealed.append(controller.begin_closing())
                     return Merge("integrated", "Merged: M1 -> main.", False)
                 return Merge("refused", "Not done: pending", False, family="merge.critic_pending")
 
-        controller = tui_controller.Controller(lambda stack: SimpleNamespace(delivery=Delivery()), "identity")
+        controller = tui_controller.Controller(lambda stack: fake_app(self, Delivery()), "identity")
         controller.start()
         self.addCleanup(controller.stop)
         with patch.object(tui_controller, "CRITIC_SLICE", 0.1):
-            controller.merge(SimpleNamespace(milestone="M1"), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
+            controller.merge(SimpleNamespace(milestone="M1", attempt=1), lambda outcome, error: (answers.append((outcome, error)), reached.set()))
             self.assertTrue(reached.wait(10), "the merge never answered")
         return calls, answers, sealed
 
@@ -195,7 +236,6 @@ class MergeWaitShell(MilestoneShell):
         async with self.shell(size=(120, 40), follow=True) as pilot:
             log = await self.merge_end(pilot, [pending(), pending()], hold)
             await self.press_button(pilot, "merge")
-            await self.press_button(pilot, "yes")
             await self.until(pilot, lambda: "merge check" in self.modal_flat())  # M2: the first slice ended pending
             for text in (self.modal_flat(), self.app.pending_text()):
                 self.assertIn("merge check", text)
@@ -209,7 +249,7 @@ class MergeWaitShell(MilestoneShell):
             self.assertIn("Already waiting", self.modal_flat())
             self.assertEqual(log.count("merge"), 2)
             hold.set()
-            await self.shows(pilot, "Merged: M1 → main.")  # M1: three merge calls, one confirm
+            await self.shows(pilot, "Merged: M1 → main.")  # M1: three merge calls, one press
             self.assertEqual(log.count("merge"), 3)
             self.assertNotIn("Not done", self.modal_flat())
             self.assertIsNone(self.app.merge_waiting)
@@ -243,7 +283,6 @@ class MergeWaitShell(MilestoneShell):
             await self.merge_end(pilot, [pending(), Blocked("The merge critic blocked the candidate.",
                                                            family="milestone.critic_blocked")], hold)
             await self.press_button(pilot, "merge")
-            await self.press_button(pilot, "yes")
             await self.until(pilot, lambda: "merge check" in self.modal_flat())
             await pilot.press("escape")
             await pilot.pause()
@@ -257,7 +296,7 @@ class MergeWaitShell(MilestoneShell):
         `blocked` verdict and an `open` one (a conflict that left no line) each replace the waiting note with their own line."""
         from terminal_planner.tui.card_kinds import NOT_STARTED_BELOW  # Rich-bound: only with Textual
         self.approve(running=False)
-        gone = SimpleNamespace(is_attached=False, end=SimpleNamespace(milestone="M1"))
+        gone = SimpleNamespace(is_attached=False, end=SimpleNamespace(milestone="M1", attempt=1))
         waiting = "zplan merges when it says go"
         async with self.shell(size=(120, 40), follow=True) as pilot:
             await self.loaded(pilot)
@@ -270,6 +309,26 @@ class MergeWaitShell(MilestoneShell):
                 self.app.settled(gone, outcome, None)
                 self.assertIn(expected, str(self.app.run_note))
                 self.assertNotIn(waiting, str(self.app.run_note))
+
+    async def test_the_architects_merge_result_shows_once_on_the_status_line_and_the_owners_does_not(self):
+        """v2b A1/A2: a result of origin architect reaches the screen through `Controller.on_result` and shows its
+        lines once; the owner's own results (the merge card and end screen say them) are never sent there.
+
+        Interpretation: «the status line» is the note line `say_note` paints; the hook carries merge results only."""
+        self.approve(running=False)
+        async with self.shell(size=(120, 40), follow=True) as pilot:
+            await self.loaded(pilot)
+            controller = self.app.controller
+            line = "Merged: M1 → main. No merge check or critic ran: the profile's merge gate is off."
+            await asyncio.to_thread(controller._result, "merge", {"milestone": "M1", "attempt": 1},
+                                    "architect", "done", "", [line])
+            await self.shows(pilot, "No merge check or critic ran")
+            self.assertEqual(str(self.app.run_note), line)
+            self.app.run_note = ""
+            await asyncio.to_thread(controller._result, "merge", {"milestone": "M1", "attempt": 1},
+                                    "owner", "done", "", ["Merged: M1 → main."])
+            await pilot.pause()
+            self.assertEqual(str(self.app.run_note), "")
 
 
 if __name__ == "__main__":

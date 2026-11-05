@@ -165,7 +165,7 @@ def identifiers():
                 walk(item)
 
     walk(engine.planner_graph())
-    walk(milestone.milestone_graph(1))
+    walk(milestone.milestone_graph())
     # zplan.* worker refs are zplan's own; bare node names are not identifiers.
     return sorted(i for i in found if "." in i and not i.startswith("zplan."))
 

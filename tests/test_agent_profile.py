@@ -16,6 +16,8 @@ import contextlib
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -243,30 +245,56 @@ class FaultTests(HomeTestCase):
                 if case:
                     self.assertEqual((home / "config.toml.bak").read_bytes(), OLDER)
 
-    def test_a_held_lock_is_the_busy_refusal_and_writes_nothing_else(self):
-        seed_config(self.home, OLDER)
+    def test_two_threads_of_one_process_take_turns_without_a_false_refusal(self):
+        """A1 (u9f): the second thread waits for the first and finds the profile current; neither raises."""
         entered, release = threading.Event(), threading.Event()
-        real, results = agent_profile._apply, []
+        real, results, errors = agent_profile._apply, [], []
 
         def paused(home, data, current):
             entered.set()
             self.assertTrue(release.wait(10), "writer 1 was never released")
             return real(home, data, current)
 
+        def run():
+            try:
+                results.append(agent_profile.ensure(self.home))
+            except Blocked as error:
+                errors.append(error)
+
         with patch.object(agent_profile, "_apply", side_effect=paused):
-            thread = threading.Thread(target=lambda: results.append(agent_profile.ensure(self.home)))
-            thread.start()
+            first = threading.Thread(target=run)
+            first.start()
             self.assertTrue(entered.wait(10), "writer 1 never entered the critical section")
+            second = threading.Thread(target=run)
+            second.start()
+            second.join(0.5)
+            self.assertTrue(second.is_alive(), "writer 2 did not wait for writer 1")
+            release.set()
+            first.join(10)
+            second.join(10)
+            self.assertFalse(first.is_alive() or second.is_alive())
+        self.assertEqual((errors, results, listing(self.home)),
+                         ([], ["written", "current"], [".zplan-profile.lock", "config.toml"]))
+
+    def test_a_lock_held_by_another_process_is_the_busy_refusal(self):
+        """A2: a flock held by a child process still refuses with `setup.agent_home`; once released `ensure` works."""
+        seed_config(self.home, OLDER)
+        self.home.chmod(0o700)
+        (self.home / agent_profile.LOCK_NAME).touch()
+        code = ("import fcntl, sys; f = open(sys.argv[1], 'a'); fcntl.flock(f, fcntl.LOCK_EX); "
+                "print('held', flush=True); sys.stdin.read()")
+        child = subprocess.Popen([sys.executable, "-c", code, str(self.home / agent_profile.LOCK_NAME)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "held")
             with self.assertRaises(Blocked) as caught:
                 agent_profile.ensure(self.home)
-            self.assertEqual((caught.exception.family, listing(self.home)),
-                             ("setup.agent_home", [".zplan-profile.lock", "config.toml"]))
-            release.set()
-            thread.join(10)
-            self.assertFalse(thread.is_alive())
-        self.assertEqual((results, agent_profile.ensure(self.home), (self.home / "config.toml").read_bytes(),
-                          (self.home / "config.toml.bak").read_bytes(), listing(self.home)),
-                         (["replaced"], "current", agent_profile.packaged(), OLDER, RESIDUAL))
+            self.assertEqual((caught.exception.family, listing(self.home), (self.home / "config.toml").read_bytes()),
+                             ("setup.agent_home", [".zplan-profile.lock", "config.toml"], OLDER))
+        finally:
+            child.communicate(timeout=10)
+        self.assertEqual((agent_profile.ensure(self.home), (self.home / "config.toml.bak").read_bytes()),
+                         ("replaced", OLDER))
 
 
 class MarkerTests(unittest.TestCase):

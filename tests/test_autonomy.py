@@ -86,25 +86,31 @@ class DecideTests(unittest.TestCase):
                 with patch.object(autonomy, "AUTOMATIC", False):
                     self.assertEqual(autonomy.decide(level, "edit"), "allow")
 
-    def test_a_merge_follows_the_level_and_the_risk_tier_not_the_gate(self):
-        """p2a A1: auto allows a merge at any tier and gate; supervised allows it below high and asks on high and on a
-        tier it does not know (none included); manual asks. The merge gate never changes the answer."""
+    def test_an_automatic_merge_requires_checks_and_then_follows_the_risk_tier(self):
+        """Without a required gate the architect must ask the owner; no autonomy level auto-merges unverified work."""
         for gate in (None, "off", "required"):
             for tier in ("low", "medium", "high", "odd", None):
                 with self.subTest(gate=gate, tier=tier):
-                    self.assertEqual(autonomy.decide("auto", "merge", gate, tier), "allow")
+                    verified = gate == "required"
+                    self.assertEqual(autonomy.decide("auto", "merge", gate, tier),
+                                     "allow" if verified else "ask")
                     self.assertEqual(autonomy.decide("supervised", "merge", gate, tier),
-                                     "allow" if tier in ("low", "medium") else "ask")
+                                     "allow" if verified and tier in ("low", "medium") else "ask")
                     self.assertEqual(autonomy.decide("manual", "merge", gate, tier), "ask")
                     self.assertEqual(autonomy.decide("yolo", "merge", gate, tier), "ask")
 
-    def test_with_the_gate_on_an_approve_is_allowed_for_auto_only(self):
-        """A5t2a C4: with the gate on, only auto lets the architect approve the plan; supervised and manual plan
-        approvals stay the owner's."""
+    def test_approve_asks_at_every_level_unless_the_owner_approved_the_chain(self):
+        """P4a: the first revision of every chain is the owner's at every level; a later revision of a chain the
+        owner approved is the architect's at auto and supervised only."""
+        for gate in (True, False):
+            with patch.object(autonomy, "AUTOMATIC", gate):
+                for level in ("auto", "supervised", "manual"):
+                    self.assertEqual(autonomy.decide(level, "approve"), "ask")
+                    self.assertFalse(autonomy.approves_alone(level, False))
         with patch.object(autonomy, "AUTOMATIC", True):
-            self.assertEqual(autonomy.decide("auto", "approve"), "allow")
-            self.assertEqual(autonomy.decide("supervised", "approve"), "ask")
-            self.assertEqual(autonomy.decide("manual", "approve"), "ask")
+            self.assertTrue(autonomy.approves_alone("auto", True))
+            self.assertTrue(autonomy.approves_alone("supervised", True))
+            self.assertFalse(autonomy.approves_alone("manual", True))
 
     def test_an_unknown_level_or_action_asks(self):
         self.assertEqual(autonomy.decide("yolo", "start"), "ask")

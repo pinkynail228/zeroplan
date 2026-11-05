@@ -172,7 +172,7 @@ class ChatInputShellTests(LiveShell):
             screen = self.app.screen
             screen.intro = None
             field, prompt, pane = (screen.query_one(name) for name in ("#input", "#prompt-box", "#chat-pane"))
-            with patch.object(self.app, "send_chat", send):
+            with patch.object(self.app, "send_chat", send), patch.object(self.app, "keep_goal", return_value=False):
                 self.assertEqual(field.size.height, 1)
                 heights = []
                 for line in range(12):

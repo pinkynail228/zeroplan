@@ -15,7 +15,7 @@ import urllib.request
 
 from devtools import driver_qual
 from terminal_planner import milestone, runs, toolchain
-from terminal_planner.authority import Blocked, canonical
+from terminal_planner.authority import TASK_ROUNDS_MAX, Blocked, canonical
 from terminal_planner.engine import fixture_proposal
 from terminal_planner.setup import default_roles, tool_paths
 
@@ -138,7 +138,11 @@ def interpret(case, graph, value, provider, error=None):
             case.assertIsNotNone(selected, name)
             result = run(selected, state)
         elif kind == "loop":
-            for _ in range(node["maxIterations"]):
+            # The engine's rule: a loop with `maxIterationsInput` runs at most min(maxIterations, the state value there).
+            bound = node["maxIterations"]
+            if "maxIterationsInput" in node:
+                bound = min(bound, state[node["maxIterationsInput"][0]])
+            for _ in range(bound):
                 result = run(node["body"], state)
                 if result is not None or guard(node["until"]):
                     channels[(name, "group")] = {"terminated": "converged"}
@@ -250,8 +254,8 @@ class ManifestTests(unittest.TestCase):
         milestone.build_manifest(driver_qual.proposal(12), "M1", 1)
         with self.assertRaisesRegex(Blocked, "M1 has 13 tasks; the driver runs at most 12. Split the milestone"):
             milestone.build_manifest(driver_qual.proposal(13), "M1", 1)
-        with self.assertRaises(Blocked):
-            milestone.milestone_graph(13)
+        baseline, _ = milestone.build_manifest(driver_qual.proposal(12), "M1", 1)
+        self.assertEqual(milestone.milestone_input(baseline)["taskLoopBound"], milestone.task_loop_ceiling())
         with self.assertRaisesRegex(Blocked, "not in the approved plan"):
             milestone.build_manifest(fixture_proposal(), "M9", 1)
         grown = copy.deepcopy(self.baseline)
@@ -455,18 +459,26 @@ class ManifestTests(unittest.TestCase):
 
 class GraphStructureTests(unittest.TestCase):
     def test_bounds_are_fixed_by_the_formula(self):
-        for tasks in range(milestone.MAX_INITIAL_TASKS + 1):
-            loops = {n["name"]: n["maxIterations"] for n in nodes(milestone.milestone_graph(tasks)["root"]) if n["kind"] == "loop"}
-            self.assertEqual(loops, {"task_loop": 2 * (tasks + 6) + 2, "review_loop": 4, "repair_loop": 3, "empty_repair_loop": 3,
-                                     **{prefix + name: milestone.FINAL_ATTEMPTS for prefix in ("", "empty_")
-                                        for name in ("final_verify_loop", "final_reverify_loop")}})
-            self.assertLessEqual(max(loops.values()), 100)
+        loops = {n["name"]: n["maxIterations"] for n in nodes(milestone.milestone_graph()["root"]) if n["kind"] == "loop"}
+        self.assertEqual(loops, {"task_loop": 2 * (milestone.MAX_INITIAL_TASKS + 6) + 2, "review_loop": 1 + TASK_ROUNDS_MAX,
+                                 "repair_loop": 3, "empty_repair_loop": 3,
+                                 **{prefix + name: milestone.FINAL_ATTEMPTS for prefix in ("", "empty_")
+                                    for name in ("final_verify_loop", "final_reverify_loop")}})
+        self.assertLessEqual(max(loops.values()), 100)
+        inputs = {n["name"]: n["maxIterationsInput"] for n in nodes(milestone.milestone_graph()["root"])
+                  if n["kind"] == "loop" and "maxIterationsInput" in n}
+        self.assertEqual(inputs, {"task_loop": ["taskLoopBound"], "review_loop": ["reviewLoopBound"]})
+        for tasks in range(1, milestone.MAX_INITIAL_TASKS + 1):
+            baseline, _ = milestone.build_manifest(driver_qual.proposal(tasks), "M1", 1)
+            value = milestone.milestone_input(baseline)
+            self.assertEqual((value["taskLoopBound"], value["reviewLoopBound"]),
+                             (2 * (tasks + 6) + 2, milestone.TASK_ITERATIONS))
 
     def test_select_is_a_verifier_without_signals_and_the_writers_stay_steps(self):
         """H2 R2/R3: `select` only runs the checker and reports its stdout, so it is a `verifier` (read-only guidance,
         no dependency-install guidance) with empty signals, a diagnostic, the same `task` output and write binding;
         the nodes that edit the workspace stay steps. A scripted run answers it with a non-null output."""
-        graph = milestone.milestone_graph(1)
+        graph = milestone.milestone_graph()
         every = {n["name"]: n for n in nodes(graph["root"]) if n["kind"] in EXECUTABLES}
         select = every["select"]
         self.assertEqual((select["kind"], select["signals"], select["diagnostic"]), ("verifier", {}, milestone.record("message")))
@@ -485,7 +497,7 @@ class GraphStructureTests(unittest.TestCase):
         input.task fails on a realistic path or the change breaks existing behaviour on a realistic path, and every
         other remark is a non-blocking `note:` - and the worker instruction repairs the findings of a rejected review
         while leaving `note:` items. The bar's sentences are asserted, not a whole-prompt snapshot."""
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
         bodies = {node["name"]: node["instructions"].split("\n", 1)[1]
                   for node in nodes(graph["root"]) if node["kind"] == "verifier"}
         for name in ("acceptance_review", "code_review"):
@@ -510,7 +522,7 @@ class GraphStructureTests(unittest.TestCase):
                      "existing tests do not cover gets a relevant test (extend an existing test first)",
                      "a project's first included", "docs, copy or config files alone gets no new test"):
             self.assertIn(part, rule)
-        by_name = {n["name"]: n for n in nodes(milestone.milestone_graph(2)["root"])}
+        by_name = {n["name"]: n for n in nodes(milestone.milestone_graph()["root"])}
         for name in ("worker", "repair", "empty_repair"):
             self.assertIn(rule, by_name[name]["instructions"], name)
         for node in by_name.values():
@@ -528,7 +540,7 @@ class GraphStructureTests(unittest.TestCase):
         (preset 2 -> 3); a milestone built without a frozen profile - a version 1 revision or an older version 2 one -
         keeps the fixed TASK_ITERATIONS (the current 4). `runs.review_rounds` reads the frozen snapshot (the value
         `process.freeze_plan` stores and `authority.validate_frozen` accepts). Interpretation: the bound is the loop
-        graph's maxIterations only; the preview's "ремонтов на задачу" and the run view's "ремонт i/n" labels stay
+        input's reviewLoopBound only; the preview's "ремонтов на задачу" and the run view's "ремонт i/n" labels stay
         untouched - the task's non-goals exclude any UI change, and `delivery.py`/`node_label` are outside the write
         set."""
         self.assertEqual(milestone.TASK_ITERATIONS, 4)
@@ -537,9 +549,9 @@ class GraphStructureTests(unittest.TestCase):
         self.assertEqual(milestone.review_iterations(None), 4)
         for task_rounds, expected in ((1, 2), (2, 3), (5, 6)):
             with self.subTest(task_rounds=task_rounds):
-                graph = milestone.milestone_graph(2, rounds=milestone.review_iterations(task_rounds))
-                loop = next(n for n in nodes(graph["root"]) if n["name"] == "review_loop")
-                self.assertEqual(loop["maxIterations"], expected)
+                baseline, _ = milestone.build_manifest(fixture_proposal(), "M1", 1)
+                value = milestone.milestone_input(baseline, rounds=milestone.review_iterations(task_rounds))
+                self.assertEqual(value["reviewLoopBound"], expected)
         frozen = {"frozen": {"plan_rounds": 3, "rules": [], "config_digest": "a" * 64, "task_rounds": 2}}
         older = {"frozen": {"plan_rounds": 3, "rules": [], "config_digest": "a" * 64}}
         self.assertEqual(runs.review_rounds(frozen), 3)
@@ -547,7 +559,7 @@ class GraphStructureTests(unittest.TestCase):
         self.assertEqual(runs.review_rounds({"version": 1, "roles": {}}), 4)
 
     def test_exits_signals_and_error_branches(self):
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
         every = list(nodes(graph["root"]))
         succeed = {n["name"]: n for n in every if n["kind"] == "succeed"}
         signals = {"done": "doneSignal", "repaired": "doneSignal", "final_exhausted": "blockedSignal",
@@ -588,12 +600,12 @@ class GraphStructureTests(unittest.TestCase):
         business exit, before the repair (final_verify) or ends the repair loop (final_reverify)."""
         self.assertEqual(milestone.FINAL_VERDICTS, ["accepted", "rejected", "incomplete"])
         with mock.patch.object(milestone, "FINAL_VERDICTS", ["accepted", "rejected", "unfinished"]):
-            patched = milestone.milestone_graph(1)
+            patched = milestone.milestone_graph()
         self.assertEqual(patched["initialInput"]["fields"]["finalVerdict"]["type"]["values"],
                          ["pending", "accepted", "rejected", "unfinished"])
         self.assertEqual({n["signals"]["verdict"][-1] for n in nodes(patched["root"]) if n["name"].endswith("final_verify")
                           or n["name"].endswith("final_reverify")}, {"unfinished"})
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
         by_name = {n["name"]: n for n in nodes(graph["root"])}
         for prefix in ("", "empty_"):
             for name in ("final_verify", "final_reverify"):
@@ -625,7 +637,7 @@ class GraphStructureTests(unittest.TestCase):
 
         Interpretation: the former root sequence `milestone` keeps its children under the new name `milestone_start`
         (node names are unique and the root keeps the name `milestone`)."""
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
         by_name = {n["name"]: n for n in nodes(graph["root"])}
         root = graph["root"]
         self.assertEqual((root["name"], [c["name"] for c in root["children"]]), ("milestone", ["preflight", "preflight_result"]))
@@ -663,7 +675,7 @@ class GraphStructureTests(unittest.TestCase):
         self.assertEqual(review["otherwise"]["name"], "steward_apply")
 
     def test_failed_selection_cannot_reach_a_writer(self):
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
 
         def routes(node, trail=()):
             # (node, choice routes taken to reach it): (choice name, branch labels or "otherwise").
@@ -715,7 +727,7 @@ class GraphStructureTests(unittest.TestCase):
         built by the same `final_stage("empty_")` helper), so a resumed attempt with every task done no longer times
         out the same way. The long-node set below therefore names all four: the test fails if any goes back to 20 min.
         """
-        graph = milestone.milestone_graph(2, tool="zplan-check")
+        graph = milestone.milestone_graph(tool="zplan-check")
         executables = [n for n in nodes(graph["root"]) if n["kind"] in EXECUTABLES]
         names = [n["name"] for n in executables]
         self.assertEqual(sorted(names), sorted(milestone.ROLES))
@@ -736,15 +748,28 @@ class GraphStructureTests(unittest.TestCase):
             self.assertEqual(binding["sessionScope"], {"reviewer": "execution", "worker": "node_instance", "steward": "execution"}[role])
             self.assertEqual(binding["model"], default_roles()[role]["model"])
 
+    def test_every_runtime_zplan_submits_keeps_active_memory_off(self):
+        """P1 (Zeroshot 11): Active Memory runs a postmortem after every run and recalls its lessons into later
+        prompts, on by default; every runtime document zplan submits turns both off."""
+        from terminal_planner import engine
+        role = {"model": "m", "effort": "high"}
+        roles = {name: role for name in ("planner", "plan_verifier", "proposer", "critic", "worker", "reviewer", "steward")}
+        for runtime in (milestone.milestone_runtime(roles), engine.goldfish_runtime(roles), engine.merge_critic_runtime(roles),
+                        engine.task_gate_runtime(roles), engine.planner_runtime(roles), engine.planner_runtime_v2(roles)):
+            self.assertEqual(runtime["activeMemory"], {"repository": False, "graph": False})
+            self.assertEqual(runtime["globalAgents"], {"postmortem": {"enabled": False}})
+
     def test_input_matches_initial_state(self):
         baseline, _ = milestone.build_manifest(fixture_proposal(), "M1", 1)
         value = milestone.milestone_input(baseline, tool="zplan-check")
-        fields = milestone.milestone_graph(1)["initialInput"]["fields"]
+        fields = milestone.milestone_graph()["initialInput"]["fields"]
         self.assertEqual(set(value), set(fields))
         for name, field in fields.items():
             self.assertTrue(field["required"])
             if field["type"]["kind"] == "enum":
                 self.assertIn(value[name], field["type"]["values"])
+            elif field["type"]["kind"] == "integer":
+                self.assertIs(type(value[name]), int)
             else:
                 self.assertIsInstance(value[name], str)
         self.assertEqual((value["doneSignal"], value["needsOwnerSignal"], value["blockedSignal"]), ("done", "needs_owner", "blocked"))
@@ -791,7 +816,7 @@ class FlowTests(unittest.TestCase):
                 finals = [n for n in calls if "final" in n or "repair" in n or "scope" in n]
                 if exit in ("needs_owner", "steward_blocked", "task_loop_exhausted"):
                     self.assertEqual(finals, [], "needs_owner/blocked bypass the final phase")
-        graph = milestone.milestone_graph(2)
+        graph = milestone.milestone_graph()
         self.assertEqual(exits, {n["name"] for n in nodes(graph["root"]) if n["kind"] == "succeed"})
 
     def test_incomplete_final_check_retries_with_its_findings_and_never_repairs(self):
@@ -865,7 +890,7 @@ class QualificationHarnessTests(unittest.TestCase):
         (the ones a lifecycle adapter digests and submits) carry one marker per node, named as the node, and after the
         scope the builders are marker-free again. Interpretation: none."""
         from terminal_planner import engine
-        builders = {"milestone": lambda: milestone.milestone_graph(2), "plan": lambda: engine.planner_graph_v2(3),
+        builders = {"milestone": lambda: milestone.milestone_graph(), "plan": lambda: engine.planner_graph_v2(3),
                     "task gate": lambda: engine.task_gate_graph(2), "merge critic": lambda: engine.merge_critic_graph()}
         for name, build in builders.items():
             self.assertNotIn("ZPLAN_NODE", json.dumps(build()), name)

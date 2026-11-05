@@ -27,6 +27,10 @@ class Blocked(RuntimeError):
             self.family = family
 
 
+class FormatRefused(Blocked):
+    """The model's format error in a plan it wrote (`check_draft`), kept from the owner's screen."""
+
+
 class Rejected(Blocked):
     """A certain, deterministic refusal (non-zero exit), as opposed to a timeout or crash."""
 
@@ -290,71 +294,153 @@ def brief_problem(brief):
     return None
 
 
+PLAN_EXAMPLE = {
+    "requirements": [{"id": "R1", "text": "Print the number of words in a file."}],
+    "milestones": [{"id": "M1", "title": "Word count", "depends_on": [], "slices": [
+        {"id": "S1", "title": "Command line", "requirements": ["R1"], "tasks": [
+            {"id": "T1", "title": "Implement the count", "checks": ["python3 -m unittest"],
+             "brief": {"goal": "Print the word count of the file given as the argument.",
+                       "why": "R1 asks for the count.", "reuse": "",
+                       "write_set": ["wc.py", "tests/test_wc.py"],
+                       "criteria": [{"id": "C1", "text": "The count of a file is printed.",
+                                     "example": "A file holding 'a b c' prints 3."}],
+                       "non_goals": ["No options."], "risk": "low",
+                       "dod": "The tests pass and the count is printed."}}]}]}]}
+
+
 def validate_proposal(plan):
-    """Reject missing coverage, cycles, dangling dependencies, and executable claims."""
-    def require(ok, reason):
-        if not ok:
-            raise Blocked("Invalid proposal: " + reason, family="plan.invalid_proposal")
+    """Reject missing coverage, cycles, dangling dependencies, and executable claims. One refusal names every problem
+    found (the first 10); a record of the wrong shape is reported and its contents skipped."""
+    problems = []
 
     def text(value):
         return isinstance(value, str) and 0 < len(value.strip()) <= 8192
 
-    def records(value, fields, limit, optional=()):
-        require(isinstance(value, list) and 0 < len(value) <= limit, "list size")
-        for item in value:
-            require(isinstance(item, dict) and set(fields) <= set(item) <= set(fields) | set(optional), "record fields")
-        return value
+    def names(keys):
+        return ", ".join(sorted(str(key)[:40] for key in keys)[:10])
 
-    require(isinstance(plan, dict) and set(plan) == {"requirements", "milestones"}, "roadmap fields")
-    requirements = records(plan["requirements"], ["id", "text"], 64)
-    ids = set()
-    for req in requirements:
-        require(text(req["id"]) and text(req["text"]) and req["id"] not in ids, "requirements")
-        ids.add(req["id"])
-    milestones = records(plan["milestones"], ["id", "title", "depends_on", "slices"], 32)
-    mids, entities, coverage = set(), set(ids), {key: 0 for key in ids}
-    for milestone in milestones:
-        mid = milestone["id"]
-        require(text(mid) and mid not in entities and text(milestone["title"]), "milestone ID/title")
-        entities.add(mid)
-        mids.add(mid)
-        deps = milestone["depends_on"]
-        require(isinstance(deps, list) and all(text(d) for d in deps) and len(deps) == len(set(deps)), "dependencies")
-        for slice_ in records(milestone["slices"], ["id", "title", "requirements", "tasks"], 32):
-            sid = slice_["id"]
-            require(text(sid) and sid not in entities and text(slice_["title"]), "slice ID/title")
-            entities.add(sid)
-            owned = slice_["requirements"]
-            require(isinstance(owned, list) and owned and all(text(r) and r in ids for r in owned), "coverage references")
-            require(len(set(owned)) == len(owned), "duplicate ownership")
-            for rid in owned:
-                coverage[rid] += 1
-            for task in records(slice_["tasks"], ["id", "title", "checks"], 32, optional=["brief"]):
-                tid = task["id"]
-                require(text(tid) and tid not in entities and text(task["title"]), "task ID/title")
-                entities.add(tid)
-                checks = task["checks"]
-                require(isinstance(checks, list) and 0 < len(checks) <= 32 and all(text(c) for c in checks), "task checks")
-                if "brief" in task:
-                    problem = brief_problem(task["brief"])
-                    require(problem is None, "task %s: %s" % (tid, problem))
-    require(all(count == 1 for count in coverage.values()), "each requirement must have exactly one slice owner")
-    edges = {m["id"]: m["depends_on"] for m in milestones}
+    def differences(found, fields, optional=()):
+        missing = [key for key in fields if key not in found]
+        unexpected = [key for key in found if key not in fields and key not in optional]
+        parts = []
+        if missing:
+            parts.append("missing " + names(missing))
+        if unexpected:
+            parts.append("unexpected " + names(unexpected))
+        return "; ".join(parts)
+
+    def label(kind, record, index, parent=""):
+        rid = record.get("id") if isinstance(record, dict) else None
+        if text(rid):
+            return "%s %s" % (kind, rid[:40])
+        return "%s #%d%s" % (kind, index, " of " + parent if parent else "")
+
+    def records(name, value, fields, limit, kind, parent="", optional=()):
+        """The well-shaped records of a list, each with its label; the others are reported and left out."""
+        if not (isinstance(value, list) and 0 < len(value) <= limit):
+            problems.append("%s: list size (1 to %d)" % (name, limit))
+            return []
+        found = []
+        for index, item in enumerate(value, 1):
+            who = label(kind, item, index, parent)
+            if not isinstance(item, dict):
+                problems.append("%s: not an object" % who)
+            elif not set(fields) <= set(item) <= set(fields) | set(optional):
+                problems.append("%s: fields: %s" % (who, differences(item, fields, optional)))
+            else:
+                found.append((who, item))
+        return found
+
+    top = ["requirements", "milestones"]
+    if not isinstance(plan, dict):
+        problems.append("roadmap fields: the plan is not an object")
+        return _refuse(problems)
+    if set(plan) != set(top):
+        problems.append("roadmap fields: expected %s; %s" % (names(top), differences(plan, top)))
+    ids, coverage, known = set(), {}, False
+    if "requirements" in plan:
+        found = records("requirements", plan["requirements"], ["id", "text"], 64, "requirement")
+        known = len(found) == len(plan["requirements"]) if found else False
+        for who, req in found:
+            if not (text(req["id"]) and text(req["text"]) and req["id"] not in ids):
+                problems.append("%s: id/text" % who)
+            if text(req["id"]):
+                ids.add(req["id"])
+                coverage[req["id"]] = 0
+    mids, entities, edges = set(), set(ids), {}
+    if "milestones" in plan:
+        for mwho, milestone in records("milestones", plan["milestones"], ["id", "title", "depends_on", "slices"], 32,
+                                       "milestone"):
+            mid = milestone["id"]
+            if not (text(mid) and mid not in entities and text(milestone["title"])):
+                problems.append("%s: id/title" % mwho)
+            if text(mid):
+                entities.add(mid)
+                mids.add(mid)
+            deps = milestone["depends_on"]
+            if not (isinstance(deps, list) and all(text(d) for d in deps) and len(deps) == len(set(deps))):
+                problems.append("%s: dependencies" % mwho)
+            elif text(mid):
+                edges[mid] = deps
+            for swho, slice_ in records("slices of " + mwho, milestone["slices"],
+                                        ["id", "title", "requirements", "tasks"], 32, "slice", mwho):
+                sid = slice_["id"]
+                if not (text(sid) and sid not in entities and text(slice_["title"])):
+                    problems.append("%s: id/title" % swho)
+                if text(sid):
+                    entities.add(sid)
+                owned = slice_["requirements"]
+                if not (isinstance(owned, list) and owned and all(text(r) and (r in ids or not known) for r in owned)):
+                    problems.append("%s: coverage references" % swho)
+                elif len(set(owned)) != len(owned):
+                    problems.append("%s: duplicate ownership" % swho)
+                else:
+                    for rid in owned:
+                        if rid in coverage:
+                            coverage[rid] += 1
+                for twho, task in records("tasks of " + swho, slice_["tasks"], ["id", "title", "checks"], 32, "task",
+                                          swho, optional=["brief"]):
+                    tid = task["id"]
+                    if not (text(tid) and tid not in entities and text(task["title"])):
+                        problems.append("%s: id/title" % twho)
+                    if text(tid):
+                        entities.add(tid)
+                    checks = task["checks"]
+                    if not (isinstance(checks, list) and 0 < len(checks) <= 32 and all(text(c) for c in checks)):
+                        problems.append("%s: checks" % twho)
+                    if "brief" in task:
+                        problem = brief_problem(task["brief"])
+                        if problem is not None:
+                            problems.append("%s: %s" % (twho, problem))
+    if problems:
+        return _refuse(problems)
+    if not all(count == 1 for count in coverage.values()):
+        problems.append("each requirement must have exactly one slice owner")
     visited, visiting = set(), set()
 
     def visit(mid):
-        require(mid in mids and mid not in visiting, "cycle or unknown dependency")
+        if mid not in mids or mid in visiting:
+            return False
         if mid in visited:
-            return
+            return True
         visiting.add(mid)
-        for dep in edges[mid]:
-            visit(dep)
+        sound = all(visit(dep) for dep in edges[mid])
         visiting.remove(mid)
         visited.add(mid)
+        return sound
 
-    for mid in mids:
-        visit(mid)
+    if not all([visit(mid) for mid in mids]):
+        problems.append("cycle or unknown dependency")
+    if problems:
+        return _refuse(problems)
     return plan
+
+
+def _refuse(problems):
+    shown = "; ".join(problems[:10])
+    if len(problems) > 10:
+        shown += "; and %d more" % (len(problems) - 10)
+    raise Blocked("Invalid proposal: " + shown, family="plan.invalid_proposal")
 
 
 # The milestone driver runs at most this many initial tasks (all slices of one milestone together).
@@ -372,6 +458,62 @@ def check_bounds(plan):
     return plan
 
 
+DRAFT_BYTES = 256 * 1024  # canonical bytes of one architect plan
+DRAFT_ORIGINS = ("plan", "edit", "renew")
+DRAFT_AUTHORS = ("owner", "architect")
+RESPONSE_LIMIT = 3000  # characters of the architect's answer to the findings
+
+
+def check_draft(plan):
+    """A new architect plan must be reviewable: a valid, in-bounds proposal with a brief on every task, small enough
+    for the bridge. Called by the entry paths only, never by `begin`, so a stored draft can be renewed."""
+    try:
+        check_bounds(validate_proposal(plan))
+        bare = [task["id"] for milestone in plan["milestones"] for slice_ in milestone["slices"]
+                for task in slice_["tasks"] if "brief" not in task]
+        if bare:
+            raise Blocked("Every task needs a brief: %s." % ", ".join(bare), family="action.refused")
+        if len(canonical(plan).encode("utf-8")) > DRAFT_BYTES:
+            raise Blocked("The plan exceeds %s bytes." % DRAFT_BYTES, family="action.refused")
+    except Blocked as error:
+        raise FormatRefused(str(error) + "\nA valid plan: " + canonical(PLAN_EXAMPLE), family="action.refused") from error
+    return plan
+
+
+def check_draft_fields(origin, by, response):
+    require(origin in DRAFT_ORIGINS and by in DRAFT_AUTHORS and isinstance(response, str)
+            and len(response) <= RESPONSE_LIMIT, "Invalid origin, author or response of the plan.", family="action.refused")
+
+
+def chain_budget(revisions):
+    """`(used, limit)` of the architect's revision budget in the current chain, or None when the last revision is
+    not a Goldfish one. The chain runs from the latest revision with origin "plan" or without a Goldfish review to
+    the last; `used` counts its revisions made by the architect, `limit` is the last revision's frozen plan_rounds."""
+    if not revisions or not _goldfish(revisions[-1]):
+        return None
+    used = sum(1 for r in revisions[_chain_start(revisions):] if r.get("by") == "architect")
+    return used, revisions[-1]["frozen"]["plan_rounds"]
+
+
+def _goldfish(revision):
+    return revision.get("frozen", {}).get("review") == "goldfish"
+
+
+def _chain_start(revisions):
+    for index in range(len(revisions) - 1, -1, -1):
+        if revisions[index].get("origin") == "plan" or not _goldfish(revisions[index]):
+            return index
+    return 0
+
+
+def chain_approved(revisions):
+    """Whether the last revision is the architect's Goldfish revision in a chain where an earlier revision carries an
+    approval (one owner approval per chain at supervised, section 5.6). The chain starts as `chain_budget`'s does."""
+    if not revisions or not _goldfish(revisions[-1]) or revisions[-1].get("by") != "architect":
+        return False
+    return any(r.get("approval") is not None for r in revisions[_chain_start(revisions):-1])
+
+
 PLANNING_ROLES = ("planner", "plan_verifier")
 
 # Plan revisions: execution version 1 (no `execution` key: planner + `plan_verifier`, output schema "1") is frozen
@@ -380,6 +522,7 @@ PLAN_EXECUTION = 2
 PLAN_ROUNDS_MAX = 5
 TASK_ROUNDS_MAX = 10  # limits.task_rounds: the same upper bound the profile resolver enforces
 DEFAULT_PLAN_ROUNDS = 3
+PARAPHRASE_LIMIT = 3000  # a Goldfish reader's paraphrase is kept up to here; a longer one is clipped, never refused
 RULES_LIMIT = 64 * 1024  # UTF-8 bytes of all frozen rules together
 DISCUSSION_TEXT = 4000  # characters of one finding / response
 DISCUSSION_BYTES = 32 * 1024
@@ -523,7 +666,9 @@ class Authority:
         # bound `runs.review_rounds` reads. Older revisions and the unprofiled default simply do not carry it.
         require(isinstance(frozen, dict)
                 and {"plan_rounds", "rules", "config_digest"} <= set(frozen)
-                <= {"plan_rounds", "task_rounds", "rules", "config_digest"})
+                <= {"plan_rounds", "task_rounds", "rules", "config_digest", "review"})
+        require("review" not in frozen or (frozen["review"] == "goldfish" and "draft" in r),
+                "Unknown review of the plan.")
         require(type(frozen["plan_rounds"]) is int and 1 <= frozen["plan_rounds"] <= PLAN_ROUNDS_MAX)
         require("task_rounds" not in frozen
                 or (type(frozen["task_rounds"]) is int and 1 <= frozen["task_rounds"] <= TASK_ROUNDS_MAX))
@@ -570,13 +715,18 @@ class Authority:
         # `execution` + `frozen` exist together on revisions of planner graph 2; a revision without them is v1 forever.
         # `override` is the owner's record of approving a rejected plan gate anyway; absent on every other revision.
         # `draft` is the full proposal of an owner edit that the plan run must present unchanged; absent otherwise.
-        require(isinstance(r, dict) and set(r) - {"live", "execution", "frozen", "override", "stop", "draft"} == fields
+        require(isinstance(r, dict) and set(r) - {"live", "execution", "frozen", "override", "stop", "draft", "origin", "by", "response"} == fields
                 and ("live" not in r or live.valid(r["live"])) and (("execution" in r) == ("frozen" in r)))
         if "draft" in r:
             require("execution" in r, "Editing a plan requires a second-version plan check.")
             validate_proposal(r["draft"])
         if "execution" in r:
             self.validate_frozen(r)
+        # `origin`, `by` and `response` exist together, on goldfish revisions only.
+        if {"origin", "by", "response"} & set(r):
+            require({"origin", "by", "response"} <= set(r) and r.get("frozen", {}).get("review") == "goldfish",
+                    "Origin, author and response belong to Goldfish revisions.")
+            check_draft_fields(r["origin"], r["by"], r["response"])
         require(type(r["version"]) is int and r["version"] == version)
         require(nonempty(r["goal"]) and len(r["goal"]) <= 8192 and nonempty(r["baseline"]) and nonempty(r["worktree"]))
         require(Path(r["worktree"]).resolve() == Path(r["worktree"]))
@@ -675,16 +825,22 @@ class Authority:
             identity.update(execution=r["execution"], frozen_digest=digest(r["frozen"]))
         if "draft" in r:  # a revision without an edit keeps its identity byte for byte
             identity["draft"] = copy.deepcopy(r["draft"])
+        if "response" in r:
+            identity["response"] = r["response"]
         return identity
 
     def review_evidence(self, r, cursor, output):
         """(proposal, evidence) of a finished review of this revision, from its frozen snapshot: the output must be
         of the revision's own execution version; a version 2 gate also carries the gate fields."""
         v2 = "execution" in r
-        limit = r["frozen"]["plan_rounds"] if v2 else PLAN_ROUNDS_MAX
+        goldfish = v2 and r["frozen"].get("review") == "goldfish"
+        limit = 1 if goldfish else r["frozen"]["plan_rounds"] if v2 else PLAN_ROUNDS_MAX
         require(isinstance(output, dict) and output.get("schemaVersion") == ("2" if v2 else "1"),
                 "Output does not match the plan's execution version.")
-        proposal, verdict, findings, _, discussion = read_review(output, limit)
+        if goldfish:
+            proposal, verdict, findings, _, discussion, paraphrase = read_goldfish_review(output)
+        else:
+            proposal, verdict, findings, _, discussion = read_review(output, limit)
         # An edit is judged, never rewritten: whatever the verdict, the proposal is the owner's draft.
         require("draft" not in r or canonical(proposal) == canonical(r["draft"]), "the planner changed the edit")
         evidence = {"kind": r["engine"], "run_id": r["run_id"], "terminal_cursor": cursor,
@@ -695,6 +851,8 @@ class Authority:
                             resolved_config_digest=r["frozen"]["config_digest"], head=r["baseline"],
                             rounds_used=len(discussion["rounds"]), rounds_limit=limit, discussion=discussion,
                             critic_verdict=verdict)
+            if goldfish:
+                evidence["paraphrase"] = paraphrase
         return proposal, evidence
 
     def check_evidence(self, r):
@@ -776,11 +934,14 @@ class Authority:
         answers, and an unusable one resolves to "" so it never equals a gate's digest. A pure read."""
         return self.profile.live_digest() if self.profile is not None else None
 
-    def begin(self, goal, roles, engine, feedback="", execution=PLAN_EXECUTION, draft=None):
+    def begin(self, goal, roles, engine, feedback="", execution=PLAN_EXECUTION, draft=None, review=None,
+              origin=None, by=None, response=""):
         """The one freeze point of a plan revision: its roles, rounds, rules and configuration digest are taken here,
         once, from the session's profile (else `roles` and the defaults), and everything the revision later runs on
         is built from that snapshot. `execution=1` makes a legacy revision (tests of the v1 graph only). `draft` is
-        the full proposal of an owner edit: the plan run must return it unchanged (execution 2 only)."""
+        the full proposal of an owner edit: the plan run must return it unchanged (execution 2 only). `review` is
+        None (the planner graph) or "goldfish" (a planner-free review of `draft`); only a goldfish revision has an
+        `origin` (plan, edit or renew), an author `by` (owner or architect) and the architect's `response`."""
         self.check_project()
         # The lifecycle precondition of this mutation, before anything is read from the profile or written: one
         # active milestone writer blocks a new revision (the same "active" notion `Runs.active` uses).
@@ -790,6 +951,16 @@ class Authority:
                 % (busy and busy["milestone"]), family="action.refused")
         require(nonempty(goal) and len(goal) <= 8192)
         require(execution in (1, PLAN_EXECUTION))
+        require(review in (None, "goldfish"), "Unknown review of the plan.", family="action.refused")
+        if review is not None:
+            require(draft is not None and execution == PLAN_EXECUTION,
+                    "A Goldfish review needs a plan to review.", family="action.refused")
+            origin = "plan" if origin is None else origin
+            by = "owner" if by is None else by
+            check_draft_fields(origin, by, response)
+        else:
+            require(origin is None and by is None and response == "",
+                    "Origin, author and response belong to Goldfish revisions.", family="action.refused")
         if draft is not None:
             require(execution == PLAN_EXECUTION, "Editing a plan requires a second-version plan check.", family="action.refused")
             check_bounds(validate_proposal(draft))
@@ -822,10 +993,14 @@ class Authority:
             "observation_cursor": None, "observation_envelope": None, "terminal_cursor": None, "terminal_envelope": None,
             "evidence": None, "diagnostic": "",
         }
+        if review is not None:
+            frozen = {**frozen, "review": review}
         if frozen is not None:
             revision.update(execution=execution, frozen=frozen)
         if draft is not None:
             revision["draft"] = copy.deepcopy(draft)
+        if review is not None:
+            revision.update(origin=origin, by=by, response=response)
         self.state["revisions"].append(revision)
         self.save()
         return revision
@@ -839,7 +1014,7 @@ class Authority:
         for r in reversed(self.state["revisions"]):
             if r["feedback"]:
                 return r["feedback"] + "\n\n" + request
-            if "draft" not in r:
+            if "draft" not in r or r.get("origin") == "plan":
                 break
         return request
 
@@ -1092,7 +1267,7 @@ def validate_projection(value, run_id, watch=True, source_optional=False):
         require({"phase", "terminalResult"} <= set(status) <= {"phase", "terminalResult", "metadata"})
         if "metadata" in status:
             metadata = status["metadata"]
-            require(isinstance(metadata, dict) and set(metadata) <= {"tokenUsage"})
+            require(isinstance(metadata, dict) and set(metadata) <= {"tokenUsage", "deliveryReceipt"})
             if metadata.get("tokenUsage") is not None:
                 usage = metadata["tokenUsage"]
                 required = {"inputTokens", "outputTokens", "complete"}
@@ -1159,6 +1334,17 @@ def read_review(output, rounds_limit=PLAN_ROUNDS_MAX):
     final = (output["planVerdict"], output["planFindings"], output["planResponse"])
     return proposal, output["planVerdict"], output["planFindings"], output["planResponse"], \
         read_discussion(output["discussion"], rounds_limit, final)
+
+
+def read_goldfish_review(output):
+    """(proposal, verdict, findings, response, discussion, paraphrase) of a completed Goldfish review: the schema 2
+    fields plus `paraphrase`, one round at most. The paraphrase is clipped to PARAPHRASE_LIMIT, never refused."""
+    require(isinstance(output, dict) and output.get("schemaVersion") == "2", "Unsupported review schema/verdict.")
+    fields = {"schemaVersion", "proposal", "planVerdict", "planFindings", "planResponse", "discussion", "paraphrase"}
+    require(set(output) == fields and all(isinstance(v, str) for v in output.values()), "Malformed completed review output.")
+    paraphrase = output["paraphrase"][:PARAPHRASE_LIMIT]
+    rest = {k: v for k, v in output.items() if k != "paraphrase"}
+    return (*read_review(rest, 1), paraphrase)
 
 
 def completed_review(output, rounds_limit=PLAN_ROUNDS_MAX):

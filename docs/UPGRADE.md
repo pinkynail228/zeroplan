@@ -10,6 +10,23 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
 
 ## For users: update zplan
 
+### What changes in 0.11 (since 0.9; 0.10 was not published)
+
+- Zeroshot 11.0.0: `zplan setup` installs the new toolchain into its own directory next to the old one.
+- The architect answers first and writes a plan only for a change. It reads your working tree and says which files
+  are not committed, because the plan check and the workers see only the last commit.
+- The first revision of every plan waits for your yes at every autonomy level. A typed "yes" approves only the plan
+  your screen showed as waiting; a settings change is a card you confirm.
+- The architect's plan format errors stay off your screen.
+- The architect writes the plan in the chat; a fresh reader's retelling and one critic pass review it, and the plan
+  card shows both. The separate planner remains only on the owner's `/plan` and line UI paths for now.
+- Before a milestone starts, the project's required checks run on the base. A check that fails or cannot run there
+  refuses the start and names the check (`milestone.preflight`), instead of stopping the milestone at its end.
+- Without the owner, a milestone gets at most two new attempts; the next decision is the owner's.
+- At `auto` and `supervised` the architect's later revisions of an approved plan are approved by an accepted critic
+  verdict.
+- A store holding a revision the architect wrote cannot be opened by zplan 0.9 or older (see the rollback note below).
+
 `zplan update` fetches the newest release tag of https://github.com/pinkynail228/zeroplan (or of
 `ZPLAN_REPOSITORY` when set) and installs it through that release's own `install.py`, then runs `zplan setup`:
 
@@ -91,6 +108,7 @@ restore the store copy the installer made before the 0.6.0 launcher swap.
 0.8.1 changes no store or record format; a new project's proposed profile is the preset `zplan.default/3` (the worker on `gpt-6.1-terra` at effort max). Profiles that name `zplan.default/1` or `/2` resolve as before.
 0.8.2 adds one store field: the event feed records which plan revisions the architect made (`architect`), and 0.8.1 refuses a store holding it as invalid. Roll back across 0.8.1 -> 0.8.2 only to the `v3.backup-0.8.1-<UTC timestamp>` copy the installer made before the launcher swap. A `/theme` choice is kept in `ui.json`; 0.8.1 ignores it.
 0.8.3 changes no store or record format; a revision's feedback now carries every request of the goal in order. Rolling back to 0.8.2 needs no store backup.
+A store holding a Goldfish plan revision (`frozen.review`, evidence `paraphrase`) cannot be opened by a zplan older than this change (pre-R1a): its store check refuses the revision as invalid. Roll back across it only to a store copy saved before the first Goldfish revision.
 
 ## For the maintainer: qualify and ship a new toolchain
 
@@ -100,8 +118,8 @@ Nothing activates a candidate automatically; the default changes only by an edit
    current default's tag: CLI (`run`, `watch`, `status`, `resume`, `force-stop`, `logs`, `list`), the graph schema,
    built-in worker templates (`builtin.agent.*@N`), the policy (`policy.native-v2@1`), the graph profile and runtime
    config. The script below diffs the same things mechanically; reading the release notes is still yours.
-2. **Run the candidate script on the Linux host** (native qualification runs there, not on macOS; the macOS run below
-   is an optional install/contracts check). It installs the candidate into a scratch data root
+2. **Run the candidate script on macOS** (Linux is not tested: the owner, 2026-11-05; the Linux command below is kept
+   only for reference). It installs the candidate into a scratch data root
    and a short isolated native state root, never into the production directories:
 
    ```sh
@@ -131,5 +149,5 @@ Nothing activates a candidate automatically; the default changes only by an edit
    Codex (a test fails when the lockfile and `codex` disagree). Any change to the bundle's content that keeps the
    versions (restic, lockfile, layout) needs a new `runtime` tag: a bundle is never replaced in place.
 5. **Release.** Bump `__version__`, `pyproject.toml` and `VERSION` in `install.py` (append the previous version to
-   `OWNED` there so its launcher stays ours), run the full suite (`devtools/linux-test.sh`), then tag a patch release.
+   `OWNED` there so its launcher stays ours), run the full lane (`python3.13 devtools/fasttest.py --lane full`), then tag a patch release.
    Update README/INSTALLATION paths that show the tool directory name.

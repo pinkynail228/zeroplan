@@ -18,11 +18,22 @@ from terminal_planner.architect import (Architect, ArchitectStore, build_argv, b
                                         mcp_overrides, mcp_servers_config, verify_cli)
 from terminal_planner.authority import Blocked
 
-# The server listing every turn runs first (`codex mcp list --json`), answered by every fake codex without counting it
-# as a turn call (it logs to mcp_calls.jsonl). Scenario keys: `mcp` = one listing (default: zplan enabled only),
+# The read-confinement probe (`codex sandbox`, F17/A0) answers READ_OK, plus LEAK_CREDENTIAL for `sandbox="leak"`,
+# or exits 2 for `sandbox="fail"`; it logs to sandbox_calls.jsonl. The server listing every turn runs first (`codex mcp
+# list --json`), answered by every fake codex without counting it as a turn call (it logs to mcp_calls.jsonl). Scenario keys: `mcp` = one listing (default: zplan enabled only),
 # `mcp_lists` = one listing per call in order (the last repeats; a string is sent raw), `mcp_exit` = a failing exit,
 # `mcp_hang` = seconds to sleep before answering. Needs `json`, `os`, `sys`, `time` and `here`, `scenario` in scope.
-MCP_LIST = r'''if sys.argv[1:3] == ["mcp", "list"]:
+MCP_LIST = r'''if sys.argv[1:2] == ["sandbox"]:
+    with open(os.path.join(here, "sandbox_calls.jsonl"), "a") as stream:
+        stream.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "files": sorted(os.listdir("."))}) + "\n")
+    time.sleep(scenario.get("sandbox_hang", 0))
+    if scenario.get("sandbox", "deny") == "fail":
+        sys.exit(2)
+    print("READ_OK")
+    if scenario.get("sandbox") == "leak":
+        print("LEAK_CREDENTIAL")
+    sys.exit(0)
+if sys.argv[1:3] == ["mcp", "list"]:
     log = os.path.join(here, "mcp_calls.jsonl")
     seen = sum(1 for _ in open(log)) if os.path.exists(log) else 0
     with open(log, "a") as stream:
@@ -155,10 +166,11 @@ class ArchitectTests(unittest.TestCase):
         one, two = self.calls()
         self.assertEqual(one["argv"], ["exec", "--json", "-s", "read-only", "-C", str(self.project), "-m", "gpt-6.1-sol",
                                        "-c", "model_reasoning_effort=high", "-c", 'approval_policy="never"',
-                                       *mcp_overrides(str(self.project)), "-"])
+                                       *mcp_overrides(str(self.project)), *architect.read_overrides(False), "-"])
         self.assertEqual(two["argv"], ["exec", "resume", THREAD, "--json", "-m", "gpt-6.1-sol",
                                        "-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"',
-                                       "-c", "model_reasoning_effort=high", *mcp_overrides(str(self.project)), "-"])
+                                       "-c", "model_reasoning_effort=high", *mcp_overrides(str(self.project)),
+                                       *architect.read_overrides(False), "-"])
         for call in (one, two):
             for flag in ("--last", "--ephemeral", "--full-auto", "--dangerously-bypass-approvals-and-sandbox",
                          "--yolo", "--add-dir", "danger-full-access", "workspace-write"):
@@ -167,17 +179,106 @@ class ArchitectTests(unittest.TestCase):
             self.assertEqual(Path(call["cwd"]).resolve(), self.project)
             for key, value in self.env.items():
                 self.assertEqual(call["env"].get(key), value)
-        self.assertIn("lead delivery", one["stdin"])
+        self.assertIn("Answer first.", one["stdin"])
         self.assertIn(architect.method(), one["stdin"])
         self.assertNotIn(architect.method(), two["stdin"])  # a resumed turn does not repeat the method
         self.assertTrue(one["stdin"].endswith("Что делать?"))
         # D-0: a resumed turn (saved thread id, so `build_update` not the preamble) still carries the draft
         # protocol and the state update, appended to the owner message.
         self.assertIn("Updated state snapshot (read-only):", two["stdin"])
-        self.assertIn("```zplan-goal", two["stdin"])
+        self.assertIn("Answer first.", two["stdin"])
         self.assertIn("```zplan-answer", two["stdin"])
         self.assertNotIn("You are the zplan architect", two["stdin"])
         self.assertTrue(two["stdin"].endswith("А дальше?"))
+
+    def sandbox_calls(self):
+        path = self.bin / "sandbox_calls.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_a_confined_architect_reads_the_project_and_nothing_else(self):
+        """A0 S1a: confined (the probe saw the sandbox deny), both a new and a resumed turn carry the read profile:
+        the whole disk readable but the home, the Codex home and zplan's data denied; the project readable but every
+        credential name and `.zplan` denied; no sub-agents (one escaped the profile in S0b), no web search, a core
+        environment without secret-named variables, git without the denied global config; the shell stays on."""
+        import tomllib
+        from terminal_planner import project_read, setup
+        arch = self.architect(confined=True)
+        for message in ("Что делать?", "А дальше?"):
+            self.assertEqual(arch.send(message).status, "completed")
+        calls = self.calls()
+        self.assertEqual([c["argv"][:2] for c in calls], [["exec", "--json"], ["exec", "resume"]])
+        for call in calls:
+            argv = call["argv"]
+            for flag in ("agents.enabled=false", 'web_search="disabled"', 'default_permissions="zplan_read"',
+                         'shell_environment_policy.inherit="core"'):
+                self.assertIn(flag, argv)
+            self.assertNotIn("features.shell_tool=false", argv)
+            profile = [a for a in argv if a.startswith("permissions.zplan_read.filesystem=")]
+            self.assertEqual(len(profile), 1)
+            fs = tomllib.loads(profile[0])["permissions"]["zplan_read"]["filesystem"]
+            self.assertEqual(fs["/"], "read")
+            for denied in (Path(os.environ["HOME"]), self.root / "codex-home", setup.data_root()):
+                self.assertEqual(fs[str(Path(denied).resolve())], "deny", denied)
+            roots = fs[":workspace_roots"]
+            self.assertEqual(roots["."], "read")
+            for name in project_read.CREDENTIAL_NAMES:
+                self.assertEqual(roots["**/" + name], "deny", name)
+            self.assertEqual(roots["**/.zplan/**"], "deny")
+            sets = [a for a in argv if a.startswith("shell_environment_policy.set=")]
+            self.assertEqual(tomllib.loads(sets[0])["shell_environment_policy"]["set"], {"GIT_CONFIG_GLOBAL": "/dev/null"})
+        self.assertIn("read-only", calls[0]["argv"])
+        self.assertIn('sandbox_mode="read-only"', calls[1]["argv"])
+
+    def test_an_unconfined_architect_has_its_shell_off(self):
+        """A0 S1a: without a passed probe (the default) the shell is off (`features.shell_tool=false`, Codex's own
+        switch) and no read profile is claimed; sub-agents and web search stay off."""
+        arch = self.architect()
+        self.assertEqual(arch.send("Что делать?").status, "completed")
+        argv = self.calls()[0]["argv"]
+        for flag in ("features.shell_tool=false", "agents.enabled=false", 'web_search="disabled"'):
+            self.assertIn(flag, argv)
+        self.assertFalse([a for a in argv if a.startswith(("permissions.", "default_permissions"))])
+
+    def test_the_probe_believes_only_a_sandbox_that_denied(self):
+        """A0 S1a: `read_confinement` runs `codex sandbox` with the confined read flags in a scratch folder outside the
+        project (removed afterwards; the project is untouched) and is True only when the sandbox answered exactly
+        READ_OK: a leaked planted credential, a failing sandbox or a hang (past the timeout) mean False."""
+        before = tree(self.project)
+        for mode, extra, expected in (("deny", {}, True), ("leak", {}, False), ("fail", {}, False),
+                                      ("deny", {"sandbox_hang": 3}, False)):
+            with self.subTest(mode=mode, extra=extra):
+                (self.bin / "sandbox_calls.jsonl").unlink(missing_ok=True)
+                self.script([{"lines": OK}], sandbox=mode, **extra)
+                with patch.object(architect, "PROBE_TIMEOUT", 1):
+                    self.assertIs(architect.read_confinement(self.codex, self.env), expected)
+                call = self.sandbox_calls()[0]
+                self.assertEqual(call["argv"][0], "sandbox")
+                self.assertIn('default_permissions="zplan_read"', call["argv"])
+                self.assertIn("--", call["argv"])
+                self.assertIn(".env", call["files"])
+                self.assertNotEqual(Path(call["cwd"]).resolve(), self.project)
+                self.assertFalse(Path(call["cwd"]).exists())
+        self.assertEqual(tree(self.project), before)
+        self.assertEqual(self.calls(), [])  # the probe is never a turn
+
+    def test_the_store_masks_credentials_in_every_row_it_writes(self):
+        """A0 S1c (design 3.4): the architect now reads the working tree, so a credential can reach a reply. Every row
+        the store writes (the owner's, the architect's with its drafts and partial text, an error's detail) is masked
+        as `live.scrub` masks a line before it touches the disk; roles, ids and numbers are not text to mask."""
+        from terminal_planner import live
+        raw = 'token = "' + 'sk' + '-' + 'abcdefghijklmnopqrstuvwx"'
+        store = ArchitectStore(self.project)
+        store.append("owner", text="see " + raw, turn_id="t-1")
+        store.append("architect", text="line\n" + raw, drafts=[{"kind": "answer", "text": raw}], partial=raw,
+                     usage={"input_tokens": 5})
+        store.append("error", status="failed", text=raw, detail=raw)
+        self.assertNotIn("abcdefghijklmnopqrstuvwx", store.transcript_path.read_text())
+        owner, reply, error = store.transcript()[-3:]
+        self.assertEqual((owner["text"], owner["turn_id"]), (live.scrub("see " + raw), "t-1"))
+        self.assertEqual(reply["text"], live.scrub("line\n" + raw))
+        self.assertEqual((reply["drafts"][0]["text"], reply["drafts"][0]["kind"]), (live.scrub(raw), "answer"))
+        self.assertEqual((reply["partial"], reply["usage"]), (live.scrub(raw), {"input_tokens": 5}))
+        self.assertEqual((error["detail"], error["status"], error["role"]), (live.scrub(raw), "failed", "error"))
 
     # A3b C3
     def test_mcp_config_is_one_inline_table_and_escapes_the_project(self):
@@ -216,13 +317,26 @@ class ArchitectTests(unittest.TestCase):
                 else:
                     self.assertEqual(args[5:], [])
 
+    def test_v6a_the_owner_turn_token_is_in_the_mcp_argv_only_beside_a_controller(self):
+        """V6a: `--turn TOKEN` follows `--controller` in zplan's MCP server argv, for a new and a resumed turn; a turn
+        without a token (an event turn) or without a controller has none."""
+        import tomllib
+        socket = "/tmp/zs-bridge-abc/controller.sock"
+        for thread in (None, THREAD):
+            for controller, turn, tail in ((socket, "tok", ["--controller", socket, "--turn", "tok"]),
+                                           (socket, None, ["--controller", socket]), (None, "tok", [])):
+                with self.subTest(thread=thread, controller=controller, turn=turn):
+                    argv = build_argv(self.codex, self.project, "gpt", "high", thread, controller=controller, turn=turn)
+                    config = [a for a in argv if a.startswith("mcp_servers=")][0]
+                    self.assertEqual(tomllib.loads(config)["mcp_servers"]["zplan"]["args"][5:], tail)
+
     def test_the_prompt_lists_the_action_tools_and_says_the_controller_decides(self):
         """A5t1/A5t2a/A5t2b C5: every prompt that starts a turn (the preamble and the resumed-turn update) lists the
         tools and leaves the decision to the Controller, so an `autonomy.ask` is not a surprise; automatic actions
         follow the autonomy level."""
         for text in (build_preamble(SNAPSHOT), build_update(SNAPSHOT)):
             for name in ("zplan_status", "zplan_start", "zplan_stop", "zplan_approve_plan", "zplan_resume",
-                         "zplan_rebrief", "zplan_edit_plan", "zplan_merge", "zplan_propose_commit"):
+                         "zplan_rebrief", "zplan_plan", "zplan_edit_plan", "zplan_merge", "zplan_propose_commit", "zplan_settings"):
                 self.assertIn(name, text)
             self.assertIn("merge", text)
             self.assertIn("the owner's", text)  # an approval over a rejected critic and every merge are the owner's
@@ -243,6 +357,12 @@ class ArchitectTests(unittest.TestCase):
             self.assertIn(owned, text)
         self.assertIn("autonomy level", text)
         self.assertIn("merge.critic_pending", text)  # the retry instruction is stated
+        self.assertIn("says requested; the row's state says stopped", text)  # v2e A4: the first prompt holds it
+        self.assertIn("says requested; the row's state says stopped", build_preamble(SNAPSHOT))
+        self.assertIn("rows[].reason", text)  # v1a A3: a stopped milestone's reason is read, not asked
+        self.assertIn("rows[].merge.gate_result", text)  # v1c A5: a refused merge's checks are read, not asked
+        self.assertIn("rows[].merge.gate_result", build_preamble(SNAPSHOT))
+        self.assertLessEqual(len(architect.method().encode("utf-8")), 4600)
 
     def test_c2_the_rules_say_a_call_the_level_leaves_to_the_owner_becomes_a_card_and_forbid_a_yes_in_the_chat(self):
         """C2 K2 / p6b A3: the rule that an action the level leaves to the owner is a card, said in one line and never
@@ -256,26 +376,72 @@ class ArchitectTests(unittest.TestCase):
             self.assertIn("becomes a card", text)
             self.assertIn("never ask for a yes in the chat", text)
             self.assertNotIn("a chat reply cannot do it", text)
+            # v1b A4: the status's readiness items and profile are read, and a readiness refusal is never asked
+            self.assertIn("failing readiness items (readiness: id, line, fix) and the profile (level, parallel runs)",
+                          text)
+            self.assertIn("name the item and its fix; never ask the owner", text)
         method = " ".join(architect.method().split())
         self.assertIn("becomes a card", method)
         self.assertIn("never ask for a yes in the chat", method)
         self.assertIn("the owner's merge card", method.split("## Merge")[1])
 
+    def test_v6b_a5_the_rules_tell_the_architect_what_an_owner_turn_call_is(self):
+        """V6b A5: the first prompt (under a project method too) and the resumed-turn update carry the owner-turn
+        rule: call an action only when the owner's message asks for it, it then runs as the owner's own, and never
+        claim the owner asked when they did not; the shipped method stays within 4600 bytes."""
+        (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
+        for text in (build_preamble(SNAPSHOT), build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
+            text = " ".join(text.split())
+            self.assertIn("call an action only when that message asks for it", text)
+            self.assertIn("it then runs as the owner's own", text)
+            self.assertIn("Never claim the owner asked when they did not", text)
+        self.assertLessEqual(len(architect.method().encode("utf-8")), 4600)
+
+    def test_v6e_a4_the_rules_send_the_goal_through_zplan_plan_in_an_owner_turn(self):
+        """V6e A4: the first prompt (under a project method too) and the resumed-turn update hold one zplan_plan
+        line: when the owner asks for a plan, call it with their goal instead of asking them to type /plan, and
+        never in a turn the owner did not start; the shipped method stays within 4600 bytes. Interpretation: none."""
+        self.assertEqual(sum("zplan_plan" in line for line in architect.TOOL_RULES), 1)
+        (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
+        for text in (build_preamble(SNAPSHOT), build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
+            text = " ".join(text.split())
+            self.assertIn("zplan_plan {goal, plan, request?} saves the plan you wrote", text)
+            self.assertIn("never call it in a turn the owner did not start", text)
+        self.assertLessEqual(len(architect.method().encode("utf-8")), 4600)
+
+    def test_v6f_a4_the_rules_tell_the_architect_to_change_settings_only_on_the_owners_word(self):
+        """V6f A4: the first prompt (under a project method too) and the resumed-turn update hold one zplan_settings
+        line: when the owner asks to change the mode or settings, call it with exactly what they asked, never on
+        the architect's own initiative; the shipped method stays within 4600 bytes. Interpretation: none."""
+        self.assertEqual(sum("zplan_settings" in line for line in architect.TOOL_RULES), 1)
+        (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
+        for text in (build_preamble(SNAPSHOT), build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
+            text = " ".join(text.split())
+            self.assertIn("zplan_settings {level?, max_runs?, merge?, roles?} changes the process profile", text)
+            self.assertIn("call it with exactly what they asked", text)
+            self.assertIn("never change settings on your own initiative", text)
+        self.assertLessEqual(len(architect.method().encode("utf-8")), 4600)
+
     def test_a8_f4_the_rules_send_a_rejected_check_to_revise_and_keep_edit_for_the_owners_text(self):
-        """A8 F4: the tool rules say to read the findings in zplan_status after a rejected check and call
-        zplan_revise_plan naming them, and to use zplan_edit_plan only for an edit whose exact text the owner gave."""
+        """A8 F4: the tool rules say zplan_edit_plan answers every finding of the review in `response`; there is no
+        planner revision tool."""
         text = " ".join(" ".join(architect.TOOL_RULES).split())
-        self.assertIn("After a rejected check, read the findings in zplan_status (plan.findings) and call it naming "
-                      "them", text)
-        self.assertIn("Use it only for an edit whose exact text the owner gave", text)
+        self.assertNotIn("zplan_revise_plan", text)
+        self.assertIn("It answers every finding of the review in response", text)
+
+    def test_v2a_the_rules_send_the_outcome_of_an_approval_to_the_status_results(self):
+        """v2a: the tool rules say the outcome of an action is in zplan_status `results`."""
+        text = " ".join(" ".join(architect.TOOL_RULES).split())
+        self.assertIn("is in zplan_status `results`", text)
 
     def test_a10_b5_the_rules_forbid_an_approval_of_a_rejected_plan_and_point_to_the_card(self):
         """A10 B5: on review_exhausted the architect never calls zplan_approve_plan; it says the check rejected the
         plan and points to the card on the main screen; a revision it made that is rejected again is the owner's."""
         text = " ".join(" ".join(architect.TOOL_RULES).split())
-        self.assertIn("When the plan status is review_exhausted never call it: say the check rejected the plan and "
-                      "point to the card on the main screen", text)
-        self.assertIn("A revision you made that the check rejects again is the owner's to decide", text)
+        self.assertIn("When the plan status is review_exhausted never call it: with plan.revisions_left above 0 in "
+                      "zplan_status, fix the plan in this turn; otherwise say the check rejected it and point to the "
+                      "card on the main screen", text)
+        self.assertIn("When your revisions run out the tool refuses and the owner decides", text)
 
     def mcp_calls(self):
         path = self.bin / "mcp_calls.jsonl"
@@ -625,7 +791,7 @@ class ArchitectTests(unittest.TestCase):
                     "milestones": [{"id": "M1", "title": "Счёт", "state": "merged"}, {"id": "M2", "state": "running"}]}
         text = build_preamble(snapshot)
         self.assertEqual(text, build_preamble(json.loads(json.dumps(snapshot))))
-        for needle in ("lead delivery", "read-only", "Controller", "zplan_list_files", "zplan_read_file", "zplan_search",
+        for needle in ("Answer first.", "read-only", "Controller", "zplan_list_files", "zplan_read_file", "zplan_search",
                        "zplan_status", "zplan_start", "zplan_stop", "zplan_approve_plan", "zplan_resume",
                        "zplan_rebrief", "zplan_state_update", "zplan_state", "own key", "demoapp", "main",
                        "План r2", "M1 Счёт: merged", "M2: running"):
@@ -660,8 +826,8 @@ class ArchitectTests(unittest.TestCase):
         first, second = self.prompts(b"# Our method\n- Small slices.")
         self.assertIn("Small slices.", first)
         self.assertNotIn("At most 5 acceptance criteria", first)
-        self.assertLess(first.index("lead delivery"), first.index("Small slices."))
-        self.assertLess(first.index("Small slices."), first.index("Tools (your only actions"))
+        self.assertLess(first.index("Answer first."), first.index("Small slices."))
+        self.assertLess(first.index("Small slices."), first.index("zplan's tools (the Controller decides what runs)"))
         self.assertNotIn("Small slices.", second)
         self.assertNotIn("At most 5 acceptance criteria", second)
         for content in (None, b"", b"\n  \n"):
@@ -684,8 +850,8 @@ class ArchitectTests(unittest.TestCase):
         self.assertEqual(method, raw.decode("utf-8").strip())
         self.assertIn("## Brief", text)
         self.assertIn("At most 5 acceptance criteria", text)
-        self.assertLess(text.index("lead delivery"), text.index(method))
-        self.assertLess(text.index(method), text.index("Tools (your only actions"))
+        self.assertLess(text.index("Answer first."), text.index(method))
+        self.assertLess(text.index(method), text.index("zplan's tools (the Controller decides what runs)"))
         self.assertNotIn("At most 5 acceptance criteria", update)
         self.assertNotIn("## Brief", update)
         self.assertLessEqual(len(raw), 4600)
@@ -829,7 +995,7 @@ class ArchitectTests(unittest.TestCase):
         self.assertEqual(calls[0]["argv"][:2], ["exec", "--json"])            # the first turn: the preamble
         self.assertEqual(calls[1]["argv"][:3], ["exec", "resume", THREAD])    # the resumed turn: the update
         self.assertIn("Updated state snapshot (read-only):", calls[1]["stdin"])
-        self.assertIn("```zplan-goal", calls[1]["stdin"])
+        self.assertIn("```zplan-answer", calls[1]["stdin"])
         self.assertIn("```zplan-answer <milestone id>", calls[1]["stdin"])
         self.assertNotIn("You are the zplan architect", calls[1]["stdin"])
         self.assertTrue(calls[1]["stdin"].endswith("второй"))                 # the owner message is still the tail
@@ -881,14 +1047,15 @@ class ArchitectTests(unittest.TestCase):
         self.assertEqual(roles, ["owner", "architect", "events", "architect"])
 
     # T2/U4
-    def test_u4_the_reply_language_follows_the_owner_and_event_turns_are_english(self):
+    def test_the_reply_language_follows_the_owner_in_owner_and_event_turns(self):
         """U4: the first-turn prompt tells the architect to answer in the language of the owner's last message, so a
         Russian owner message (kept verbatim as the tail) is answered in Russian; it names the English «yes» button.
         An event turn (`feed.summary`) and the `/new` warm-up and handoff prompts have no owner message: their text
         and the instructions around them carry no Cyrillic.
 
         Interpretation: the rule is one static sentence of the preamble (built once, on the first turn), which also
-        says that a turn without an owner message is answered in English; the test reads the real stdin of the turn.
+        says that a turn without an owner message follows the owner's last message in the conversation (English when
+        there is none); the test reads the real stdin of the turn.
         """
         from terminal_planner import feed
         from terminal_planner.tui import chat
@@ -897,7 +1064,7 @@ class ArchitectTests(unittest.TestCase):
         self.assertEqual(owner.send("привет").status, "completed")
         stdin = self.calls()[0]["stdin"]
         self.assertIn("in the language of the owner's last message", stdin)
-        self.assertIn("answered in English", stdin)
+        self.assertIn("in the language of the owner's last message in this conversation", stdin)
         self.assertIn("only their «yes» commits", stdin)
         self.assertTrue(stdin.endswith("привет"))
         self.assertIsNone(cyrillic.search(stdin[:-len("привет")]), "the instructions are English")
@@ -1020,7 +1187,7 @@ class DraftTests(unittest.TestCase):
 
     def test_the_draft_protocol_is_in_the_preamble_and_in_the_update_of_a_resumed_turn(self):
         for text in (build_preamble(SNAPSHOT), build_update(SNAPSHOT)):
-            self.assertIn("```zplan-goal", text)
+            self.assertIn("```zplan-answer", text)
             self.assertIn("```zplan-answer <milestone id>", text)
         self.assertEqual(build_update(SNAPSHOT),
                          build_update(json.loads(json.dumps(SNAPSHOT))))  # pure and deterministic

@@ -768,7 +768,11 @@ class VerdictReadTests(RunsTest):
             record = controller.observe(controller.active())  # both leave; a1 is read this slice
         self.assertEqual(record["live"]["verdicts"],
                          [{"at": live.floored(1791935230934), "task": "T1", "round": 1,
-                           "role": "acceptance_review", "verdict": "rejected", "text": "no test for the refusal"}])
+                           "role": "acceptance_review", "execution": "a1",
+                           "verdict": "rejected", "text": "no test for the refusal"}])
+        projected = live.flow(record["live"], None, live.floored(1791935230934))
+        review = next(event for event in projected["events"] if event["execution"] == "a1")
+        self.assertEqual((review["state"], review["result"]), ("failed", "no test for the refusal"))
         # The C3a command read ran on the first slice; the second slice read the departed reviewer, not a command.
         self.assertEqual([execution for execution, _ in reads], ["w1", "a1"])
         self.assertEqual(reads[-1], ("a1", {"deadline": runs.VERDICT_DEADLINE, "buffer": runs.LOG_LIMIT}))
@@ -836,7 +840,8 @@ class VerdictReadTests(RunsTest):
         self.assertEqual((record["status"], record["outcome"]), ("finished", "done"))
         self.assertEqual(record["live"]["verdicts"],
                          [{"at": live.floored(1791935230934), "task": "T1", "round": 1,
-                           "role": "acceptance_review", "verdict": "rejected", "text": "no test for the refusal"}])
+                           "role": "acceptance_review", "execution": "a1",
+                           "verdict": "rejected", "text": "no test for the refusal"}])
         # The terminal slice read the departed reviewer a1, and it made no C3a command read.
         self.assertEqual([execution for execution, _ in reads], ["a1"])
         self.assertNotIn("c1", [execution for execution, _ in reads])
@@ -858,7 +863,7 @@ class VerdictReadTests(RunsTest):
         self.assertEqual([execution for execution, _ in reads], ["a1"])
         self.assertEqual(record["live"]["verdicts"],
                          [{"at": live.floored(1791935230934), "task": "T1", "round": 1,
-                           "role": "acceptance_review", "verdict": "accepted", "text": "ok"}])
+                           "role": "acceptance_review", "execution": "a1", "verdict": "accepted", "text": "ok"}])
 
 
 

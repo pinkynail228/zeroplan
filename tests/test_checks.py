@@ -252,33 +252,79 @@ class Fixture(unittest.TestCase):
         return lines
 
 
+class CandidateIntegrityTests(Fixture):
+    def test_passing_checks_that_change_tracked_inputs_index_or_head_fail_closed(self):
+        git(self.project, "commit", "--allow-empty", "-qm", "second")
+        self.commit = git(self.project, "rev-parse", "HEAD")
+        mutations = {
+            "tracked": "from pathlib import Path; Path('file.txt').write_text('fixed\\n')",
+            "index": "import subprocess; subprocess.run(['git', 'rm', '--cached', 'file.txt'], check=True)",
+            "head": "import subprocess; subprocess.run(['git', 'checkout', '--detach', 'HEAD^'], check=True)",
+        }
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            mutations[flag] = ("import subprocess; from pathlib import Path; "
+                               "subprocess.run(['git', 'update-index', %r, 'file.txt'], check=True); "
+                               "Path('file.txt').write_text('fixed\\n')" % flag)
+        for name, code in mutations.items():
+            with self.subTest(name=name):
+                result = checks.qualify(self.project, self.commit, self.tree,
+                                        [self.check(name, code), self.check("later", "pass")], self.work)
+                self.assertEqual(result["outcome"], "failed")
+                self.assertEqual(result["checks"][0]["status"], "candidate_changed")
+                self.assertEqual(result["checks"][0]["exit_code"], 0)
+                self.assertEqual(result["checks"][1]["status"], "not_run")
+                self.assertEqual(result["commit"], self.commit)
+                self.assertEqual(git(self.project, "rev-parse", "HEAD"), self.commit)
+                self.assertEqual((self.project / "file.txt").read_text(), "one\n")
+                self.assertEqual(self.leftovers(), [])
+
+    def test_untracked_check_outputs_do_not_invalidate_the_candidate(self):
+        result = checks.qualify(self.project, self.commit, self.tree,
+                                [self.check("report", "from pathlib import Path; Path('report.txt').write_text('ok')")],
+                                self.work)
+        self.assertEqual(result["outcome"], "passed")
+
+
 class RunCheckTests(Fixture):
     """R-3/R-4: one check's execution, its status, its bounded window and the scrubbed tail it returns."""
 
-    def test_pass_fail_timeout_and_spawn_failure_give_their_exact_evidence(self):
-        """Class: the evidence dict is exactly the five keys of R-3 for a pass, an exit 3, a timeout and a spawn
-        failure (a foreign duration only for `spawn_failed` is caught here). Domain: the four outcomes, each with an
-        injected clock. Oracle: the dict literals, written from the spec."""
+    def test_pass_fail_timeout_and_spawn_failure_give_complete_deterministic_evidence(self):
+        """Every outcome records the executed contract and environment, not only a model-readable summary."""
         for code, status, tail in (("print('ok')", 0, "ok"), ("import sys; print('nope'); sys.exit(3)", 3, "nope")):
             with self.subTest(status=status):
                 check, clock = self.check("unit", code), self.clock()
-                found = checks.run_check(check, self.project, export.environment(), clock=clock)
-                self.assertEqual(found, {"name": "unit", "argv_digest": digest(check["argv"]), "status": status,
-                                         "duration_s": round(clock.reads[-1] - clock.reads[0], 3), "tail": tail})
+                environment = export.environment()
+                found = checks.run_check(check, self.project, environment, clock=clock)
+                self.assertEqual((found["name"], found["argv"], found["argv_digest"]),
+                                 ("unit", check["argv"], digest(check["argv"])))
+                self.assertEqual((found["status"], found["exit_code"], found["tail"], found["bounded_output"]),
+                                 (status, status, tail, tail))
+                self.assertEqual((found["cwd"], found["environment_digest"], found["interpreter"]),
+                                 (str(self.project), digest(environment), sys.executable))
+                self.assertEqual(found["duration_s"], round(clock.reads[-1] - clock.reads[0], 3))
+                self.assertIsInstance(found["started_at"], str)
+                self.assertIsInstance(found["ended_at"], str)
         slow = self.check("slow", "import time; time.sleep(30)", timeout_s=1)
         clock, began = self.clock(), time.monotonic()
         timed = checks.run_check(slow, self.project, export.environment(), clock=clock)
-        self.assertEqual(timed, {"name": "slow", "argv_digest": digest(slow["argv"]), "status": "timeout",
-                                 "duration_s": round(clock.reads[-1] - clock.reads[0], 3), "tail": ""})
+        self.assertEqual((timed["status"], timed["exit_code"], timed["tail"]), ("timeout", None, ""))
         self.assertGreaterEqual(timed["duration_s"], 1)
         self.assertLess(time.monotonic() - began, 1 + checks.GRACE + 1)
         ghost, clock = {"name": "ghost", "argv": ["zplan-no-such-program"], "timeout_s": 5}, self.clock()
         stranded = checks.run_check(ghost, self.project, export.environment(), clock=clock)
-        self.assertEqual(stranded, {"name": "ghost", "argv_digest": digest(ghost["argv"]), "status": "spawn_failed",
-                                    "duration_s": round(clock.reads[-1] - clock.reads[0], 3), "tail": ""})
+        self.assertEqual((stranded["status"], stranded["exit_code"], stranded["tail"]),
+                         ("spawn_failed", None, ""))
         for check, expected in ((slow, "timeout"), (ghost, "spawn_failed")):  # never a pass, and the rest stop
             listed = checks.run_checks([check, self.marker("after", self.base / "m")], str(self.project))
             self.assertEqual(([c["status"] for c in listed["checks"]], listed["outcome"]), ([expected, "not_run"], "failed"))
+
+    def test_an_empty_check_list_is_not_a_pass(self):
+        found = checks.run_checks([], str(self.project))
+        self.assertEqual((found["outcome"], found["checks"]), ("failed", []))
+
+    def test_the_declared_path_order_is_preserved(self):
+        with patch.dict(os.environ, {"PATH": "/declared/bin:/usr/bin:/bin"}):
+            self.assertEqual(export.environment()["PATH"], "/declared/bin:/usr/bin:/bin")
 
     def test_an_argv_element_reaches_the_check_literally_without_a_shell(self):
         directory = self.base / "cwd"
@@ -432,8 +478,13 @@ class CheckoutTests(Fixture):
         self.assertEqual(spawned, ["first", "second"])
         self.assertEqual(order.read_text(), "firstsecond")
         self.assertEqual(found["outcome"], "failed")
-        self.assertEqual(found["checks"][2], {"name": "third", "argv_digest": digest(listed[2]["argv"]),
-                                              "status": "not_run", "duration_s": 0, "tail": ""})
+        pending = found["checks"][2]
+        self.assertEqual((pending["name"], pending["argv"], pending["argv_digest"]),
+                         ("third", listed[2]["argv"], digest(listed[2]["argv"])))
+        self.assertEqual((pending["status"], pending["exit_code"], pending["duration_s"],
+                          pending["tail"], pending["bounded_output"]), ("not_run", None, 0, "", ""))
+        self.assertEqual((pending["started_at"], pending["ended_at"]), (None, None))
+        self.assertEqual(pending["cwd"], str(self.project))
 
     def test_an_interrupt_kills_the_group_reaps_the_child_and_removes_the_checkout(self):
         handshake, pidfile = self.base / "ready", self.base / "pid"
@@ -1000,8 +1051,10 @@ class SpawnTests(Fixture):
         unspawnable argv, with the injected clock. Oracle: the evidence dict and the untouched root."""
         ghost, clock = {"name": "ghost", "argv": ["zplan-no-such-program"], "timeout_s": 5}, self.clock()
         found = checks.run_check(ghost, self.project, export.environment(), clock=clock)
-        self.assertEqual(found, {"name": "ghost", "argv_digest": digest(ghost["argv"]), "status": "spawn_failed",
-                                 "duration_s": round(clock.reads[-1] - clock.reads[0], 3), "tail": ""})
+        self.assertEqual((found["name"], found["argv"], found["argv_digest"], found["status"], found["exit_code"]),
+                         ("ghost", ghost["argv"], digest(ghost["argv"]), "spawn_failed", None))
+        self.assertEqual((found["duration_s"], found["tail"], found["bounded_output"]),
+                         (round(clock.reads[-1] - clock.reads[0], 3), "", ""))
         self.assertEqual(checks.ORPHANS, [])  # no guard left alive: nothing was orphaned
 
     def test_a_signalled_check_reports_its_negative_status_and_stderr_is_kept(self):

@@ -1,0 +1,49 @@
+# One worker contract, at most 3 KB. Copy to .local/slices/<run>/contracts/<id>.toml.
+# Acceptance files go in .local/slices/<run>/contracts/<id>/: standalone modules the supervisor copies into the
+# worktree's .slice/ (never committed), restores before every green run and locks. Rules: docs/DEVELOPMENT.md 2.6.
+title = "One result in a few words"
+commit = "[run S1] Commit subject"
+
+# The only files the worker may change; a trailing / allows a folder.
+files = ["terminal_planner/x.py"]
+
+# Run by the supervisor, not the worker: must fail on the base, for a behaviour, and pass on the result.
+check = "PYTHONPATH=.slice:.:tests python3.13 -m unittest x_acceptance"
+
+# Required: the failure on the base must contain this text: a behaviour, never the check's own module name.
+red_contains = "KeyError: 'required'"
+
+# Project checks after green, before the run's lane_gate. Their output goes back to a repair worker.
+gates = ["python3.13 devtools/fasttest.py tests.test_x"]
+
+# Non-empty: an action reserved for the owner. The slice is deferred and the queue moves on.
+needs_owner = ""
+
+# A slice that failed or was deferred defers this one.
+depends = []
+
+# Earlier slices of this run whose behaviour this one changes on purpose; their checks are not rerun on it.
+supersedes = []
+
+max_diff_lines = 300
+
+review = true
+
+# Everything the worker needs, up front: it has no network, no .local and no one to ask.
+brief = """Result: what is true afterwards, and why it matters, in one or two sentences.
+Where: files, functions, line numbers, the existing pattern to copy.
+Decisions: every value and choice already made, so nothing is left to guess.
+Facts: what it cannot look up: data shapes, synthetic examples.
+R1. A requirement a reviewer can check against the diff.
+Non-goals: what the worker must not do.
+Invariants: what must keep working.
+Tests to keep: none, or the one durable test to write and why (a named risk, a defect that escaped to main, words the
+owner must see). The acceptance check is not kept."""
+
+# The test ratchet: a change may not add a test, a sentence assertion, a test module or a test named after a brief
+# criterion, nor drop an assertion. Every exception is "<test id, path or fnmatch pattern>: <reason>"; the reviewer sees it.
+# [ratchet]
+# new_tests = ["tests.test_x.T.test_refuses_y: the brief asks for this regression"]   # the durable tests the brief asks for
+# new_modules = ["tests/test_x.py: a new product area"]
+# text_pins = ["tests.test_x.T.test_warns: the owner must see this warning"]   # one per added sentence assertion
+# removes = ["tests.test_x.T.test_old: the behaviour moved to the screen"]

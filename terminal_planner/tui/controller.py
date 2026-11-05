@@ -5,20 +5,24 @@ runs actions and refresh slices one at a time and hands back immutable snapshots
 read-only overview as the plain home screen (workspace + overview/status): it never polls, submits or dispatches.
 This module does not import Textual."""
 
+import collections
 import contextlib
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
 import queue
+import secrets
 import threading
 import time
 from typing import Optional, Tuple
 import uuid
 
-from .. import autonomy, bridge, catalog, engine, feed, planning as planning_module, process, user_commit
-from ..architect import NO_PLAN
-from ..authority import Authority, Blocked
+from .. import autonomy, bridge, catalog, engine, feed, live, planning as planning_module, process, setup, user_commit
+from ..architect import NO_PLAN, ArchitectStore
+from ..application import ApplicationService, request_snapshot
+from ..authority import Authority, Blocked, FormatRefused, atomic_state, chain_approved, chain_budget
 from ..cli import App, fixture_driver, refusal, safe, summary
-from ..delivery import ACTIVE, CRITIC_SLICE, Changed, END_ACTIONS, Row, Token
+from ..delivery import ACTIVE, ApprovedPlan, CRITIC_SLICE, Changed, END_ACTIONS, Row, Token
 from ..planning import PlanView
 from ..process import Profile, ProfileChanged
 from ..runs import MilestoneRuns, extended, git_call, run_state
@@ -26,6 +30,7 @@ from . import chat as chat_module
 
 REFRESH, CHECK, SETUP, OBSERVE, OBSERVE_RUN = "refresh", "check", "setup", "observe", "observe_run"
 ROWS = "bridge_rows"  # the architect status tool's rows snapshot: read-only, posted and waited for by each status
+MESSAGE_LINE = 200  # characters of the owner's message an owner-bound request keeps (its first line, scrubbed)
 STATUS_WAIT = 2.0  # seconds the architect's status waits for its rows job before it answers the last rows, stale
 FEED_PENDING, FEED_HANDLE = "feed_pending", "feed_handle"  # A6b2b: the chat's feed port jobs (a read, an ack)
 OBSERVATIONS = frozenset((OBSERVE, OBSERVE_RUN))  # a watch slice: quitting may skip one once it has closed
@@ -44,7 +49,7 @@ STOP_WAIT = TUI_SLICE + 3  # quitting waits at most this long for the slice in f
 # it running waits for it and one that has already closed refuses it). Neither is ever cut, and both keep their
 # count until the result reached the UI: quitting shows a submission or an export before the app may exit.
 CUTTABLE = frozenset((REFRESH, CHECK, OBSERVE, OBSERVE_RUN, "open_run", "diff", "details", "record", "changes",
-                     "tail", "open_answer_draft", ROWS, FEED_PENDING))
+                     "tail", "open_answer_draft", "request_snapshot", ROWS, FEED_PENDING))
 # The action tools' argument keys, exactly their schemas (`architect_tools.TOOLS`, additionalProperties=false):
 # a request carrying anything else is an invalid argument, refused before freshness and the policy, never ignored.
 TOOL_ARGUMENTS = {"zplan_start": frozenset(("milestone", "revision")),
@@ -52,15 +57,28 @@ TOOL_ARGUMENTS = {"zplan_start": frozenset(("milestone", "revision")),
                   "zplan_approve_plan": frozenset(("revision",)),
                   "zplan_resume": frozenset(("milestone", "token")),
                   "zplan_rebrief": frozenset(("milestone", "token", "note")),
-                  "zplan_edit_plan": frozenset(("revision", "plan")),
-                  "zplan_revise_plan": frozenset(("revision", "feedback")),
+                  "zplan_plan": frozenset(("goal", "plan", "request")),
+                  "zplan_edit_plan": frozenset(("revision", "plan", "response", "request")),
                   "zplan_merge": frozenset(("milestone", "token")),
-                  "zplan_propose_commit": frozenset(("paths", "message"))}
+                  "zplan_propose_commit": frozenset(("paths", "message")),
+                  "zplan_settings": frozenset(("level", "max_runs", "merge", "roles"))}
 
-# The action tools whose admission is one `_plan_job` (`Planning.edit` is the plan service's own rule): they are
+# The action tools whose admission is one `_plan_job` (`Planning.edit` is the plan service's own rule; `zplan_plan`
+# is the owner's own start-planning work, only on the owner's word): they are
 # posted through the Controller's plan-job path from the socket thread itself, exactly as the owner's own submit and
 # revise are, never as the generic bridge job and never as a job nested inside another.
-PLAN_TOOLS = frozenset(("zplan_edit_plan", "zplan_revise_plan"))
+ARCHITECT_ATTEMPTS = 2  # the new attempts an event turn may start per milestone and plan revision; then the owner decides
+RESULTS = 20  # the results a status keeps (the last ones), and the subjects results.json keeps
+RESULTS_FILE = "results.json"  # beside the store, never in planning.json (V2c)
+RESULT_LINES = 4  # the lines one result carries
+AT_WORD = {"start": "Started", "resume": "Continued", "rebrief": "Started a new attempt", "approve": "Approved",
+           "merge": "Merged", "plan": "Planned", "settings": "Changed settings"}  # what an owner turn's call says it did, "<verb> at your word: «message»"
+PLAN_TOOLS = {"zplan_plan": "plan", "zplan_edit_plan": "edit"}
+# The plan format refusals one owner turn allows (one owner line, at the cap); then both plan tools refuse, quietly.
+# A runaway bound only: caps of 3 and 6 cut converging plans off (A0 rig: 9 of 16 and 8 of 15 plan turns missed);
+# with no cap every plan turn saved a plan (0 of 8, about 7 refusals per turn).
+FORMAT_REFUSALS = 25
+LATE_WAKE = ("zplan_merge", "zplan_start", "zplan_rebrief")  # R3d: a job of these that ends after its wait wakes the architect
 
 
 class Release:
@@ -133,9 +151,14 @@ class Snapshot:
     panel: Tuple[str, ...] = ()  # live lines (roles, elapsed, last event, heartbeat) of the observed run
     journal: Tuple[str, ...] = ()  # stored journal entries of the observed attempt, oldest first (nothing rendered yet)
     flow: Optional[dict] = None  # structured facts of the active attempt for the Now drawing (F2); None without one
+    graph: Optional[dict] = None  # the frozen Zeroshot root of that attempt, not a UI-rebuilt template
     profile: Optional[process.View] = None  # the process profile as the screens show it (None: not enforced)
     plan_state: Optional[object] = None  # the plan identity state of `version` (plain data; None: no plan)
     uncommitted: Tuple[str, ...] = ()  # the paths the last commit does not hold (the planner and the runs see HEAD)
+    approved: Optional[ApprovedPlan] = None  # the last approved plan and its progress (None: never approved)
+    scripted: bool = False  # the architect is the fixture script: it never approves, the owner does
+    goldfish: bool = False  # the plan is a Goldfish one: no planner runs, the owner's texts say "plan check"
+    chain_approved: bool = False  # a later revision of a chain the owner approved: the architect may approve it
 
     @property
     def stale(self):
@@ -176,6 +199,11 @@ class Capture:
 
     def show(self, value=""):
         self.lines.extend(safe(value).split("\n"))
+
+
+def approved_line(version, despite=False):
+    """The result line of an approval: what happened, nothing about what comes next (the snapshot shows that)."""
+    return "Plan r%s approved%s." % (version, " despite the check" if despite else "")
 
 
 def checks_of(items):
@@ -247,19 +275,62 @@ def token_fields(token):
 PLAN_FINDINGS = 4000  # the characters of the evidence's findings a status plan carries
 
 
-def plan_fields(plan):
+def plan_fields(plan, revisions=None):
     """The current plan revision as the status payload names it: its version, status, gate verdict and the
     evidence's findings (at most `PLAN_FINDINGS`, "" without evidence), or None without a revision. The verdict is the evidence's own `verdict` (accepted / rejected), the same word the plan
-    screen prints; None while the plan has no verdict yet."""
+    screen prints; None while the plan has no verdict yet. A Goldfish plan also carries `revisions_left`: the
+    plan revisions the architect may still make, counted from `revisions` (the plan revision chain), None when
+    there is no budget."""
     if not isinstance(plan, dict):
         return None
     evidence = plan.get("evidence")
     findings = evidence.get("findings") if isinstance(evidence, dict) else None
     findings = findings if isinstance(findings, str) else ""
-    return {"version": plan.get("version"), "status": plan.get("status") or "",
-            "verdict": evidence.get("verdict") if isinstance(evidence, dict) else None,
-            "findings": findings if len(findings) <= PLAN_FINDINGS else findings[:PLAN_FINDINGS - 1] + "…",
-            "proposal": plan.get("proposal")}
+    fields = {"version": plan.get("version"), "status": plan.get("status") or "",
+              "verdict": evidence.get("verdict") if isinstance(evidence, dict) else None,
+              "findings": findings if len(findings) <= PLAN_FINDINGS else findings[:PLAN_FINDINGS - 1] + "…",
+              "proposal": plan.get("proposal")}
+    if is_goldfish(plan):  # the evidence's paraphrase, and the architect's plan before a review has produced a proposal
+        fields["paraphrase"] = evidence.get("paraphrase") if isinstance(evidence, dict) else None
+        fields["draft"] = plan.get("draft") if plan.get("proposal") is None else None
+        budget = chain_budget(revisions)
+        fields["revisions_left"] = None if budget is None else max(budget[1] - budget[0], 0)
+    return fields
+
+
+def is_goldfish(revision):
+    """Whether a plan revision is a Goldfish (planner-free) one."""
+    return revision.get("frozen", {}).get("review") == "goldfish"
+
+
+REASON_STATES = ("blocked", "failed", "failed_recoverable", "needs_owner", "conflict", "stopped", "paused")
+REASON_LINES = 12   # the lines of a stopped attempt's reason a status row carries
+REASON_WIDTH = 300  # the characters of each of them
+
+
+def cut_lines(lines, last=False):
+    """`lines` (strings, split on newlines) as the status carries text: at most `REASON_LINES` lines (the first
+    ones, the last ones for `last`) of at most `REASON_WIDTH` characters, every line scrubbed like the architect's
+    other reads."""
+    def cut(line):
+        line = live.scrub(line.rstrip())
+        return line if len(line) <= REASON_WIDTH else line[:REASON_WIDTH - 1] + "…"
+    lines = [part for text in lines for part in str(text).split("\n")]
+    return "\n".join(cut(line) for line in (lines[-REASON_LINES:] if last else lines[:REASON_LINES]))
+
+
+def reason_fields(view):
+    """Why an attempt stopped, as the status row carries it: the owner's end view (heading, status, family) with its
+    body cut by `cut_lines`."""
+    return {"heading": live.scrub(view.heading), "status": live.scrub(view.status),
+            "body": cut_lines(view.body), "family": view.family}
+
+
+def reason_of(app, row):
+    """`reason_fields` of the row's latest attempt, built by `Delivery.view` (it exports nothing, unlike `end`);
+    None when the row has no attempt."""
+    r = app.delivery.latest(row.id)
+    return None if r is None else reason_fields(app.delivery.view(r))
 
 
 MERGE_FILES = 20  # the changed files a status row names before it only counts the rest
@@ -291,9 +362,10 @@ def merge_tier(status, paths):
 def merge_fields(app, row, status):
     """What the architect needs to decide a merge from `zplan_status` alone: the result commit, its branch, the
     destination branch, the files the result changes against the destination (at most `MERGE_FILES`, then
-    `more`), the live profile's merge gate and check names, and the autonomy policy's own `decision` for a merge
-    under them (`status` is the one profile read of the rows job, as `_merge_tool` reads it). `files` is None when
-    Git cannot list them; an attempt not exported yet has no commit and no files."""
+    `more`), the live profile's merge gate and check names, the autonomy policy's own `decision` for a merge
+    under them (`status` is the one profile read of the rows job, as `_merge_tool` reads it), the attempt's `tasks`
+    count and the stored `gate_result` of this result. `files` is None when Git cannot list them; an attempt not
+    exported yet has no commit and no files."""
     r = app.delivery.latest(row.id)
     result, destination = extended(r)["result"] or {}, r["destination"]
     names = changed_paths(app, r)
@@ -303,7 +375,54 @@ def merge_fields(app, row, status):
     return {"commit": result.get("commit"), "branch": result.get("branch"), "destination": destination["branch"],
             "files": files, "more": more, "gate": gate,
             "checks": [c["name"] for c in resolved.config["checks"]] if resolved is not None else [],
-            "decision": autonomy.decide(autonomy.level_of(status), "merge", gate, merge_tier(status, names))}
+            "decision": autonomy.decide(autonomy.level_of(status), "merge", gate, merge_tier(status, names)),
+            "tasks": tasks_count(app, r), "gate_result": gate_result(app, r, result.get("commit"))}
+
+
+def tasks_count(app, r):
+    """`{"done", "total"}` of the attempt's manifest as `Delivery.tasks_lines` counts it (dropped tasks excluded);
+    None when the manifest is unavailable."""
+    manifest = app.delivery.runs.manifest(r)
+    if not manifest:
+        return None
+    tasks = [t for t in manifest["tasks"] if t["status"] != "dropped"]
+    return {"done": sum(t["status"] == "done" for t in tasks), "total": len(tasks)}
+
+
+def gate_result(app, r, commit):
+    """The stored merge gate of the attempt's current result `commit`, as the architect reads it after a refused
+    merge: the outcome, each check's name, status and tail (its last lines), and the critic's verdict and findings.
+    Only stored records are read; None when no gate was built or it was built for another result."""
+    gate = r.get("gate")
+    if not isinstance(gate, dict) or commit is None or gate.get("result") != commit:
+        return None
+    evidence = gate["evidence"]
+    critic = next((c for c in app.authority.state.get("critics", []) if c["id"] == gate.get("critic")), None)
+    return {"outcome": evidence["outcome"],
+            "checks": [{"name": c["name"], "status": c["status"], "tail": cut_lines([c["tail"]], last=True)}
+                       for c in evidence["checks"]],
+            "critic": None if critic is None else
+            {"verdict": critic["verdict"],
+             "findings": None if critic["findings"] is None else cut_lines([critic["findings"]])}}
+
+
+def profile_fields(status):
+    """The effective profile as `zplan_status` shows it, from the one `autonomy.status_of` read: its state, short
+    digest, autonomy level and parallel runs. None without a status (no profile, or one that cannot be read)."""
+    if status is None:
+        return None
+    resolved = status.resolved
+    config = resolved.config if resolved is not None else {}
+    return {"state": status.state, "digest": resolved.short if resolved is not None else None,
+            "level": autonomy.level_of(status),
+            "parallel_runs": process.parallel_runs(config.get("autonomy", {}).get("max_runs"))}
+
+
+def readiness_fields(app):
+    """The start gate's blocking readiness items for `zplan_status`: `{"id", "line", "fix"}` (`fix` is the item's
+    `detail`), scrubbed; `[]` when nothing blocks or there is no readiness check."""
+    return [{"id": i["id"], "line": live.scrub(i["line"]), "fix": live.scrub(i["detail"])}
+            for i in app.planning.items("start") if setup.severity(i) == "block"]
 
 
 def draft_token(identity, milestone):
@@ -342,10 +461,23 @@ def job_label(label):
     return label.split(":", 1)[0]
 
 
+def frozen_graph(app):
+    """The active attempt's exact frozen Zeroshot root, or None when no readable active graph exists."""
+    record = app.delivery.active_run()
+    if record is None:
+        return None
+    try:
+        document = json.loads(app.delivery.runs.frozen(record)["graph"].read_text(encoding="utf-8"))
+        return document.get("root") if isinstance(document, dict) and isinstance(document.get("root"), dict) else None
+    except (Blocked, OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def take_snapshot(app, name):
     """Plain `home` of the session, frozen. Read-only: the overview only detects integration (ancestry)."""
     branch, clean = app.controller.workspace()
     home = app.delivery.home()  # the same lines the plain home prints
+    approved = app.delivery.approved()
     plan = app.plan()
     roles = tuple((role, b["model"], b["effort"]) for role, b in app.roles.items() if b)
     try:
@@ -356,9 +488,12 @@ def take_snapshot(app, name):
                     tuple(safe(line) for line in home.lines), roles, plan=view, rows=home.rows,
                     focus=home.focus.id if home.focus else None, g=home.g, g_milestone=home.g_milestone,
                     busy=home.busy, slots=home.slots, panel=tuple(safe(line) for line in home.panel),
-                    journal=tuple(safe(line) for line in home.journal), flow=home.flow,
+                    journal=tuple(safe(line) for line in home.journal), flow=home.flow, graph=frozen_graph(app),
                     profile=process.view(app.profile) if app.profile is not None else None,
-                    plan_state=plan_state(plan), uncommitted=tuple(app.controller.uncommitted()))
+                    plan_state=plan_state(plan), uncommitted=tuple(app.controller.uncommitted()), approved=approved,
+                    goldfish=bool(plan and is_goldfish(plan)),
+                    chain_approved=chain_approved(getattr(getattr(app, "authority", None), "state", None) and
+                                                  app.authority.state.get("revisions") or []))
 
 
 @dataclass(frozen=True)
@@ -383,7 +518,7 @@ class ConsentRequest:
     (None: no profile), `preview` the start's `Preview` as it was built. It runs nothing: only the owner's answer
     does (`Controller.consent`, `Controller.decline`). `state` is `awaiting`, `done`, `declined`, `stale` (the
     profile, plan or attempt moved: nothing ran) or `failed`, and `lines` what the card and the architect's status
-    show."""
+    show (while awaiting, a settings change's "key: old -> new" lines)."""
     id: str
     action: str
     milestone: str
@@ -405,6 +540,7 @@ class Controller:
         `can_plan` is False when no planner engine is wired (nothing may be submitted)."""
         self.open_session, self.name, self.can_plan = open_session, name, can_plan
         self.project = project  # the project directory (None: unknown), for the architect chat of this window
+        self.scripted = False  # the architect is the fixture script (`for_project(scripted=True)`)
         self.readiness, self.install, self.login = readiness, install, login
         self.driver_factory = driver_factory
         self.error = ""
@@ -422,11 +558,18 @@ class Controller:
         self._released = []  # worker thread: what the job being delivered right now owes (its own count, an export)
         self._bridge = None  # the live endpoint for the architect's action tools (None: not serving)
         self._registry = bridge.Registry()  # the architect's action requests, by id, kept after a timeout
-        self._rows = None  # (approved revision, rows, current plan) of the last status snapshot; None: none yet
-        # The TUI's hand-over for a plan verdict an architect tool produced (A5t2b): the app sets it to a
-        # worker-callable that shows the outcome exactly as the owner's own submission does (`after_submission`),
-        # so a `zplan_edit_plan` that reaches "ready" starts the planner watch that dispatches it. None in a
-        # controller without a UI (the tool still saves the revision).
+        self._format_refusals = {}  # owner turn (_turn_key) -> the plan format refusals it has had
+        self._revised_in = set()  # (occurrence, text) of each owner message that created a Goldfish revision
+        self._turns = {}  # token -> the owner's message reference, for each owner turn running now (`_turn_guard`)
+        self._turn_guard = threading.Lock()
+        self._results = collections.deque(maxlen=RESULTS)  # V2a: one receipt per approval call, written by its job
+        self._result_seq = 0
+        self._result_guard = threading.Lock()
+        self._kept = []  # V2c: the last result of each subject, oldest first, at most RESULTS (the file's content)
+        self._results_path = None  # V2c: results.json beside the store, set when the session opens
+        self._rows = None  # (approved revision, rows, current plan, readiness, profile) of the last status snapshot; None: none yet
+        # Optional presentation of an application-driven initial dispatch. No callback is needed to
+        # save the revision or receipt; a TUI may continue observing after this notification.
         self.on_plan_submission = None
         # D4c: the architect's proposal to commit the owner's files (None: none yet). The worker sets it, the app
         # shows its card (`on_commit_proposal`, worker-callable) and runs «yes» on the UI thread (`commit_files`).
@@ -448,14 +591,18 @@ class Controller:
         # sends). `_feed` is the requested port: its presence makes the worker bootstrap the feed once the session opens.
         self.on_observed = None
         self.snapshot_source = None
+        self.on_result = None  # the screen's hook: the architect's merge or start result, once (V2b, V2d)
         self.on_merge_wait = None  # the screen's hook: the milestone whose merge waits for the critic, None at its end
         self.on_start_wait = None  # the screen's hook: (milestone, "begin"/"done"/"failed") of a start the architect's tool makes
         self._feed = None
         self._opened = False  # the session open (and the feed bootstrap, when requested) is over; guarded
+        # Lazy: a fixture shell with chat disabled must not open an architect store at startup.
+        self.application = None
 
     @classmethod
     def for_project(cls, project, state_root, fixture_id=None, driver_factory=None, worktrees=None, readiness=None,
-                    install=None, login=None, role_preferences=None, engine_factory=None, profile=False):
+                    install=None, login=None, role_preferences=None, engine_factory=None, profile=False,
+                    scripted=False):
         """The production wiring: the same Authority/MilestoneRuns/App objects as the plain session, opened
         (and locked) on the worker thread. `engine_factory(name, terminal)` is the plain session's planner."""
         def no_engine(*_):
@@ -471,8 +618,10 @@ class Controller:
             return App(Capture(role_preferences), authority, engine_factory or no_engine, factory(authority), trees,
                        readiness=readiness, driver_factory=factory,
                        profile=Profile.of(authority) if profile else None)
-        return cls(open_session, project.name, readiness, install, login, factory,
-                   can_plan=engine_factory is not None, project=Path(project).expanduser().resolve())
+        controller = cls(open_session, project.name, readiness, install, login, factory,
+                         can_plan=engine_factory is not None, project=Path(project).expanduser().resolve())
+        controller.scripted = scripted  # a `--fixture ID` session: the plan card asks the owner, never the script
+        return controller
 
     # Worker --------------------------------------------------------------------
 
@@ -578,6 +727,11 @@ class Controller:
                 app = self.open_session(stack)
             except (Blocked, OSError, ValueError) as error:
                 app, self.error, self.family = None, summary(error), catalog.family(error)
+            if app is not None:
+                try:
+                    self._seed_results(app.authority.directory / RESULTS_FILE)
+                except Exception:  # results are never in the way: no name for the file leaves none
+                    pass
             with self._guard:
                 self._opened = True
             booted = app is None
@@ -713,14 +867,50 @@ class Controller:
     # these tools over the endpoint's socket. `zplan_status` posts the rows job and waits, bounded, on the socket
     # thread; an action posts a mutating job and waits, on the socket thread, for its callback. The worker never joins a request thread.
 
+    def request_snapshot(self):
+        """Capture the common projection on the owning worker, without a Textual screen."""
+        return self._feed_call("request_snapshot", lambda app: request_snapshot(take_snapshot(app, self.name), self.name))
+
+    def begin_turn(self, message, occurrence=None, identity=None):
+        """Mint the token of one owner turn, before its Codex starts; the turn's MCP server sends it with every
+        request. It stands for the owner's message: its first line, scrubbed, at most `MESSAGE_LINE` characters, and
+        `occurrence`, the message's place in the architect's store. `end_turn` closes it."""
+        token = secrets.token_hex(16)
+        reference = {"text": live.scrub(live.first_line(message))[:MESSAGE_LINE], "occurrence": occurrence,
+                     **(identity or {})}
+        with self._turn_guard:
+            self._turns[token] = reference
+        return token
+
+    def end_turn(self, token):
+        """Close a turn's token: a request that arrives with it afterwards is bound to the events."""
+        with self._turn_guard:
+            self._turns.pop(token, None)
+
+    def _binding(self, token):
+        """`("owner", reference)` when `token` is one `begin_turn` minted and `end_turn` has not closed, else
+        `("events", None)`: no token, an unknown one and a closed one alike."""
+        with self._turn_guard:
+            reference = self._turns.get(token) if isinstance(token, str) else None
+        return ("owner", dict(reference)) if reference is not None else ("events", None)
+
     def _bridge_request(self, request):
         """`(ok, error)` of one request; runs on the endpoint's socket thread. `error` is a {family, message} dict."""
+        if self.application is None and self.project is not None:
+            with self._guard:
+                if self.application is None:
+                    ApplicationService(None, store=ArchitectStore(self.project), controller=self)
+        if self.application is not None:
+            try:
+                return self.application.tool_request(request).envelope()
+            except Blocked as error:
+                return None, {"family": error.family, "message": str(error)}
         tool, args = request.get("tool"), request.get("args")
         args = args if isinstance(args, dict) else {}
         if tool == "zplan_status":
             return self._bridge_status(), None
         if tool in TOOL_ARGUMENTS:
-            return self._bridge_action(request.get("id"), tool, args)
+            return self._bridge_action(request.get("id"), tool, args, request.get("turn"))
         return None, {"family": "architect.request_invalid", "message": "Unknown tool: %s." % tool}
 
     def _bridge_status(self):
@@ -740,7 +930,8 @@ class Controller:
         rows = self._rows
         payload = {"requests": self._registry.snapshot(), "revision": rows[0] if rows else None,
                    "rows": rows[1] if rows else "rows unavailable",
-                   "plan": rows[2] if rows else "plan unavailable"}
+                   "plan": rows[2] if rows else "plan unavailable",
+                   "readiness": rows[3] if rows else [], "profile": rows[4] if rows else None}
         proposal = self.commit_proposal
         if proposal is not None:
             payload["commit"] = {"state": proposal.state, "paths": list(proposal.selection.paths),
@@ -751,6 +942,7 @@ class Controller:
                                   "state": request.state, "lines": list(request.lines)}
         if self.asked:
             payload["asked"] = dict(self.asked)
+        payload["results"] = self.results()
         if not fresh:
             payload["stale"] = True
         return payload
@@ -758,23 +950,25 @@ class Controller:
     def _rows_job(self, app):
         """Read-only snapshot of the current plan for the architect status tool: the approved plan's rows, each with
         its attempt's token (an `awaiting_merge` row also its `merge` evidence), and the current revision (version,
-        status and gate verdict, also when it is not approved)."""
+        status and gate verdict, also when it is not approved), the start gate's blocking readiness items and the
+        profile, read once (`status_of`) for the profile and the rows' merge evidence alike."""
         self._need(app)
         home = app.delivery.home()
+        status = autonomy.status_of(app.profile)
         if home.kind == "approved":
             revision = app.authority.current["version"]
-            status = autonomy.status_of(app.profile) if any(r.state == "awaiting_merge" for r in home.rows) else None
             rows = tuple({"id": row.id, "state": row.state, "attempt": row.token.attempt if row.token else None,
                           "run_id": row.token.run_id if row.token else None, "token": token_fields(row.token),
                           **({"merge": merge_fields(app, row, status)}
-                             if row.state == "awaiting_merge" and row.token else {})}
+                             if row.state == "awaiting_merge" and row.token else {}),
+                          **({"reason": reason_of(app, row)} if row.state in REASON_STATES and row.token else {})}
                          for row in home.rows)
         else:
             revision, rows = None, ()
-        self._rows = (revision, rows, plan_fields(app.delivery.plan()))
+        self._rows = (revision, rows, plan_fields(app.delivery.plan(), app.authority.state["revisions"] if app.authority.state else None), readiness_fields(app), profile_fields(status))
         return None
 
-    def _bridge_action(self, rid, tool, args):
+    def _bridge_action(self, rid, tool, args, turn=None, complete=None, application=None, admitted_binding=None):
         """Post `tool` as one job and wait, bounded, for its callback. `(ok, error)`.
 
         `Planning.edit` (`zplan_edit_plan`) is the plan service's own rule, so it is admitted as one `_plan_job`
@@ -783,51 +977,120 @@ class Controller:
         own `mutating=True` job. Both carry the request's bookkeeping (`open`/`running`/`finish`) inside the job.
 
         `post` refusing (the interface is leaving) is an immediate refusal with no job; otherwise the socket
-        thread waits on the callback's Event, never the worker, so quitting joins no request thread."""
+        thread waits on the callback's Event, never the worker, so quitting joins no request thread.
+
+        The request's binding is fixed here, at admission, from the `turn` token it arrived with, and stays in its
+        registry entry: a job that runs after its turn ended is still the owner turn's."""
         event, box = threading.Event(), {}
-        if not self._registry.open(rid, tool):  # refused before admission: no job, the registry keeps its entries
-            return None, {"family": bridge.INVALID,
-                          "message": "Request %s not accepted: the id is taken or %d requests are not finished yet."
-                                     % (rid, bridge.MAX_REQUESTS)}
+        lock = threading.Lock()
+        job = {"app": None, "expired": False, "finished": False}  # R3d: the wait and the job meet under `lock`
+        binding, message = admitted_binding if admitted_binding is not None else self._binding(turn)
+        if not self._registry.open(rid, tool, binding, message):
+            error = {"family": bridge.INVALID,
+                     "message": "Request %s not accepted: the id is taken or %d requests are not finished yet."
+                                % (rid, bridge.MAX_REQUESTS)}
+            if complete is not None:
+                complete(None, error)
+            return None, error
 
         def done(result, error):
             if error is not None and not box:
                 # The job refused before `work` ran (the plan job's own session check, `_need`): the request fails
                 # with that refusal, never ends as a success.
                 box["error"] = {"family": self.family, "message": self.error or str(error)}
+            if complete is not None:
+                try:
+                    complete(box.get("ok"), box.get("error"))
+                except Exception:
+                    # An effect may already exist. Leave its durable claim unfinished, not retryable.
+                    box.clear()
+                    box["error"] = {"family": bridge.TIMEOUT_FAMILY, "message": "outcome unknown"}
             if "error" in box:
                 self._registry.finish(rid, error=box["error"])
             else:
                 self._registry.finish(rid, ok=box.get("ok"))
+            with lock:
+                expired = job["expired"]
+                job["finished"] = True
+            if expired and tool in LATE_WAKE and job["app"] is not None:
+                self._late_result(job["app"], rid, tool, box.get("error"))
             event.set()
 
         def work(app, planning=None):
+            job["app"] = app
             self._registry.running(rid)  # queued -> running, visible to a status while the job runs
             app.authority.architect_acting = True  # the events this job's saves capture do not wake the architect
+            failure = None
+            seen = None
             try:
-                box["ok"] = self._run_tool(app, tool, args, planning)
+                if application is not None:
+                    self._need(app)
+                    if tool in PLAN_TOOLS:
+                        application.prepare_tool(app)
+                box["ok"] = self._run_tool(app, tool, args, planning, rid)
+                if tool in PLAN_TOOLS:
+                    box["ok"], seen = box["ok"]  # the plan tool's submission verdict, checks included
+                    if application is not None:
+                        # Engine observations must still wake later TUI event turns. The architect's
+                        # revision creation above is marked separately by the existing feed.
+                        app.authority.architect_acting = False
+                        box["ok"]["dispatch"] = application.advance_plan(app, seen)
+                        if seen.kind == "ready":
+                            # Presentation only: the receipt exists before this hook can run.
+                            self._notify(self.on_plan_submission, Outcome("dispatched", lines=tuple(
+                                box["ok"]["dispatch"].get("lines", ()))))
             except Blocked as error:
                 box["error"] = {"family": catalog.family(error), "message": summary(error)}
+                failure = error
             except (OSError, ValueError) as error:
                 box["error"] = {"family": catalog.UNKNOWN, "message": summary(error)}
+                failure = error
             except Exception as error:
                 box["error"] = {"family": catalog.UNKNOWN,
                                 "message": "%s: %s" % (type(error).__name__, summary(error))}
+                failure = error
             finally:
                 app.authority.architect_acting = False
-            return None
+            if tool not in PLAN_TOOLS:
+                return None
+            if failure is not None:  # the plan job's own end writes the result; the request's entry is in `box`
+                raise failure
+            return seen if seen is not None else Outcome(box["ok"]["status"])
 
-        posted = (self._plan_job(tool, work, done) if tool in PLAN_TOOLS
+        posted = (self._plan_job(tool, work, done, PLAN_TOOLS[tool], rid) if tool in PLAN_TOOLS
                   else self.post(tool, work, done, mutating=True))
         if not posted:
             error = {"family": "architect.closing", "message": "The interface is closing: the action was not started."}
+            if complete is not None:
+                complete(None, error)
             self._registry.finish(rid, error=error)
             return None, error
         if not event.wait(bridge.TIMEOUT):
-            return None, {"family": "architect.controller_timeout", "message": "outcome unknown"}
+            with lock:
+                job["expired"] = not job["finished"]
+                gave_up = job["expired"]
+            if gave_up:
+                return None, {"family": "architect.controller_timeout", "message": "outcome unknown"}
         if "error" in box:
             return None, box["error"]
         return box.get("ok"), None
+
+    def _late_result(self, app, rid, tool, error):
+        """R3d: the job of request `rid` ended after its wait gave up: the feed gets one result event, which wakes the
+        architect by the autonomy level. The outcome is the call's own result (`_result`); a request refused before
+        the tool left one is a failure with the refusal."""
+        with self._result_guard:
+            kept = next((result for result in reversed(self._results) if result.get("request") == rid), None)
+        if kept is not None:
+            outcome, family, lines = kept["outcome"], kept["family"], list(kept["lines"])
+        else:
+            error = error or {}
+            outcome, family = "failed", error.get("family") or catalog.UNKNOWN
+            lines = [live.scrub(error.get("message") or "")]
+        try:
+            feed.late_result(app.authority, rid, tool.removeprefix("zplan_"), outcome, family, lines)
+        except (Blocked, OSError, ValueError):
+            pass
 
     @staticmethod
     def _argument(args, name, kind):
@@ -840,10 +1103,33 @@ class Controller:
             raise Blocked("Invalid argument %s." % name, family="architect.request_invalid")
         return value
 
-    def _run_tool(self, app, tool, args, planning=None):
+    @staticmethod
+    def _plan_argument(args):
+        """The `plan` argument: an object, or the JSON text of one (the model often sends the plan as text: the first
+        call of most plan turns on the A0 rig). Anything else is the model's format error, kept from the owner."""
+        value = args.get("plan")
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                value = None
+        if not isinstance(value, dict):
+            raise FormatRefused("Invalid argument plan: send the plan as a JSON object, not as text.", family="action.refused")
+        return value
+
+    @staticmethod
+    def _text_argument(args, name):
+        """An optional string argument ("" when absent); an empty string is allowed, a non-string is invalid."""
+        value = args.get(name, "")
+        if isinstance(value, bool) or not isinstance(value, str):
+            raise Blocked("Invalid argument %s." % name, family="architect.request_invalid")
+        return value
+
+    def _run_tool(self, app, tool, args, planning=None, request=None):
         """One action tool, on the worker inside one job: validate the arguments, then the freshness, then the
         Controller's gates and the autonomy policy. `planning` is the plan service of the job that admitted the
-        tool (the `zplan_edit_plan` plan job); None for the tools the bridge job admits itself."""
+        tool (the `zplan_edit_plan` plan job); None for the tools the bridge job admits itself. `request` is the
+        bridge request id, which the approval's result names."""
         self._need(app)
         allowed = TOOL_ARGUMENTS.get(tool)
         if allowed is None:
@@ -858,7 +1144,9 @@ class Controller:
                 raise Blocked("Invalid argument revision.", family="architect.request_invalid")
             self._start_wait(milestone, "begin")
             try:
-                started = self._start_tool(app, milestone, revision)
+                # a call without a bridge request id (a test's stand-in) is the three-argument form
+                started = (self._start_tool(app, milestone, revision) if request is None
+                           else self._start_tool(app, milestone, revision, request))
             except BaseException:
                 self._start_wait(milestone, "failed")
                 raise
@@ -866,35 +1154,37 @@ class Controller:
             return started
         if tool == "zplan_stop":
             return self._stop_tool(app, self._argument(args, "milestone", str),
-                                   self._argument(args, "run_id", str))
+                                   self._argument(args, "run_id", str), request)
         if tool == "zplan_approve_plan":
             revision = self._argument(args, "revision", int)
             if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
                 raise Blocked("Invalid argument revision.", family="architect.request_invalid")
-            return self._approve_tool(app, revision)
+            return self._approve_tool(app, revision, request)
         if tool == "zplan_resume":
             milestone = self._argument(args, "milestone", str)
-            return self._resume_tool(app, milestone, self._token_argument(args, milestone))
+            return self._resume_tool(app, milestone, self._token_argument(args, milestone), request)
         if tool == "zplan_rebrief":
             milestone = self._argument(args, "milestone", str)
             return self._rebrief_tool(app, milestone, self._token_argument(args, milestone),
-                                      self._argument(args, "note", str))
+                                      self._argument(args, "note", str), request)
+        if tool == "zplan_plan":
+            return self._plan_tool(app, planning, self._argument(args, "goal", str), request,
+                                   self._plan_argument(args) if "plan" in args else None,
+                                   self._text_argument(args, "request"))
         if tool == "zplan_edit_plan":
             revision = self._argument(args, "revision", int)
             if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
                 raise Blocked("Invalid argument revision.", family="architect.request_invalid")
-            return self._edit_tool(app, planning, revision, self._argument(args, "plan", dict))
-        if tool == "zplan_revise_plan":
-            revision = self._argument(args, "revision", int)
-            if revision < 1:  # the tool schema's own minimum: a lower one never names the current revision
-                raise Blocked("Invalid argument revision.", family="architect.request_invalid")
-            return self._revise_tool(app, planning, revision, self._argument(args, "feedback", str))
+            return self._edit_tool(app, planning, revision, self._plan_argument(args), request,
+                                   self._text_argument(args, "response"), self._text_argument(args, "request"))
         if tool == "zplan_merge":
             milestone = self._argument(args, "milestone", str)
             with self._project_op:
-                return self._merge_tool(app, milestone, self._token_argument(args, milestone))
+                return self._merge_tool(app, milestone, self._token_argument(args, milestone), request)
         if tool == "zplan_propose_commit":
             return self._propose_commit_tool(app, args)
+        if tool == "zplan_settings":
+            return self._settings_tool(app, args, request)
         raise Blocked("Unknown tool: %s." % tool, family="architect.request_invalid")
 
     @staticmethod
@@ -908,12 +1198,55 @@ class Controller:
             raise Blocked("Invalid argument token.", family="architect.request_invalid")
         return token
 
-    def _start_tool(self, app, milestone, revision):
+    def _start_tool(self, app, milestone, revision, request=None):
         """Preview then start in one job. The current revision is required (else today's `Changed`); the policy
         decides on the very profile digest the preview was built on, so a profile that moved after the preview is
         today's `ProfileChanged` refusal rather than a policy answer read from another profile, and
         `Delivery.start`'s own final digest check is kept. A start the level leaves to the owner becomes a
-        `ConsentRequest` holding that preview."""
+        `ConsentRequest` holding that preview. The call leaves one result, whichever way it ends."""
+        attempt = self._next_attempt(app.delivery, milestone)
+        turn = self._owner_turn(request)
+        try:
+            answer = self._start_decided(app, milestone, revision, turn)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            origin, via = self._bound(turn)
+            self._result("start", {"milestone": milestone, "attempt": attempt}, origin, outcome, family,
+                         summary(error).split("\n"), request, via)
+            raise
+        if answer["status"] == "awaiting_owner":
+            origin, via = self._bound(turn)
+            self._result("start", {"milestone": milestone, "attempt": attempt}, origin, "asked", "",
+                         ["The start of %s waits for the owner: answer request %s." % (milestone, answer["request"])],
+                         request, via)
+        else:
+            origin, lead, via = self._at_word("start", turn)
+            self._result("start", {"milestone": milestone, "attempt": answer["attempt"]}, origin, "done", "",
+                         lead + [self._started_line(answer)], request, via)
+        return answer
+
+    def _owner_turn(self, request):
+        """The owner's message reference when the bridge request `request` was bound to an owner turn at admission
+        (V6a), else None: an events binding, a call without a request id."""
+        entry = next((item for item in self._registry.snapshot() if item["id"] == request), None)
+        return entry["message"] if entry is not None and entry["binding"] == "owner" else None
+
+    @staticmethod
+    def _at_word(operation, turn):
+        """`(origin, leading lines, turn)` of the result of a call that went through: one bound to an owner turn
+        (`turn`, the owner's message reference) is the owner's, via the chat, and says at whose word; any other is the
+        architect's."""
+        if turn is None:
+            return "architect", [], None
+        return "owner", ["%s at your word: «%s»" % (AT_WORD[operation], turn["text"])], turn
+
+    @staticmethod
+    def _bound(turn):
+        """`(origin, turn)` of any other result of a call (refused, failed, asked): the owner's own, via the chat,
+        when the call is bound to an owner turn, else the architect's."""
+        return ("architect", None) if turn is None else ("owner", turn)
+
+    def _start_decided(self, app, milestone, revision, turn=None):
         delivery = app.delivery
         plan = delivery.plan()  # a session without a plan names no current revision: today's `Changed`, no crash
         if plan is None or plan.get("version") != revision:
@@ -927,30 +1260,125 @@ class Controller:
         if status is not None and preview.profile and status.digest != preview.profile:
             raise ProfileChanged("The process profile changed after the preview: check the new values and "
                                  "confirm the start again.")
+        by_owner = False
         if autonomy.decide(autonomy.level_of(status), "start") == "ask":
-            return self._request(
-                "start", milestone, {"milestone": milestone, "revision": revision}, status, preview)
-        r = delivery.start(preview, app.roles)
-        return {"milestone": r["milestone"], "plan_revision": r["plan_revision"], "attempt": r["attempt"],
-                "run_id": r["run_id"], "status": r["status"]}
+            args = {"milestone": milestone, "revision": revision}
+            if turn is None:
+                return self._request("start", milestone, args, status, preview)
+            by_owner, r = True, self._as_owner(app, "start", milestone, args, status, preview)
+        else:
+            if turn is None and Controller._attempts(delivery, milestone, revision):
+                raise Blocked("%s already has an attempt in plan revision %s: use zplan_rebrief." % (milestone, revision),
+                              family="action.refused")
+            r = delivery.start(preview, app.roles)
+            if turn is not None:
+                self._settle_awaiting("start", milestone, {"milestone": milestone, "revision": revision}, r)
+        answer = {"milestone": r["milestone"], "plan_revision": r["plan_revision"], "attempt": r["attempt"],
+                  "run_id": r["run_id"], "status": r["status"]}
+        return dict(answer, origin="owner") if by_owner else answer
+
+    def _as_owner(self, app, action, milestone, args, status, preview=None):
+        """An owner turn's `action` the level would ask about, run at once as the owner's own: the service call and
+        guards of the owner's yes (`_grant`) on the policy's read `status`, no request stored; an awaiting request for the
+        same action, milestone and arguments is settled `done`. Returns the attempt it ran."""
+        request = ConsentRequest("", action, milestone, args, status.digest if status is not None else None, preview)
+        lines, res = self._grant(app, request)
+        self._settle_awaiting(action, milestone, args, res, lines)
+        return res
+
+    def _settle_awaiting(self, action, milestone, args, res, lines=None):
+        """An owner turn ran `action` (the attempt `res`): an awaiting request for the same action, milestone and
+        arguments is settled `done` with the action's receipt lines; a different awaiting request stays."""
+        awaiting = self.consent_request
+        if (awaiting is not None and awaiting.state == "awaiting"
+                and (awaiting.action, awaiting.milestone, awaiting.args) == (action, milestone, args)):
+            if lines is None:
+                lines = (self._receipt(action, res),)
+            self._settled(awaiting, "done", lines)  # the owner's turn did what the events turn's request asked
 
     @staticmethod
-    def _stop_tool(app, milestone, run_id):
+    def _receipt(action, res):
+        verb = {"start": "started", "resume": "continued", "rebrief": "new attempt"}[action]
+        return Controller._attempt_line(verb, res["milestone"], res["plan_revision"], res["attempt"])
+
+    @staticmethod
+    def _next_attempt(delivery, milestone):
+        """The attempt number a start of `milestone` would create under the current plan revision: the one a
+        preview names (a start that fails before its preview exists still names it)."""
+        plan = delivery.plan()
+        if plan is None:  # no plan: nothing started under it, and the call itself is refused as `Changed`
+            return 1
+        revision = plan.get("version")
+        return 1 + sum(r["plan_revision"] == revision and r["milestone"] == milestone and r["predecessor"] is None
+                       for r in delivery.runs.runs)
+
+    @staticmethod
+    def _fate(error):
+        """`(outcome, family)` of a call that raised: a refusal (readiness, a moved plan, attempt or profile) is
+        `refused` with its family, any other error `failed`."""
+        if isinstance(error, Blocked):
+            return "refused", catalog.family(error)
+        return "failed", catalog.UNKNOWN
+
+    @staticmethod
+    def _started_line(res):
+        return "%s started · plan r%s · attempt %s" % (res["milestone"], res["plan_revision"], res["attempt"])
+
+    def _stop_tool(self, app, milestone, run_id, request=None):
         """Stop the milestone's latest attempt, named by its run id; another attempt's run id is refused. A session
-        without a current plan has no latest attempt to stop: the same `Changed` refusal, never a crash."""
+        without a current plan has no latest attempt to stop: the same `Changed` refusal, never a crash. The call
+        leaves one result, whichever way it ends: a stop is requested here, the attempt reaches `stopped` later."""
         delivery = app.delivery
-        r = delivery.latest(milestone) if delivery.plan() is not None else None
-        if r is None or r["run_id"] != run_id:
-            raise Changed("another attempt was started")
-        delivery.stop(r)
+        attempt = 0  # the attempt the run id names; none for an unknown id or a session without a plan
+        try:
+            if delivery.plan() is not None:
+                attempt = next((r["attempt"] for r in delivery.runs.runs
+                                if r["milestone"] == milestone and r["run_id"] == run_id), 0)
+            r = delivery.latest(milestone) if delivery.plan() is not None else None
+            if r is None or r["run_id"] != run_id:
+                raise Changed("another attempt was started")
+            delivery.stop(r)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            self._result("stop", {"milestone": milestone, "attempt": attempt}, "architect", outcome, family,
+                         summary(error).split("\n"), request)
+            raise
+        self._result("stop", {"milestone": milestone, "attempt": attempt}, "architect", "requested", "",
+                     [self._stop_line(milestone)], request)
         return {"milestone": r["milestone"], "attempt": r["attempt"], "run_id": r["run_id"], "status": r["status"]}
 
-    def _approve_tool(self, app, revision):
+    @staticmethod
+    def _stop_line(milestone):
+        return "Stop of %s requested; the run ends shortly." % milestone
+
+    @staticmethod
+    def _attempt_line(verb, milestone, revision, attempt):
+        return "%s %s · plan r%s · attempt %s" % (milestone, verb, revision, attempt)
+
+    def _approve_tool(self, app, revision, request=None):
         """Approve the current plan revision in one job. A revision that is not the current one is today's `Changed`;
         the policy decides on the very profile digest the revision's gate was argued under, so a profile that moved
         is today's `ProfileChanged` (never an approval the live configuration no longer backs). `Authority.approve`
         keeps the verifier pass, the plan gate and its own digest check. An approval the level leaves to the owner
-        is recorded as asked and left to the plan card."""
+        is recorded as asked and left to the plan card. The call leaves one result, whichever way it ends."""
+        turn = self._owner_turn(request)
+        try:
+            answer = self._approve_decided(app, revision, turn)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            origin, via = self._bound(turn)
+            self._result("approve", {"revision": revision}, origin, outcome, family,
+                         summary(error).split("\n"), request, via)
+            raise
+        asked = answer["status"] == "awaiting_owner"
+        origin, via = self._bound(turn)
+        lead = [] if asked else self._at_word("approve", turn)[1]
+        self._result("approve", {"revision": revision}, origin, "asked" if asked else "done", "",
+                     ["Plan r%s waits for the owner: approve it on the plan card." % revision] if asked
+                     else lead + [approved_line(revision)], request, via)
+        return answer
+
+    def _approve_decided(self, app, revision, turn=None):
         delivery = app.delivery
         plan = delivery.plan()  # a session without a plan names no current revision: today's `Changed`, no crash
         if plan is None or plan.get("version") != revision:
@@ -960,99 +1388,403 @@ class Controller:
         if status is not None and gate and status.digest != gate:
             raise ProfileChanged("The process profile changed after the plan check: check the configuration and "
                                  "approve again.")
-        if autonomy.decide(autonomy.level_of(status), "approve") == "ask":
+        level = autonomy.level_of(status)
+        if turn is not None and turn.get("shown_plan") != revision:
+            turn = None  # a word approves only the plan the screen showed when the owner wrote
+        asked = not autonomy.approves_alone(level, chain_approved(app.authority.state["revisions"]))
+        if asked and turn is None:
             return self._ask("approve", revision, "plan")
         app.planning.approve(revision)
         self._answered("approve", revision)
-        return {"revision": revision, "status": "approved"}
+        answer = {"revision": revision, "status": "approved"}
+        return dict(answer, origin="owner") if asked else answer
 
-    def _resume_tool(self, app, milestone, token):
-        """Resume the exact attempt a status row named, in one job. The token is resolved exactly (an attempt that
-        moved is today's `Changed`), then today's readiness gate `resume`, the autonomy policy and the milestone
-        profile guard, enforced before the dispatch and bound to the policy's own read. A resume the level leaves
-        to the owner becomes a `ConsentRequest`."""
+    def _result(self, operation, subject, origin, outcome, family, lines, request=None, turn=None, notify=True):
+        """Keep one result of a call: the Controller is the one writer, from the job that ran the call; `subject`
+        names what it was about. The architect's reaches the owner once through `on_result`; the owner's own is not
+        repeated, their screen already says it, except an owner turn's call that ran as the owner's own (`turn`, the
+        owner's message reference: the result is `via` "chat"). No feed event and no wake. Returns a copy."""
+        lines = [live.scrub(line) for line in lines if line.strip()][:RESULT_LINES]
+        with self._result_guard:
+            self._result_seq += 1
+            result = {"seq": self._result_seq, "operation": operation, "subject": dict(subject),
+                      "outcome": outcome, "family": family, "lines": lines, "origin": origin}
+            if request is not None:
+                result["request"] = request
+            if turn is not None:
+                result["via"], result["turn"] = "chat", dict(turn)
+            self._results.append(result)
+            self._keep(result)
+            result = self._copied(result)
+        if notify and (origin in ("architect", "zplan") or turn is not None):
+            self._notify(self.on_result, result)
+        return result
+
+    def _keep(self, result):
+        """V2c: the last result of its subject replaces the earlier one and goes to the end; the file follows, in the
+        job that wrote the result. A write that fails leaves the result, and the call's own outcome, as they are."""
+        key = self._subject_key(result)
+        self._kept = [kept for kept in self._kept if self._subject_key(kept) != key][-(RESULTS - 1):]
+        self._kept.append(self._copied(result))
+        if self._results_path is not None:
+            try:
+                atomic_state(self._results_path, {"results": self._kept})
+            except OSError:
+                pass
+
+    @staticmethod
+    def _copied(result):
+        copy = dict(result, subject=dict(result["subject"]), lines=list(result["lines"]))
+        if "turn" in copy:
+            copy["turn"] = dict(copy["turn"])
+        return copy
+
+    @staticmethod
+    def _subject_key(result):
+        return result["operation"], tuple(sorted(result["subject"].items()))
+
+    @staticmethod
+    def _turn_shaped(turn):
+        """Legacy message references plus optional application-issued owner linkage."""
+        required = {"text", "occurrence"}
+        linkage = {"parent_operation_id", "conversation_id", "turn_id", "message_id"}
+        return (isinstance(turn, dict) and required <= set(turn) <= required | linkage | {"shown_plan"}
+                and (turn.get("shown_plan") is None
+                     or (isinstance(turn["shown_plan"], int) and not isinstance(turn["shown_plan"], bool)))
+                and isinstance(turn["text"], str)
+                and (turn["occurrence"] is None
+                     or (isinstance(turn["occurrence"], int) and not isinstance(turn["occurrence"], bool)))
+                and all(isinstance(turn[key], str) and turn[key] for key in linkage & set(turn)))
+
+    def _seed_results(self, path):
+        """Worker, at session open: load valid results independently, retaining legacy and linked entries.
+        A missing, unreadable or malformed container gives none; one malformed entry cannot hide its valid peers.
+        The file is left alone until the next result writes it."""
+        kept = []
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(stored, dict) or not isinstance(stored.get("results"), list):
+                raise ValueError("results.json is not a list of results")
+            shape = {"seq": int, "operation": str, "subject": dict, "outcome": str, "family": str, "lines": list,
+                     "origin": str}
+            for result in stored["results"]:
+                if not (isinstance(result, dict) and set(result) - {"request", "via", "turn"} == set(shape)
+                        and all(type(result[name]) is kind for name, kind in shape.items())
+                        and all(isinstance(line, str) for line in result["lines"])
+                        and all(value is None or (isinstance(value, (int, str)) and not isinstance(value, bool))
+                                for value in result["subject"].values())
+                        and isinstance(result.get("request", ""), str)
+                        and ("via" in result) == ("turn" in result)
+                        and (("via" not in result) or (result["via"] == "chat" and self._turn_shaped(result["turn"])))):
+                    continue
+                kept.append(result)
+        except (OSError, ValueError, KeyError, TypeError):
+            kept = []
+        with self._result_guard:
+            for result in kept:
+                self._results.append(result)
+                self._keep(result)  # no path yet: nothing is rewritten before the next result
+            self._results_path = path
+            self._result_seq = max([result["seq"] for result in kept], default=0)
+
+    def results(self):
+        """The kept results, oldest first, as copies (a status reads them on the socket thread)."""
+        with self._result_guard:
+            return [self._copied(result) for result in self._results]
+
+    def _owner_decision(self, operation, version, act, line):
+        """The owner's own approve or override in its plan job: `act()` then one result, `done` with the
+        result's own `line` or `refused` with the refusal's family and text (the job still fails as before)."""
+        try:
+            act()
+        except Exception as error:
+            outcome, family = self._fate(error)
+            self._result(operation, {"revision": version}, "owner", outcome, family, summary(error).split("\n"))
+            raise
+        self._result(operation, {"revision": version}, "owner", "done", "", [line])
+        self._answered("approve", version)
+
+    def _resume_tool(self, app, milestone, token, request=None):
+        """Resume the exact attempt a status row named, in one job. The call leaves one result, whichever way it
+        ends (V2f)."""
+        turn = self._owner_turn(request)
+        try:
+            answer = self._resume_decided(app, milestone, token, turn)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            origin, via = self._bound(turn)
+            self._result("resume", {"milestone": token.milestone, "attempt": token.attempt}, origin, outcome,
+                         family, summary(error).split("\n"), request, via)
+            raise
+        self._architect_attempt("resume", "continued", milestone, token, answer, request, turn)
+        return answer
+
+    def _architect_attempt(self, operation, verb, milestone, token, answer, request, turn=None):
+        subject = {"milestone": token.milestone, "attempt": token.attempt}
+        if answer["status"] == "awaiting_owner":
+            origin, via = self._bound(turn)
+            self._result(operation, subject, origin, "asked", "",
+                         ["The %s of %s waits for the owner: answer request %s." % (operation, milestone,
+                                                                                    answer["request"])], request, via)
+        else:
+            origin, lead, via = self._at_word(operation, turn)
+            self._result(operation, dict(subject, created=answer["attempt"]), origin, "done", "",
+                         lead + [self._attempt_line(verb, answer["milestone"], answer["plan_revision"],
+                                                    answer["attempt"])], request, via)
+
+    def _resume_decided(self, app, milestone, token, turn=None, due=False):
+        """The exact attempt is resolved (an attempt that moved is today's `Changed`), then today's readiness gate
+        `resume`, the autonomy policy and the milestone profile guard, enforced before the dispatch and bound to the
+        policy's own read. A resume the level leaves to the owner becomes a `ConsentRequest`. An attempt paused on a
+        provider limit is resumed only by `resume_due` (`due`) or in the owner's turn: an event turn is refused."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
+        if turn is None and not due and r.get("resume_at"):
+            raise Blocked("%s is paused on a provider limit: zplan continues it by itself when the limit resets."
+                          % milestone, family="action.refused")
         blocked = Controller._blocked(app, "resume")
         if blocked:
             raise Blocked("Not ready to continue: " + "; ".join(check.line for check in blocked.checks),
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
+        by_owner = False
         if autonomy.decide(autonomy.level_of(status), "resume") == "ask":
-            return self._request("resume", milestone, {"milestone": milestone, "token": token_fields(token)}, status)
-        Controller._action_status(app, "milestone", status)  # the guard the owner's own resume applies, before it
-        res = delivery.resume(r)
-        return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
-                "run_id": res["run_id"], "status": res["status"]}
+            args = {"milestone": milestone, "token": token_fields(token)}
+            if turn is None:
+                return self._request("resume", milestone, args, status)
+            by_owner, res = True, self._as_owner(app, "resume", milestone, args, status)
+        else:
+            Controller._action_status(app, "milestone", status)  # the guard the owner's own resume applies, before it
+            res = delivery.resume(r)
+            if turn is not None:
+                self._settle_awaiting("resume", milestone, {"milestone": milestone, "token": token_fields(token)}, res)
+        answer = {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
+                  "run_id": res["run_id"], "status": res["status"]}
+        return dict(answer, origin="owner") if by_owner else answer
 
-    def _rebrief_tool(self, app, milestone, token, note):
+    def _rebrief_tool(self, app, milestone, token, note, request=None):
+        """A new attempt with the owner's note, in one job. The call leaves one result, whichever way it ends
+        (V2f)."""
+        turn = self._owner_turn(request)
+        try:
+            answer = self._rebrief_decided(app, milestone, token, note, turn)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            origin, via = self._bound(turn)
+            self._result("rebrief", {"milestone": token.milestone, "attempt": token.attempt}, origin, outcome,
+                         family, summary(error).split("\n"), request, via)
+            raise
+        self._architect_attempt("rebrief", "new attempt", milestone, token, answer, request, turn)
+        return answer
+
+    def _rebrief_decided(self, app, milestone, token, note, turn=None):
         """A new attempt with the owner's note, in one job. The token is resolved exactly (an attempt that moved is
         today's `Changed`), then today's readiness gate `start`, the autonomy policy and the milestone profile
         guard, and `check_followup` inside the service. A `needs_owner` attempt is answered, any other unsuccessful
         attempt gets a new attempt; the note is added to the attempt's task notes, the brief itself unchanged. The
         attempt's roles come from the same profile read the policy decided on, so the two never disagree. A rebrief
-        the level leaves to the owner becomes a `ConsentRequest`."""
+        the level leaves to the owner becomes a `ConsentRequest`, also in an owner turn when it answers a
+        `needs_owner` question (the owner writes that answer on the card); any other rebrief the owner's turn asked
+        for runs as the owner's own."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
+        if turn is None and r.get("resume_at"):
+            raise Blocked("%s is paused on a provider limit: zplan continues it by itself when the limit resets."
+                          % milestone, family="action.refused")
+        if turn is None:
+            attempts = Controller._attempts(delivery, r["milestone"], r["plan_revision"])
+            if attempts >= ARCHITECT_ATTEMPTS + 1:
+                raise Blocked("%s has had %d attempts in plan revision %s; the owner decides now."
+                              % (r["milestone"], attempts, r["plan_revision"]), family="action.refused")
         blocked = Controller._blocked(app, "start")
         if blocked:
             raise Blocked("Not ready for a new attempt: " + "; ".join(check.line for check in blocked.checks),
                           family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
-        if autonomy.decide(autonomy.level_of(status), "rebrief") == "ask":
-            return self._request("rebrief", milestone,
-                                 {"milestone": milestone, "token": token_fields(token), "note": note}, status)
-        res = Controller._rebrief_attempt(app, r, note, status)
-        return {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
-                "run_id": res["run_id"], "status": res["status"]}
+        by_owner = False
+        level = autonomy.level_of(status)
+        answers = turn is not None and r["outcome"] == "needs_owner" and level in ("supervised", "manual")
+        if answers or autonomy.decide(level, "rebrief") == "ask":
+            args = {"milestone": milestone, "token": token_fields(token), "note": note}
+            if turn is None or answers:
+                return self._request("rebrief", milestone, args, status)
+            by_owner, res = True, self._as_owner(app, "rebrief", milestone, args, status)
+        else:
+            res = Controller._rebrief_attempt(app, r, note, status, after_merge=turn is None)
+            if turn is not None:
+                self._settle_awaiting("rebrief", milestone,
+                                      {"milestone": milestone, "token": token_fields(token), "note": note}, res)
+        answer = {"milestone": res["milestone"], "plan_revision": res["plan_revision"], "attempt": res["attempt"],
+                  "run_id": res["run_id"], "status": res["status"]}
+        return dict(answer, origin="owner") if by_owner else answer
 
     @staticmethod
-    def _rebrief_attempt(app, r, note, status):
+    def _attempts(delivery, milestone, revision):
+        """The number of attempts the milestone has in plan revision `revision`."""
+        return sum(1 for run in delivery.runs.runs if run["milestone"] == milestone and run["plan_revision"] == revision
+                   and "resume_at" not in run)  # the attempt zplan itself continued after a limit costs no attempt
+
+    @staticmethod
+    def _rebrief_attempt(app, r, note, status, after_merge=False):
         """The new attempt of `r` with the owner's note, after the policy read `status` allowed it or the owner
         granted it: the profile the attempt runs under is bound to that read, and the cap guard comes first."""
         delivery = app.delivery
         enforced = Controller._action_status(app, "milestone", status)  # the profile the attempt itself runs under
         roles = enforced.resolved.roles() if enforced is not None else None
         delivery.admission()  # C3: the same cap guard the owner's own paths take, before the attempt is created
+        if after_merge and r["outcome"] == "done":  # an event turn after a failed merge
+            return delivery.runs.answer(r, note, roles, after_merge=True)
         return (delivery.runs.answer(r, note, roles) if r["outcome"] == "needs_owner"
                 else delivery.runs.retry(r, note, roles))
 
-    @staticmethod
-    def _brake(app):
+    def _brake(self, app, request=None):
         """A10: the architect gets one automatic revision after a rejection. A current revision the plan check
         rejected (`review_exhausted`) that an architect tool made is the owner's to decide: both plan tools refuse,
-        nothing written. The mark lives in the feed of the planning store, so it holds after a restart."""
+        nothing written. The mark lives in the feed of the planning store, so it holds after a restart.
+
+        A current Goldfish revision has the chain budget instead: an event turn is refused when the chain's
+        architect revisions are spent or the owner stopped the run; an owner turn may create one revision per owner
+        message."""
         current = app.authority.current
+        if is_goldfish(current):
+            turn = self._owner_turn(request)
+            if turn is None:
+                budget = chain_budget(app.authority.state["revisions"])
+                if current["status"] == "stopped" or (budget is not None and budget[0] >= budget[1]):
+                    raise Blocked("The plan check rejected revision %s; the owner decides now." % current["version"],
+                                  family="action.refused")
+            elif self._turn_key(turn) in self._revised_in:
+                raise Blocked("This message already produced a revision; the owner's next message can revise again.",
+                              family="action.refused")
+            return
         if current["status"] == "review_exhausted" and feed.architect_made(app.authority, current["version"]):
             raise Blocked("The plan check rejected revision %s; the owner decides now." % current["version"],
                           family="action.refused")
 
-    def _edit_tool(self, app, planning, revision, plan):
-        """Save an edited proposal as a new revision, inside the one `_plan_job` the bridge admitted it as (the same
-        plan job the owner's own submit and revise use). `Planning.edit` is the whole rule (not current, invalid or
-        unchanged refuses as `action.refused` before anything is written); it returns a `Submission`, whose verdict
-        is shown exactly as the owner's own submission. A "ready" verdict reaches the UI through
-        `on_plan_submission`, so the app's planner watch dispatches the new revision (`zplan_edit_plan` only
-        proposes: the approval that lets it run stays the owner's, and `Planning.edit` itself runs the plan gate)."""
-        self._brake(app)
-        result = planning.edit(revision, plan)
-        outcome = verdict(result)
-        if outcome.kind == "ready" and self.on_plan_submission is not None:
-            self.on_plan_submission(outcome)
-        return {"revision": app.authority.current["version"], "status": outcome.kind}
+    @staticmethod
+    def _turn_key(turn):
+        return turn["occurrence"], turn["text"]
 
-    def _revise_tool(self, app, planning, revision, feedback):
-        """Ask the planner for a new revision from written feedback, inside the one `_plan_job` the bridge admitted
-        it as, exactly as `_edit_tool` does. Refused, with nothing written, unless `revision` is the current one;
-        `Planning.revise` is the rest of the rule (a milestone writer being active refuses)."""
-        if app.authority.current["version"] != revision:
-            raise Blocked("Only the current revision can be revised.", family="action.refused")
-        self._brake(app)
-        result = planning.revise(feedback)
-        outcome = verdict(result)
-        if outcome.kind == "ready" and self.on_plan_submission is not None:
-            self.on_plan_submission(outcome)
-        return {"revision": app.authority.current["version"], "status": outcome.kind}
+    def _format_cap(self, request):
+        """In an owner turn that had FORMAT_REFUSALS plan format refusals, both plan tools refuse before any work."""
+        turn = self._owner_turn(request)
+        if turn is not None and self._format_refusals.get(self._turn_key(turn), 0) >= FORMAT_REFUSALS:
+            raise FormatRefused("The plan could not be written in this turn: tell the owner what blocks it.",
+                                family="action.refused")
+
+    def _plan_tool(self, app, planning, goal, request, plan=None, note=""):
+        """Save the architect's own plan for the goal as a Goldfish revision, inside the one `_plan_job` the bridge
+        admitted it as (`Planning.plan_draft`: the plan is validated and reviewed, no planner). Only in a turn the
+        owner started (V6a): any other request is refused, nothing written; so is a call without `plan`. The
+        Application Service advances a ready revision before any presentation hook; the approval of the plan stays
+        the level's rules."""
+        self._format_cap(request)
+        if self._owner_turn(request) is None:
+            raise Blocked("A plan starts only on the owner's word: the owner asks for it in the chat.",
+                          family="autonomy.ask")
+        if plan is None:  # the architect writes the plan: there is no planner to ask
+            raise Blocked("The plan is missing: write the plan and pass it as `plan`.", family="action.refused")
+        if not planning.valid_goal(goal):
+            raise Blocked(planning_module.GOAL_PROBLEM, family="usage.invalid_option")
+        return self._revised(app, request,
+                             lambda: planning.plan_draft(goal, plan, note, by="owner", roles=app.roles))
+
+    def _revised(self, app, request, create):
+        """The result of a tool that creates a Goldfish revision with `create`; an owner turn's message is marked as
+        having produced one, for the brake."""
+        turn = self._owner_turn(request)
+        before = app.authority.current["version"] if app.authority.state and app.authority.state["revisions"] else 0
+        try:
+            outcome = verdict(create())
+        finally:
+            if turn is not None and app.authority.state and app.authority.state["revisions"] \
+                    and app.authority.current["version"] != before:
+                self._revised_in.add(self._turn_key(turn))
+        return {"revision": app.authority.current["version"], "status": outcome.kind}, outcome
+
+    def _edit_tool(self, app, planning, revision, plan, request=None, response="", note=""):
+        """Save an edited plan as a new Goldfish revision, inside the one `_plan_job` the bridge admitted it as.
+        `Planning.revise_draft` is the whole rule (not current, invalid or unchanged refuses as `action.refused`
+        before anything is written); its verdict is advanced by the Application Service before
+        `on_plan_submission` presents it. This only proposes a revision: approval remains gated."""
+        self._format_cap(request)
+        self._brake(app, request)
+        by = "owner" if self._owner_turn(request) is not None else "architect"
+        return self._revised(app, request, lambda: planning.revise_draft(revision, plan, response, note, by=by))
+
+    def _settings_tool(self, app, args, request=None):
+        """Ask for a change of the level, parallel runs, merge gate or roles of the accepted profile, only in the
+        owner's turn (V6a): an events request is refused, nothing changed. The change never applies here (what the
+        architect reads could ask for one): it becomes the owner's consent card naming each change as "old -> new",
+        and his yes applies it (`_grant`). A project file as the source, a value the profile refuses (`Profile.preview`,
+        the /setup editor's own rule) or a change already in place is refused at once. The call leaves one result."""
+        turn = self._owner_turn(request)
+        origin, via = self._bound(turn)
+        subject = {"keys": ",".join(sorted(args))}
+        try:
+            if turn is None:
+                raise Blocked("Settings change only on the owner's word: the owner asks for it in the chat.",
+                              family="autonomy.ask")
+            changes = self._settings_changes(args)
+            if app.profile is None:
+                raise Blocked("The process profile is not used in this session.", family="action.refused")
+            before = self._profile_config(app.profile.status())
+            after = app.profile.preview(changes).config
+            shown = self._setting_lines(changes, before, after)
+            if not shown:
+                raise Blocked("The settings are already as asked.", family="action.refused")
+            answer = self._request("settings", "", dict(args), autonomy.status_of(app.profile), lines=tuple(shown))
+        except Exception as error:
+            outcome, family = self._fate(error)
+            self._result("settings", subject, origin, outcome, family, summary(error).split("\n"), request, via)
+            raise
+        room = RESULT_LINES - 1  # the first line is the lead; the changes beyond the room share the last
+        lines = list(shown)
+        if len(lines) > room:
+            lines = lines[:room - 1] + ["; ".join(lines[room - 1:])]
+        self._result("settings", subject, origin, "asked", "",
+                     ["The settings change waits for your yes on the card."] + lines, request, via)
+        return dict(answer, changes=shown)
+
+    @staticmethod
+    def _settings_changes(args):
+        """The `changes` of `Profile.revise` from the tool's arguments: at least one key, each of its own type (the
+        values themselves are the profile's to judge). Anything else is an invalid argument."""
+        if not args:
+            raise Blocked("Missing argument: at least one of level, max_runs, merge, roles.",
+                          family="architect.request_invalid")
+        changes = {}
+        for name, kind in (("level", str), ("max_runs", int), ("merge", str), ("roles", dict)):
+            if name in args:
+                changes[name] = Controller._argument(args, name, kind)
+        roles = changes.get("roles")
+        if roles is not None and (not roles or not all(isinstance(bound, dict) and bound for bound in roles.values())):
+            raise Blocked("Invalid argument roles.", family="architect.request_invalid")
+        return changes
+
+    @staticmethod
+    def _profile_config(status):
+        return status.resolved.config if status.resolved is not None else {}
+
+    @staticmethod
+    def _setting_lines(changes, before, after):
+        """One "key: old -> new" line per changed setting, only for the values that really differ."""
+        where = {"level": ("autonomy", "level"), "max_runs": ("autonomy", "max_runs"), "merge": ("gates", "merge")}
+        lines = []
+        for key, (section, name) in where.items():
+            old, new = before.get(section, {}).get(name), after.get(section, {}).get(name)
+            if key in changes and old != new:
+                lines.append("%s: %s -> %s" % (key, old, new))
+        parts = []
+        for role, bound in sorted(changes.get("roles", {}).items()):
+            for field in sorted(bound):
+                old = before.get("roles", {}).get(role, {}).get(field)
+                new = after.get("roles", {}).get(role, {}).get(field)
+                if old != new:
+                    parts.append("%s.%s: %s -> %s" % (role, field, old, new))
+        if parts:
+            lines.append("roles: " + "; ".join(parts))
+        return lines
 
     def _propose_commit_tool(self, app, args):
         """Offer the owner a commit of their own files; commit nothing. The paths are checked against the live
@@ -1121,13 +1853,29 @@ class Controller:
                 raise Blocked("This request is no longer valid: ask the architect again.", family="action.refused")
             if request.state != "awaiting":
                 return Outcome(request.state, lines=request.lines, data=request)
+            failure = unexpected = None
             try:
-                lines = self._grant(app, request)
+                lines, res = self._grant(app, request)
                 state = "done"
             except (Changed, ProfileChanged) as error:
-                state, lines = "stale", (summary(error),)
+                state, lines, failure, res = "stale", (summary(error),), error, None
             except (Blocked, OSError, ValueError) as error:
-                state, lines = "failed", (summary(error),)
+                state, lines, failure, res = "failed", (summary(error),), error, None
+            except Exception as error:  # any other error leaves its result too, then reaches the caller
+                state, lines, failure, res, unexpected = "failed", (summary(error),), error, None, error
+            outcome, family = ("done", "") if failure is None else self._fate(failure)
+            if request.action == "start":  # V2d: the owner's yes is a start call of its own
+                subject = {"milestone": request.milestone, "attempt": request.preview.attempt}
+            elif request.action == "settings":
+                subject = {"keys": ",".join(sorted(request.args))}
+            else:  # V2f: so is the yes to a resume or a rebrief, on the attempt the architect's status row named
+                token = self._token_argument(request.args, request.milestone)
+                subject = {"milestone": token.milestone, "attempt": token.attempt}
+                if res:
+                    subject["created"] = res["attempt"]
+            self._result(request.action, subject, "owner", outcome, family, lines, request.id)
+            if unexpected is not None:
+                raise unexpected
             return self._settled(request, state, lines)
         return self._job("consent", work, done)
 
@@ -1138,8 +1886,59 @@ class Controller:
             request = self.consent_request
             if request is None or request.id != request_id or request.state != "awaiting":
                 return Outcome("ignored")
+            if request.action == "resume":
+                self._unpause(delivery, request)  # the owner's no ends the pause: the architect decides now
             return self._settled(request, "declined", ("The owner declined the architect's request.",))
         return self._job("decline", work, done)
+
+    def _unpause(self, delivery, request):
+        """The owner declined to continue an attempt paused on a limit: it stays a recoverable failure and wakes
+        the architect. An attempt that moved, or was never paused, is left as it is."""
+        try:
+            r = delivery.resolve(self._token_argument(request.args, request.milestone), exact=True)
+        except Blocked:
+            return
+        if "resume_at" in r:
+            del r["resume_at"]
+            delivery.runs.save(r)
+
+    # Paused attempts ----------------------------------------------------------
+
+    # The refusals that leave a due attempt paused: it is tried again at the next tick.
+    STAYS_PAUSED = frozenset(("action.refused", "autonomy.ask", "process.changed", "readiness.tools"))
+
+    def resume_due(self, done=None):
+        """Resume, once, every attempt paused on a provider limit whose moment has come, under the autonomy policy
+        (the architect's own `resume`): one job, run by the app's tick and at a reopen. The level may leave it to the
+        owner (one request); a refusal that is only for now leaves the pause; any other refusal ends it, and the
+        architect is woken by the failure it was."""
+        def work(app, delivery):
+            for r in delivery.runs.due():
+                self._resume_paused(app, delivery, r)
+            return Outcome("resumed")
+        return self._job("limit_resume", work, done)
+
+    def _resume_paused(self, app, delivery, r):
+        subject = {"milestone": r["milestone"], "attempt": r["attempt"]}
+        asked = self.consent_request
+        try:
+            answer = self._resume_decided(app, r["milestone"], Token.of(r), None, due=True)
+        except Blocked as error:
+            if error.family in self.STAYS_PAUSED:
+                return
+            r.pop("resume_at", None)
+            delivery.runs.save(r)
+            outcome, family = self._fate(error)
+            self._result("resume", subject, "zplan", outcome, family, summary(error).split("\n"))
+            return
+        if answer["status"] == "awaiting_owner":
+            if self.consent_request is not asked:  # the owner is told once, however many ticks find it due
+                self._result("resume", subject, "zplan", "asked", "",
+                             ["The continuation of %s after the provider limit waits for the owner: answer request %s."
+                              % (r["milestone"], answer["request"])])
+            return
+        self._result("resume", dict(subject, created=answer["attempt"]), "zplan", "done", "",
+                     ["%s continued after the provider limit (attempt %s)" % (r["milestone"], answer["attempt"])])
 
     def _settled(self, request, state, lines):
         """The request ends in `state`: stored, shown by the hook and returned for the owner's card."""
@@ -1152,13 +1951,23 @@ class Controller:
         """Run the action the owner granted: the same readiness gate, profile guard and service call the architect's
         own tool makes at a level that allows it, on the profile the policy read when the architect asked. A
         profile that moved since is `ProfileChanged`, a start whose attempt or plan revision moved is the
-        service's `Changed`, a token that moved is `Changed`; nothing has run then. Returns the receipt lines."""
+        service's `Changed`, a token that moved is `Changed`; nothing has run then. Returns `(receipt lines, the attempt it ran)`."""
         delivery = app.delivery
         status = autonomy.status_of(app.profile)
         if (status.digest if status is not None else None) != request.digest:
             raise ProfileChanged("The process profile changed after the architect asked: nothing was done. Ask the "
                                  "architect again.")
         args, milestone = request.args, request.milestone
+        if request.action == "settings":  # exactly what the card showed: the digest above is the profile it was read on
+            changes = self._settings_changes(args)
+            before = self._profile_config(app.profile.status())
+            after = self._profile_config(app.profile.revise(changes))
+            lead = "Changed settings at your yes. It applies to what starts next; running attempts keep their profile."
+            room = RESULT_LINES - 1
+            shown = self._setting_lines(changes, before, after)
+            if len(shown) > room:
+                shown = shown[:room - 1] + ["; ".join(shown[room - 1:])]
+            return tuple([lead] + shown), None
         r = None
         if request.action != "start":  # the exact attempt the architect's status row named
             r = delivery.resolve(self._token_argument(args, milestone), exact=True)
@@ -1172,10 +1981,9 @@ class Controller:
             res = delivery.resume(r)
         else:
             res = Controller._rebrief_attempt(app, r, args["note"], status)
-        verb = {"start": "started", "resume": "continued", "rebrief": "new attempt"}[request.action]
-        return ("%s %s · plan r%s · attempt %s" % (res["milestone"], verb, res["plan_revision"], res["attempt"]),)
+        return (self._receipt(request.action, res),), res
 
-    def _merge_tool(self, app, milestone, token):
+    def _merge_tool(self, app, milestone, token, request=None):
         """Merge the exact attempt a status row named, in one job. The token is resolved exactly (an attempt that
         moved is today's `Changed`), then the autonomy policy decides on the same profile read the merge is bound to:
         `Delivery.merge` gets the digest the policy saw as `expected`, so a profile that moved to another one, before or
@@ -1184,27 +1992,61 @@ class Controller:
         The decision follows the level and the candidate's risk tier (auto allows, supervised asks on high risk, manual asks); the merge gate only decides whether checks and the critic
         run. The result is `Delivery.merge`'s own (`kind` and `line`); a landed merge without the gate says that no
         merge check or critic ran."""
+        subject = {"milestone": token.milestone, "attempt": token.attempt}
+        turn = self._owner_turn(request)
+        try:
+            answer, merged = self._merge_decided(app, milestone, token, turn)
+        except Exception as error:
+            outcome, family = self._fate(error)
+            origin, via = self._bound(turn)
+            self._result("merge", subject, origin, outcome, family, summary(error).split("\n"), request, via)
+            raise
+        if merged is None:
+            origin, via = self._bound(turn)
+            self._result("merge", subject, origin, "asked", "",
+                         ["The merge of %s waits for the owner: use the merge card." % milestone], request, via)
+        else:
+            landed = merged.kind == "integrated"
+            origin, via = self._bound(turn)
+            lead = self._at_word("merge", turn)[1] if landed else []
+            self._result("merge", subject, origin, "done" if landed else "refused", "" if landed else merged.family,
+                         lead + [answer["line"]] + list(merged.paths), request, via)
+        return answer
+
+    def _merge_decided(self, app, milestone, token, turn=None):
+        """`(answer, merge)` of the architect's merge: `merge` is `Delivery.merge`'s verdict, None for an ask. In an
+        owner turn (`turn`) a merge the level would ask about runs as the owner's own, unless the candidate's tier is
+        high or unknown: that stays the owner's card (here and in `vet`)."""
         delivery = app.delivery
         r = delivery.resolve(token, exact=True)
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         gate, level = autonomy.merge_gate(status), autonomy.level_of(status)
-        if autonomy.decide(level, "merge", gate, merge_tier(status, changed_paths(app, r))) == "ask":
-            return self._ask("merge", milestone, "merge")
+        # A conversational owner turn is not consent to an unverified merge. Only the
+        # deterministic owner merge card may opt in, irrespective of risk or autonomy.
+        if gate != "required":
+            return self._ask("merge", milestone, "merge"), None
+
+        def asks(tier):
+            return autonomy.decide(level, "merge", gate, tier) == "ask" and (turn is None or tier not in ("low", "medium"))
+
+        tier = merge_tier(status, changed_paths(app, r))
+        if asks(tier):
+            return self._ask("merge", milestone, "merge"), None
+        by_owner = turn is not None and autonomy.decide(level, "merge", gate, tier) == "ask"
 
         def vet(paths):  # the tier of the candidate that lands, not of the result branch (a rename on main can raise it)
-            if autonomy.decide(level, "merge", gate, merge_tier(status, paths)) == "ask":
+            if asks(merge_tier(status, paths)):
                 raise Blocked("The merge candidate changes files the profile rates high risk: the owner decides.",
                               family="autonomy.ask")
 
-        merged = delivery.merge(r, expected=status.digest if status is not None else None, vet=vet)
+        merged = delivery.merge(r, expected=status.digest if status is not None else None, vet=vet,
+                                allow_unverified=False)
         if merged.family == "autonomy.ask":
-            return self._ask("merge", milestone, "merge")
+            return self._ask("merge", milestone, "merge"), None
         if merged.kind == "integrated":
             self._answered("merge", milestone)
-        line = merged.line
-        if merged.kind == "integrated" and gate != "required":
-            line += " No merge check or critic ran: the profile's merge gate is off."
-        return {"milestone": r["milestone"], "kind": merged.kind, "line": line}
+        answer = {"milestone": r["milestone"], "kind": merged.kind, "line": merged.line}
+        return (dict(answer, origin="owner") if by_owner else answer), merged
 
     def _notify(self, hook, *args):
         """Tell the screen (a worker-callable hook); a screen that went away is not the job's failure."""
@@ -1214,7 +2056,7 @@ class Controller:
             except Exception:  # the UI went away
                 pass
 
-    def _request(self, action, milestone, args, status, preview=None):
+    def _request(self, action, milestone, args, status, preview=None, lines=()):
         """The architect's `action` at "ask": store one `ConsentRequest` and answer `awaiting_owner` with its id; the
         owner's answer is what acts. The same request again is the same id; another one while a request awaits is
         refused naming the awaiting one. `status` is the policy's read, whose digest the owner's answer is checked
@@ -1227,7 +2069,7 @@ class Controller:
                               family="autonomy.ask")
             return {"status": "awaiting_owner", "request": request.id}
         request = ConsentRequest(uuid.uuid4().hex[:12], action, milestone, args,
-                                 status.digest if status is not None else None, preview)
+                                 status.digest if status is not None else None, preview, lines=tuple(lines))
         self.consent_request = request
         self._notify(self.on_consent_request, request)
         return {"status": "awaiting_owner", "request": request.id}
@@ -1237,7 +2079,7 @@ class Controller:
         stays the owner's own card or command, and answer the architect with the card that holds it."""
         self.asked[action] = value
         self._notify(self.on_asked, dict(self.asked))
-        return {"status": "awaiting_owner", "card": card}
+        return {"status": "awaiting_owner", "card": card, "decision": {"action": action, "subject": value}}
 
     def _answered(self, action, value):
         """The owner's own card or command (or an allowed action) did what the architect asked for `value`: the ask
@@ -1270,7 +2112,8 @@ class Controller:
         """Read-only plan slice -> Snapshot."""
         def work(app):
             self._need(app)
-            return take_snapshot(app, self.name)
+            snapshot = take_snapshot(app, self.name)
+            return replace(snapshot, scripted=True) if self.scripted else snapshot
         return self.post(REFRESH, work, done, coalesce=True)
 
     def check(self, done):
@@ -1305,15 +2148,74 @@ class Controller:
     # Planning --------------------------------------------------------------------
     # Every rule below is the service's (terminal_planner.planning); these jobs only order its calls on the worker.
 
-    def _plan_job(self, label, work, done):
+    def _plan_job(self, label, work, done, operation=None, request=None):
+        """One plan job. An `operation` (plan, send, restart, revise, edit, stop_planner) makes the job leave one
+        result from its own end (V2g), whichever way it ends; `request` is the bridge request id of an architect's
+        tool (origin architect), none for the owner's own."""
         def run(app):
-            self._need(app)
-            return work(app, app.planning)
+            try:
+                self._need(app)
+                value = work(app, app.planning)
+            except Exception as error:
+                if operation is not None:
+                    self._plan_ended(operation, app, request, error=error)
+                raise
+            if operation is not None:
+                self._plan_ended(operation, app, request, value=value)
+            return value
         return self.post(label, run, done)
 
+    def _plan_ended(self, operation, app, request, value=None, error=None):
+        """The one result of a plan operation (V2g): `value` is the job's Outcome, `error` what it raised. The subject
+        is the revision the plan service holds after the job (None when none). A `sent` or `ready` verdict is sent,
+        a readiness block is unsent with the failing checks' lines, the planner's stop is requested, a revision that
+        moved on is refused as `Changed`. The architect's `zplan_plan` bound to an owner turn is the owner's own, via
+        the chat, and says at whose word when it sent."""
+        turn = self._owner_turn(request) if operation == "plan" else None
+        try:
+            revision = app.authority.current["version"]
+            goldfish = is_goldfish(app.authority.current)
+        except (AttributeError, Blocked):
+            revision, goldfish = None, False
+        if error is not None:
+            outcome, family = self._fate(error)
+            lines = summary(error).split("\n")
+        else:
+            kind = value.data.kind if value.kind == "plan" else value.kind  # `to_plan` wraps the submission verdict
+            if kind in ("sent", "ready"):
+                outcome, family = "sent", ""
+                lines = ["Plan r%s sent to the %s." % (revision, "plan check" if goldfish else "planner")]
+                if turn is not None:
+                    lines.insert(0, self._at_word("plan", turn)[1][0])
+            elif kind in ("unsent", "blocked"):
+                outcome, family = "unsent", ""
+                lines = [check.line for check in value.checks] or ["The plan was not sent."]
+            elif kind == "stopping":
+                outcome, family = "requested", ""
+                lines = ["The %s stop was requested." % ("plan check" if goldfish else "planner")]
+            elif kind == "stale":
+                outcome, family = "refused", Changed.family
+                lines = list(value.lines) or ["The plan was revised: it was not sent."]
+            else:
+                outcome, family, lines = "failed", catalog.UNKNOWN, ["Unexpected plan outcome: %s." % kind]
+        notify = True
+        if isinstance(error, FormatRefused) and operation in ("plan", "edit"):
+            notify = False
+            owner_turn = self._owner_turn(request)
+            if owner_turn is not None:
+                key = self._turn_key(owner_turn)
+                count = self._format_refusals.get(key, 0)
+                if count < FORMAT_REFUSALS:
+                    count = self._format_refusals[key] = count + 1
+                    if count == FORMAT_REFUSALS:
+                        notify = True
+                        lines = ["The plan could not be written: " + lines[0]]
+        self._result(operation, {"revision": revision}, "owner" if request is None or turn is not None else "architect",
+                     outcome, family, lines, request, turn, notify)
+
     def decide_profile(self, accept, done, changes=None):
-        """The first-start choice of the process profile: accept (writes the file; `changes` are the editor's
-        values set on it) or later -> the new View."""
+        """The first-start choice of the process profile: accept (records the snapshot, no file; `changes` are the
+        editor's values set on it) or later -> the new View."""
         def work(app, planning):
             if app.profile is None:
                 raise Blocked("The process profile is not used in this session.", family="action.refused")
@@ -1325,7 +2227,7 @@ class Controller:
         return self._plan_job("profile", work, done)
 
     def edit_profile(self, changes, done):
-        """/setup «profile»: the editor's `changes` on the accepted profile (its file is replaced and committed)
+        """/setup «profile»: the editor's `changes` on the accepted profile (its snapshot; a project file is the source and refuses)
         -> the new View. A refused value raises its reason and writes nothing."""
         def work(app, planning):
             if app.profile is None:
@@ -1347,6 +2249,11 @@ class Controller:
         with the gate's checks and writes nothing — the draft stays usable and the plan identity does not move, so a
         retry after the owner fixed readiness still matches the card. The goal form (`card` False) keeps saving the
         unsent revision."""
+        return self._plan_job("start", self._start_work(goal, draft, card), done, "plan")
+
+    @staticmethod
+    def _start_work(goal, draft=None, card=False):
+        """The worker function of `start_planning`, also the architect's `zplan_plan` (`_plan_tool`)."""
         def work(app, planning):
             if not planning.valid_goal(goal):
                 raise Blocked(planning_module.GOAL_PROBLEM, family="usage.invalid_option")
@@ -1365,7 +2272,7 @@ class Controller:
             result = verdict(planning.submission())
             # Readiness failed between the check and the submission: the goal is saved as an unsent revision.
             return Outcome("unsent", result.checks) if result.kind == "blocked" else result
-        return self._plan_job("start", work, done)
+        return work
 
     def submit_plan(self, done):
         """[g] on the unsent revision; a stale one is renewed and sent by the service (a sent one never is)."""
@@ -1374,10 +2281,10 @@ class Controller:
             result = planning.send(announce=lambda old, new: notes.append(
                 planning_module.renewed_line(old, new["version"])))
             return Outcome(result.kind, checks_of(i for i in result.items if not i["ok"]), lines=tuple(notes))
-        return self._plan_job("submit", work, done)
+        return self._plan_job("submit", work, done, "send")
 
     def restart_plan(self, done):
-        return self._plan_job("restart", lambda app, planning: verdict(planning.restart()), done)
+        return self._plan_job("restart", lambda app, planning: verdict(planning.restart()), done, "restart")
 
     def stop_planner(self, done):
         """The confirmed stop of the running planner: `Planning.stop()` once, on the worker. A refusal is the
@@ -1385,10 +2292,10 @@ class Controller:
         def work(app, planning):
             planning.stop()
             return Outcome("stopping")
-        return self._plan_job("stop_planner", work, done)
+        return self._plan_job("stop_planner", work, done, "stop_planner")
 
     def revise_plan(self, feedback, done):
-        return self._plan_job("revise", lambda app, planning: verdict(planning.revise(feedback)), done)
+        return self._plan_job("revise", lambda app, planning: verdict(planning.revise(feedback)), done, "revise")
 
     def renew_plan(self, done):
         def work(app, planning):
@@ -1398,24 +2305,17 @@ class Controller:
 
     def approve_plan(self, version, done):
         def work(app, planning):
-            planning.approve(version)
-            self._answered("approve", version)
-            return Outcome("approved")
+            line = approved_line(version)
+            self._owner_decision("approve", version, lambda: planning.approve(version), line)
+            return Outcome("approved", lines=(line,))
         return self._plan_job("approve", work, done)
 
     def override_plan(self, version, reason, done):
         def work(app, planning):
-            planning.override(version, reason)
-            self._answered("approve", version)
-            return Outcome("overridden")
+            line = approved_line(version, despite=True)
+            self._owner_decision("override", version, lambda: planning.override(version, reason), line)
+            return Outcome("overridden", lines=(line,))
         return self._plan_job("override", work, done)
-
-    def reject_plan(self, version, done):
-        def work(app, planning):
-            planning.reject(version)
-            self._answered("approve", version)
-            return Outcome("rejected")
-        return self._plan_job("reject", work, done)
 
     def details(self, done):
         """The lines under [i] of the plan screen: the requirements, or the details with diagnostics of a failure."""
@@ -1448,7 +2348,7 @@ class Controller:
                 raise
             if result != "continue":
                 self._watch = None
-            return Outcome(result)
+            return Outcome(result, data=is_goldfish(app.authority.current))
         return self.post(OBSERVE, work, done, coalesce=True, mutating=dispatch)
 
     # Milestones ------------------------------------------------------------------
@@ -1490,24 +2390,45 @@ class Controller:
         return None if gate.ok else Outcome("blocked", checks_of(gate.missing))
 
     def preview_start(self, milestone_id, done):
-        """Readiness, then what a start would create -> Outcome("preview", data=Preview) or ("blocked")."""
+        """Readiness, then what a start would create -> Outcome("preview", data=Preview) or ("blocked", with the
+        checks' lines). A preview that is only shown leaves no result (V2d); a start that is refused or fails
+        here leaves the owner's one."""
         def work(app, delivery):
-            blocked = self._blocked(app)
-            if blocked:
-                return blocked
-            preview = delivery.preview(milestone_id, app.roles)
+            attempt = self._next_attempt(delivery, milestone_id)
+            try:
+                blocked = self._blocked(app)
+                if blocked:
+                    lines = tuple(summary(check.line) for check in blocked.checks)
+                    self._result("start", {"milestone": milestone_id, "attempt": attempt}, "owner", "refused",
+                                 "action.refused", lines)
+                    return Outcome("blocked", blocked.checks, lines)
+                preview = delivery.preview(milestone_id, app.roles)
+            except Exception as error:
+                outcome, family = self._fate(error)
+                self._result("start", {"milestone": milestone_id, "attempt": attempt}, "owner", outcome, family,
+                             summary(error).split("\n"))
+                raise
             return Outcome("preview", lines=(delivery.start_text(preview),), data=preview)
         return self._job("preview", work, done)
 
     def start_run(self, preview, done):
-        """The confirmed start of the previewed attempt (refused when the plan or the attempt number moved)."""
+        """The confirmed start of the previewed attempt (refused when the plan or the attempt number moved). The
+        call leaves the owner's one result, whichever way it ends."""
         def work(app, delivery):
+            subject = {"milestone": preview.milestone, "attempt": preview.attempt}
             try:
-                return Outcome("started", data=Token.of(delivery.start(preview, app.roles)))
+                res = delivery.start(preview, app.roles)
             except ProfileChanged as error:
                 # The profile moved after the preview: the owner confirms the new values, nothing was started.
+                self._result("start", subject, "owner", "refused", catalog.family(error), [refusal(error)])
                 fresh = delivery.preview(preview.milestone, app.roles)
                 return Outcome("changed", lines=(refusal(error), delivery.start_text(fresh)), data=fresh)
+            except Exception as error:
+                outcome, family = self._fate(error)
+                self._result("start", subject, "owner", outcome, family, summary(error).split("\n"))
+                raise
+            self._result("start", subject, "owner", "done", "", [self._started_line(res)])
+            return Outcome("started", data=Token.of(res))
         return self._job("start_run", work, done)
 
     def observe_run(self, milestone_id, emit, done, run_id=None):
@@ -1637,7 +2558,25 @@ class Controller:
         def work(app, delivery, r):
             delivery.stop(r)
             return Outcome("stopping", data=Token.of(r))
-        return self._job("stop_run", self._acting(token, work, exact=False), done)
+        acting = self._acting(token, work, exact=False)
+
+        subject = {"milestone": token.milestone, "attempt": token.attempt}
+
+        def run(app, delivery):
+            """The call leaves the owner's one result: requested, or refused (the attempt moved, or a refusal)
+            / failed; the screen's `run_note` is worded from the same lines."""
+            try:
+                outcome = acting(app, delivery)
+            except Exception as error:
+                fate, family = self._fate(error)
+                self._result("stop", subject, "owner", fate, family, summary(error).split("\n"))
+                raise
+            if outcome.kind == "stale":
+                self._result("stop", subject, "owner", "refused", Changed.family, list(outcome.lines))
+                return outcome
+            self._result("stop", subject, "owner", "requested", "", [self._stop_line(token.milestone)])
+            return outcome
+        return self._job("stop_run", run, done)
 
     def check_run(self, token, done):
         """[g] on an interrupted attempt: reconcile with native (an unconfirmed submission is never resent)."""
@@ -1662,7 +2601,8 @@ class Controller:
         that returns at once is paced by short jobs that requeue themselves, so the project lock is free and the
         jobs queued meanwhile run before the next call. `on_merge_wait(milestone)` tells the screen while it waits
         and `(None)` when it ended."""
-        began = [None]
+        began, family, raised = [None], [""], [None]
+        subject = {"milestone": token.milestone, "attempt": token.attempt}
 
         def work(app, delivery, r):
             repeat = began[0] is not None
@@ -1673,35 +2613,52 @@ class Controller:
                 if not admitted:
                     return Outcome("closing")
                 with self._project_op:
-                    merged = delivery.merge(r)
+                    merged = delivery.merge(r, allow_unverified=True)
             if merged.kind == "refused" and merged.family == "merge.critic_pending":
                 return Outcome("waiting")
+            family[0] = merged.family
             return Outcome(merged.kind, lines=((merged.line,) if merged.line else ()) + tuple(merged.paths),
                            data=self._end(delivery, token.milestone))
         acting = self._acting(token, work)
 
-        def run(app, delivery):
-            remaining = CRITIC_SLICE - (time.monotonic() - began[0]) if began[0] is not None else 0
-            if remaining > 0:
-                time.sleep(min(remaining, MERGE_PACE))
-                return Outcome("pacing")
-            if began[0] is not None and self.quit_begun():  # a repeat queued before the quit: it merges for nobody
-                return Outcome("closing")
-            return acting(app, delivery)
+        def run(app):
+            try:
+                self._need(app)
+                delivery = app.delivery
+                remaining = CRITIC_SLICE - (time.monotonic() - began[0]) if began[0] is not None else 0
+                if remaining > 0:
+                    time.sleep(min(remaining, MERGE_PACE))
+                    return Outcome("pacing")
+                if began[0] is not None and self.quit_begun():  # a repeat queued before the quit: it merges for nobody
+                    return Outcome("closing")
+                return acting(app, delivery)
+            except Exception as caught:  # the worker turns it into the caller's text; the result keeps its fate
+                raised[0] = caught
+                raise
 
         def settle(outcome, error):
+            closing = False
             if error is None and outcome.kind in ("waiting", "pacing", "closing"):
                 if outcome.kind == "waiting":
                     self._merge_wait(token.milestone)
-                if outcome.kind != "closing" and self._job("merge", run, settle):
+                if outcome.kind != "closing" and self.post("merge", run, settle):
                     return
-                outcome, error = None, "zplan is closing; the merge was not repeated."
+                outcome, error, closing = None, "zplan is closing; the merge was not repeated.", True
             self._merge_wait(None)
+            if not closing:  # V2b: the call's one result, from its last answer only
+                if error is not None:
+                    fate, code = self._fate(raised[0])
+                    self._result("merge", subject, "owner", fate, code, error.split("\n"))
+                elif outcome.kind == "integrated":
+                    self._result("merge", subject, "owner", "done", "", outcome.lines)
+                else:  # stale (the attempt moved), a refusal, a conflict, an overlap or an open attempt
+                    self._result("merge", subject, "owner", "refused",
+                                 Changed.family if outcome.kind == "stale" else family[0], outcome.lines)
             if error is None and outcome.kind == "integrated":
                 self._answered("merge", token.milestone)
             if done is not None:
                 done(outcome, error)
-        return self._job("merge", run, settle)
+        return self.post("merge", run, settle)
 
     def _start_wait(self, milestone, state):
         if self.on_start_wait is not None:
@@ -1717,26 +2674,53 @@ class Controller:
             except Exception:  # the UI went away
                 pass
 
-    def _creating(self, token, make, done, label, action="start"):
-        """Owner actions that create an attempt or a revision: readiness first, then `make(delivery, r)`."""
+    def _creating(self, token, make, done, label, action="start", operation=None):
+        """Owner actions that create an attempt or a revision: readiness first, then `make(delivery, r)`. With an
+        `operation` (resume, rebrief, answer) the call leaves the owner's one result (V2f), whichever way it ends."""
         def work(app, delivery, r):
             blocked = self._blocked(app, action)
             if blocked:
                 return blocked
             return make(app, delivery, r)
-        return self._job(label, self._acting(token, work), done)
+        acting = self._acting(token, work)
+        if operation is None:
+            return self._job(label, acting, done)
+
+        subject = {"milestone": token.milestone, "attempt": token.attempt}
+
+        def run(app, delivery):
+            try:
+                outcome = acting(app, delivery)
+            except Exception as error:
+                kind, family = self._fate(error)
+                self._result(operation, subject, "owner", kind, family, summary(error).split("\n"))
+                raise
+            if outcome.kind == "attempt":
+                made = outcome.data
+                self._result(operation, dict(subject, created=made.attempt), "owner", "done", "",
+                             [self._attempt_line(self._VERBS[operation], made.milestone, made.plan_revision,
+                                                 made.attempt)])
+                return outcome
+            if outcome.kind == "blocked":  # the readiness gate: the checks' lines are what the screen shows
+                outcome = replace(outcome, lines=tuple(summary(check.line) for check in outcome.checks))
+            self._result(operation, subject, "owner", "refused",
+                         Changed.family if outcome.kind == "stale" else "action.refused", outcome.lines)
+            return outcome
+        return self._job(label, run, done)
+
+    _VERBS = {"resume": "continued", "rebrief": "new attempt", "answer": "answered"}
 
     def answer(self, token, text, done):
         return self._creating(token, lambda app, d, r: Outcome("attempt", data=Token.of(d.answer(r, text))),
-                              done, "answer")
+                              done, "answer", operation="answer")
 
     def new_attempt(self, token, note, done):
         return self._creating(token, lambda app, d, r: Outcome("attempt", data=Token.of(d.new_attempt(r, note))),
-                              done, "new_attempt")
+                              done, "new_attempt", operation="rebrief")
 
     def resume_run(self, token, done):
         return self._creating(token, lambda app, d, r: Outcome("attempt", data=Token.of(d.resume(r))), done, "resume",
-                              action="resume")
+                              action="resume", operation="resume")
 
     def accept(self, token, done):
         def make(app, delivery, r):
@@ -1749,13 +2733,24 @@ class Controller:
         return self._creating(token, make, done, "accept")
 
     def to_plan(self, token, feedback, done):
-        """A scope change: the request becomes a plan revision and goes to the planner (blocked -> unsent, as plain)."""
+        """A scope change: the request becomes a plan revision and goes to the planner (blocked -> unsent, as plain).
+        The job leaves one result, whichever way it ends (V2g)."""
         def work(app, delivery, r):
             value = delivery.to_plan(r, feedback)
             sent = verdict(app.planning.submission())
             return Outcome("plan", sent.checks, ("Plan change: revision r%s was created; it needs approval."
                                                  % value["version"],), data=sent)
-        return self._job("to_plan", self._acting(token, work), done)
+        acting = self._acting(token, work)
+
+        def run(app, delivery):
+            try:
+                outcome = acting(app, delivery)
+            except Exception as error:
+                self._plan_ended("feedback", app, None, error=error)
+                raise
+            self._plan_ended("feedback", app, None, value=outcome)
+            return outcome
+        return self._job("to_plan", run, done)
 
     def leave(self, token, done):
         def work(app, delivery, r):
@@ -1780,6 +2775,13 @@ class FeedPort:
         """C1a: what `zplan_status` answers now (`Controller._bridge_status`, bounded by `STATUS_WAIT`; `stale` when
         the worker stayed busy). Called off the worker thread, like the other port calls."""
         return self.controller._bridge_status()
+
+    def begin_turn(self, message, occurrence=None):
+        """The token of one owner turn (`Controller.begin_turn`); the chat sends it to the turn's MCP server."""
+        return self.controller.begin_turn(message, occurrence)
+
+    def end_turn(self, token):
+        self.controller.end_turn(token)
 
     def snapshot(self):
         source = self.controller.snapshot_source

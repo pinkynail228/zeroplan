@@ -95,7 +95,6 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
     def specs(self):
         """One open spec per builder, in the shapes the task names."""
         return [
-            cards.draft_card("draft-1", "21:03"),
             cards.plan_card("plan-1", "21:05", "3 этапа", "9 задач"),
             cards.merge_card("merge-1", "22:06", "M2 Экспорт CSV", "5", "5"),
             cards.question_card("q-1", "21:58", "T3", "Ревью отклонило T3 четыре раза подряд. Что делаем?",
@@ -112,13 +111,6 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
     # A1 -------------------------------------------------------------------------------------------
     def test_a1_each_builder_resolves_its_ids_and_values_through_strings(self):
         """A1: every title, text, button label and the question hint equal the `strings.text` result for their ids."""
-        draft = cards.draft_card("d", "21:03")
-        self.assertEqual(draft.title, strings.text("card.draft_title"))
-        self.assertEqual(draft.text, strings.text("card.draft_text"))
-        self.assertEqual(draft.buttons, ((strings.text("card.plan_yes"), "/plan"),
-                                         (strings.text("card.no"), "/decline")))
-        self.assertIsNone(draft.hint)
-
         plan = cards.plan_card("p", "21:05", "3 этапа", "9 задач")
         self.assertEqual(plan.title, strings.text("card.plan_title", stages="3 этапа", tasks="9 задач"))
         self.assertEqual(plan.text, strings.text("card.plan_text"))
@@ -142,8 +134,6 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(error.alarm)
         self.assertTrue(cards.error_card("e", "21:57", "T3", "сбой", [], fix="true").text.endswith("\ntrue"))
 
-        closed = cards.closed(draft, strings.text("card.draft_sent", time="21:04"))
-        self.assertEqual(closed.done, strings.text("card.draft_sent", time="21:04"))
         self.assertEqual(cards.closed(plan, strings.text("card.plan_done", time="21:05")).done,
                          strings.text("card.plan_done", time="21:05"))
 
@@ -257,8 +247,8 @@ class CardTests(unittest.IsolatedAsyncioTestCase):
         """
         self.assertTrue(str(strings.store_path()).startswith(str(self.root) + os.sep), strings.store_path())
         self.assertEqual(strings.language(), "en")
-        draft = cards.draft_card("d", "21:03")
-        self.assertEqual(draft.title, strings.text("card.draft_title"))
+        plan = cards.plan_card("p", "21:03", "3 этапа", "9 задач")
+        self.assertEqual(plan.title, strings.text("card.plan_title", stages="3 этапа", tasks="9 задач"))
         strings.set_language("ru")
         self.assertEqual(strings.language(), "ru")
         self.assertEqual(strings.store_path().read_text(encoding="utf-8").strip(), '{"language":"ru"}')

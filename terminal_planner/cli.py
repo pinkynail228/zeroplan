@@ -6,6 +6,7 @@ The UI only renders engine/authority/runs state and sends explicit owner actions
 import argparse
 import importlib
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -299,9 +300,9 @@ class App:
                 # R-3: the demo keeps the snapshot in the fixture state; the project file is never created.
                 self.show("Demo profile accepted: it applies in the fixture state; %s is not created." % process.PROFILE_FILE)
             else:
-                self.show("Profile accepted: %s. %s" % (
-                    process.PROFILE_FILE, "It was committed so the profile is shared." if not status.present
-                    else "The file is unchanged."))
+                self.show("Profile accepted: %s." % ("%s. The file is unchanged" % process.PROFILE_FILE if status.present
+                                                      else "kept by zplan; %s is not created "
+                                                      "(zplan profile init writes it)" % process.PROFILE_FILE))
             if done.notice:
                 self.show(done.notice)
         elif key == "l":
@@ -514,7 +515,7 @@ class App:
 
     PLAN_ACTIONS = {"start": "plan.start", "renew": "plan.renew", "watch": "plan.watch", "details": "plan.details",
                     "retry": "plan.retry", "revise": "plan.revise", "login": "plan.login", "restart": "plan.restart",
-                    "approve": "plan.approve", "reject": "plan.reject", "requirements": "plan.requirements",
+                    "approve": "plan.approve", "requirements": "plan.requirements",
                     "tail": "plan.tail", "override": "plan.override", "stop": "plan.stop"}
 
     def plan_screen(self, current):
@@ -525,7 +526,7 @@ class App:
                     "tail": self.tail,
                     "retry": self.restart, "revise": self.revise_current, "login": self.relogin,
                     "restart": self.restart, "approve": lambda: self.approve(current),
-                    "reject": lambda: self.reject(current), "requirements": lambda: self.requirements(current),
+                    "requirements": lambda: self.requirements(current),
                     "override": lambda: self.override(current), "stop": self.stop_planner}
         if view.kind == "unknown":
             handlers["details"] = lambda: self.unknown_details(current)
@@ -608,11 +609,6 @@ class App:
             return False
         self.show("Plan r%s approved despite the check. Nothing was started; start with [g] on the home screen."
                   % current["version"])
-        return True
-
-    def reject(self, current):
-        self.planning.reject(current["version"])
-        self.show("Proposal r%s not approved; nothing was started." % current["version"])
         return True
 
     def requirements(self, current):
@@ -774,7 +770,7 @@ class App:
             return r
         self.show(self.delivery.pending_text("merge", r["milestone"]))
         # A7b2: the plain CLI has no event loop between slices, so it waits for the merge critic to finish.
-        result = self.delivery.merge(r, slice=None)
+        result = self.delivery.merge(r, slice=None, allow_unverified=True)
         if result.line:
             self.show(result.line)
         return r if result.stay else None
@@ -932,7 +928,8 @@ def build_parser():
 
 
 def profile_command(terminal, args):
-    """`zplan profile` prints the resolved profile (no lock, no prompt); `profile init` writes the proposal.
+    """`zplan profile` prints the resolved profile (no lock, no prompt); `profile init` exports the effective profile
+    to the project's file (never over an existing one) and commits it; from then on the file is the source.
 
     In a fixture session it records the snapshot in the fixture state and never writes the target's file (R-3); the
     file's own rule still applies (an existing file is refused), and an already accepted fixture profile is refused
@@ -949,7 +946,7 @@ def profile_command(terminal, args):
                               % process.PROFILE_FILE, family="action.refused")
             if fixture and status.state == "accepted":
                 raise Blocked("The demo profile is already accepted: profile init does not overwrite it.", family="action.refused")
-            status = profile.accept()
+            status = profile.accept() if fixture else profile.export()
         if fixture:
             terminal.show("Demo profile accepted: it applies in the fixture state; %s is not created." % process.PROFILE_FILE)
         else:
@@ -982,6 +979,41 @@ def roles_command(terminal, args):
     return 0
 
 
+def exec_command(args, text, engine_factory, driver_factory, readiness):
+    """Thin send-only frontend; the service owns admission, replay and aggregate status."""
+    from .application import ApplicationService, scrub
+    from .architect import ArchitectStore, FixtureArchitect
+    from .tui.controller import Controller  # existing no-screen controller; imports no Textual
+
+    controller = None
+    try:
+        project = discover(args.project or os.getcwd())
+        fixture = args.fixture is not None
+        root = Path(args.state_dir) / "architect" / args.fixture if fixture else None
+        store = ArchitectStore(project, root=root)
+        architect = FixtureArchitect(store) if fixture else None
+        controller = Controller.for_project(project, args.state_dir, fixture_id=args.fixture,
+                                            engine_factory=engine_factory, driver_factory=driver_factory,
+                                            readiness=None if fixture else readiness, profile=not fixture)
+        service = ApplicationService(architect, store=store, controller=controller)
+        controller.start()
+        result = service.submit_message(args.operation_id, text)
+        output = service.message_outcome(result)
+        print(json.dumps(output, ensure_ascii=False))
+        return output["exit_code"]
+    except KeyboardInterrupt:
+        print("Interrupted; inspect the durable operation before submitting another id.", file=sys.stderr)
+        return 3
+    except Exception as error:
+        family = getattr(error, "family", None) or ("operation.store_invalid" if isinstance(error, (OSError, ValueError))
+                                                  else catalog.UNKNOWN)
+        print(scrub("%s: %s" % (family, error))[:2000], file=sys.stderr)
+        return 1
+    finally:
+        if controller is not None:
+            controller.stop()
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     asked = help_request(argv)
@@ -998,11 +1030,33 @@ def main(argv=None):
     # the production state path) or the wiring: an invalid id never reaches setup, attach_tools or a session.
     if args.fixture is not None and not valid_fixture_id(args.fixture):
         parser.error("the fixture ID must be non-empty and consist of letters, digits, \"-\" or \"_\"")
+    goal_text = None
+    if args.command == "exec":
+        if not args.goal or not args.operation_id or not args.operation_id.strip() or len(args.operation_id) > 128:
+            parser.error("exec requires --goal GOAL.md and --operation-id ID (1-128 characters)")
+        if args.state_dir is not None and args.fixture is None:
+            parser.error("--state-dir is fixture only")
+        if args.fixture is not None and args.state_dir is None:
+            parser.error("exec --fixture requires --state-dir DIR")
+        if args.plain or args.check:
+            parser.error("exec does not use --plain or --check")
+        try:
+            if not Path(args.goal).is_file():
+                raise ValueError("not a regular goal file")
+            with Path(args.goal).open("rb") as stream:
+                data = stream.read((1 << 20) + 1)
+            goal_text = data.decode("utf-8")
+            if len(data) > 1 << 20 or not goal_text.strip() or "\0" in goal_text:
+                raise ValueError("invalid goal")
+        except (OSError, ValueError):
+            parser.error("--goal must name a readable, nonempty UTF-8 text file of at most 1 MiB (no NUL)")
+    elif args.goal is not None or args.operation_id is not None:
+        parser.error("--goal and --operation-id apply only to exec")
     if args.native_state_dir is None:
         args.native_state_dir = str(native_state_root())
     if args.subcommand and args.command != "profile":
         parser.error("%s takes no argument %s" % (args.command or "zplan", args.subcommand))
-    if args.command and args.command not in ("status", "profile") and args.fixture is not None:
+    if args.command and args.command not in ("status", "profile", "exec") and args.fixture is not None:
         parser.error("setup/doctor/login/logout/update/roles do not use a fixture namespace")
     terminal = Terminal()
     environment = None
@@ -1050,6 +1104,12 @@ def main(argv=None):
         if not args.native_binary:
             return None  # status without installed tools: no live phase, nothing else needs the binary
         return NativeDriver(args.native_binary, args.native_state_dir, environment=environment)
+
+    if args.command == "exec":
+        def exec_readiness():
+            attach_tools()
+            return readiness(discover(args.project or os.getcwd()), args.native_state_dir, tools=not explicit)
+        return exec_command(args, goal_text, factory, drivers, exec_readiness)
 
     try:
         if args.command == "setup":
@@ -1104,7 +1164,7 @@ def main(argv=None):
                               + catalog.tag("tui.unavailable"))
         # The start screen needs the real terminals tui_wanted looks for; a patched check without them stays line-based.
         if start_screen is not None and sys.stdin.isatty() and sys.stdout.isatty():
-            project = start_screen(args.project or os.getcwd())
+            project = start_screen(args.project or os.getcwd(), origin=not fixture)
         else:
             project = choose_project(terminal, args.project or os.getcwd())
         if project is None:

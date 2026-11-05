@@ -389,7 +389,7 @@ def proposal(tasks):
 
 def documents(scenario):
     baseline, _ = milestone.build_manifest(proposal(scenario["tasks"]), "M1", 1)
-    return (milestone.milestone_graph(len(baseline["tasks"])), milestone.milestone_runtime(default_roles()),
+    return (milestone.milestone_graph(), milestone.milestone_runtime(default_roles()),
             milestone.milestone_input(baseline))
 
 

@@ -1,0 +1,5 @@
+#!/bin/sh
+# The test ratchet on direct commits (docs/DEVELOPMENT.md section 2). Install once per clone:
+#   git config core.hooksPath devtools/hooks
+# Exceptions are trailers in the commit message, e.g. `Ratchet-new-test: tests.test_x.T.test_y: <reason>`.
+exec python3.13 "$(git rev-parse --show-toplevel)/devtools/ratchet.py" --hook "$1"

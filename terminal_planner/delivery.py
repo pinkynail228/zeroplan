@@ -23,10 +23,10 @@ from . import catalog, live, merge_critic, process, task_gate
 from .engine import (NativeEngine, ObservationDetached, SliceEnded, gate_owner_rules, gate_prepared,
                      merge_critic_documents, reset_value, task_gate_documents)
 from .authority import Blocked, baseline, canonical, decode, git, require
-from .planning import OVERRIDDEN, Planning, goal_line, one_line, summary
+from .planning import OVERRIDDEN, Planning, brief_lines, goal_line, one_line, plan_worker, summary
 from .process import ProfileChanged
-from .runs import (ACTIVE as RUN_ACTIVE, CONTROL, MAX_RUNS, amendment_text, critic_identity,
-                   diagnostic_commands, extended, git_call, now, review_rounds, run_state, Overlap)
+from .runs import (ACTIVE as RUN_ACTIVE, CONTROL, MAX_RUNS, amendment_text, changed_text, critic_identity,
+                   diagnostic_commands, extended, git_call, now, review_rounds, run_state, stamp_time, Overlap)
 
 def task_gate_roles(config):
     """The gate graph's node bindings from the resolved configuration (R-3): the worker presents the frozen briefs
@@ -90,10 +90,12 @@ PLAN_STATUS = {"approved": "approved", "proposed": "proposed, waiting for approv
 STATE_TEXT = {"waiting": "waiting", "ready": "ready", "running": "running", "needs_owner": "needs an answer",
               "blocked": "blocked", "failed_recoverable": "failed · can continue",
               "failed": "failed · cannot continue", "awaiting_merge": "waiting for merge", "conflict": "conflict",
-              "integrated": "merged", "stopped": "stopped", "stopping": "stopping"}
+              "integrated": "merged", "stopped": "stopped", "stopping": "stopping", "paused": "paused"}
 # Active states [g] check reconciles: an unconfirmed submission, a stop not yet confirmed by native.
 CHECK = ("unknown", "stopping")
 ATTENTION = ("needs_owner", "blocked", "conflict", "awaiting_merge", "failed_recoverable", "failed", "stopped")
+# A provider limit paused the attempt: it needs nobody, so it is the last thing the focus lands on.
+PAUSED = "paused"
 RUN_STATUS = {"preparing": "preparing", "submission_unknown": "submission not confirmed", "submitted": "submitted",
               "running": "running", "stopping": "stopping", "resume_pending": "resume not confirmed",
               "finished": "finished", "failed": "failed", "stopped": "stopped"}
@@ -111,6 +113,11 @@ CAUSE_TEXT = {"limit": "Provider limit; check the account limits and try again l
               "auth": "The service rejected the authorization; [l] refresh login (`zplan login`) and retry the attempt.",
               "forbidden": "Access denied (403 Forbidden); check the account or region and try again.",
               "network": "No connection to the model service; try again later."}
+
+
+def local_time(stamp):
+    """A stored UTC stamp as the owner's local `YYYY-MM-DD HH:MM`."""
+    return stamp_time(stamp).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def cause_line(r):
@@ -259,6 +266,14 @@ class Home:
 
 
 @dataclass(frozen=True)
+class ApprovedPlan:
+    """The last approved plan as a read-only view: its version and the plan lines of home (goal line, summary line,
+    one line per milestone with its state), whether or not a newer revision is only proposed."""
+    version: int
+    lines: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Pick:
     """Which milestone a plain key applies to and what to do: follow (an attempt to watch or open), check,
     start, or message (nothing to do; `text` says why)."""
@@ -354,6 +369,7 @@ def plan_lines(authority, plan, runs):
     a = authority
     merged = any(extended(r)["delivery"] == "integrated" for r in runs)
     status = OVERRIDDEN if plan.get("override") else PLAN_STATUS.get(plan["status"], plan["status"])
+    status = status.replace("planner", plan_worker(plan))
     lines = ["Plan r%s · %s" % (plan["version"], status),
              "Goal: " + plan["goal"]]
     if plan["feedback"]:
@@ -366,7 +382,8 @@ def plan_lines(authority, plan, runs):
                          % (plan["baseline"][:12], baseline(a.project)[:12]))
     else:
         lines.append("Project: CHANGED — the plan needs revising")
-    lines.append("Roles: " + "; ".join("%s=%s/%s" % (role, v["model"], v["effort"]) for role, v in plan["roles"].items()))
+    lines.append("Roles: " + "; ".join("%s=%s/%s" % (role, v["model"], v["effort"]) for role, v in plan["roles"].items()
+                                          if role != "planner" or plan_worker(plan) == "planner"))
     evidence = plan.get("evidence")
     if evidence:
         lines += Planning.gate_lines(evidence, plan.get("override"))
@@ -386,6 +403,7 @@ def plan_lines(authority, plan, runs):
             for task in s["tasks"]:
                 lines.append("    %s — %s" % (task["id"], task["title"]))
                 lines.append("      checks: " + "; ".join(task["checks"]))
+                lines.extend(brief_lines(task))
     if not runs:
         lines.append("Nothing has been implemented; this is only a plan.")
     return lines
@@ -398,6 +416,7 @@ class Delivery:
 
     def __init__(self, authority, runs, planning):
         self.authority, self.runs, self.planning = authority, runs, planning
+        self.home_read = None  # (version, overview items) of the last approved `home`, for `approved` to reuse once
 
     # Reading -----------------------------------------------------------------
 
@@ -434,6 +453,8 @@ class Delivery:
         if state == "integrated":
             x = extended(r)
             text = "merged %s" % short(x["integration"]["commit"] or x["result"]["commit"])
+        elif state == PAUSED:
+            text = "%s · provider limit · resumes %s" % (STATE_TEXT[state], local_time(r["resume_at"]))
         else:
             text = STATE_TEXT[state] + (" · " + line if line else "")
         # A carried record names its revision: the milestone's work of an older, still-unchanged revision.
@@ -454,7 +475,7 @@ class Delivery:
 
     @staticmethod
     def focus_item(items):
-        for states in (("running",) + CHECK, ATTENTION, ("ready",)):
+        for states in (("running",) + CHECK, ATTENTION, ("ready",), (PAUSED,)):
             found = next((i for i in items if i["state"] in states), None)
             if found is not None:
                 return found
@@ -546,12 +567,13 @@ class Delivery:
     def home(self):
         """The plan part of home (the TUI panel shows exactly these lines). Refresh only detects integration."""
         plan = self.plan()
+        self.home_read = None
         if plan is None:
             return Home("none", ("No plan.", "Next: [p] plan — describe the goal"),
                         ("home.plan", "home.settings", "home.quit"))
         lines = [goal_line(plan["goal"], 100, "home.details")]
         if plan["status"] != "approved":
-            lines.append("Plan r%s · %s" % (plan["version"], PLAN_STATUS[plan["status"]]))
+            lines.append("Plan r%s · %s" % (plan["version"], PLAN_STATUS[plan["status"]].replace("planner", plan_worker(plan))))
             if plan["status"] == "proposed" and not fresh(self.authority):  # C5: a stale proposal cannot be approved
                 lines.append(REVISE_NEXT)
             else:
@@ -561,6 +583,7 @@ class Delivery:
                 ids.insert(1, "home.tail")
             return Home("pending", tuple(lines), tuple(ids), panel=self.planner_panel(), journal=self.journal(None))
         items = self.runs.overview()
+        self.home_read = (plan["version"], items)
         lines += self.overview_lines(plan, items)
         found = self.focus_item(items)
         slots = self.slots()
@@ -570,7 +593,7 @@ class Delivery:
         g = self.g_id(items, slots)
         if g:
             ids.append(g)
-        if any(i["state"] in ATTENTION for i in items):
+        if any(i["state"] in ATTENTION + (PAUSED,) for i in items):
             ids.append("home.open")
         if self.tail_item(items) is not None:
             ids.append("home.tail")
@@ -590,6 +613,22 @@ class Delivery:
         return Home("approved", tuple(lines), tuple(ids), tuple(self.row(i) for i in items),
                     self.row(found) if found else None, g, g_item["id"] if g_item else None,
                     busy["id"] if busy else None, panel, flow=flow, journal=journal, slots=slots)
+
+    def approved(self):
+        """The newest revision the store holds as approved, read like home reads an approved current revision (the
+        same lines); None when no revision was ever approved. Read-only: nothing is dispatched or exported. When the
+        approved revision is the current one `home` has just read, that overview is reused (once); an older approved
+        revision gets its own."""
+        a = self.authority
+        read, self.home_read = self.home_read, None
+        plan = next((r for r in reversed(a.state["revisions"]) if r["status"] == "approved"), None) if a.state else None
+        if plan is None:
+            return None
+        current = self.plan()
+        reuse = read is not None and current is not None and read[0] == plan["version"] == current["version"]
+        items = read[1] if reuse else self.runs.overview(revision=plan)
+        return ApprovedPlan(plan["version"], tuple([goal_line(plan["goal"], 100, "home.details")]
+                                                   + self.overview_lines(plan, items)))
 
     @staticmethod
     def next_view(home):
@@ -688,6 +727,32 @@ class Delivery:
         if resolved is not None:  # any usable state: accepted, "later" or undecided (the proposal)
             value = resolved.config.get("autonomy", {}).get("max_runs")
         return min(value, MAX_RUNS) if isinstance(value, int) and not isinstance(value, bool) else 1
+
+    def base_checks(self):
+        """D1: the evidence of the required checks run on the project's HEAD and its tree, as `gate_candidate` runs
+        them on a candidate; None when no required merge gate or no checks are configured. A passed evidence is kept
+        under the authority directory by (tree, checks) and not run again; a failed one is never kept."""
+        status = self.guard("milestone")
+        if status is None:
+            return None
+        config = status.resolved.config
+        if config["gates"]["merge"] != "required" or not config.get("checks"):
+            return None
+        return self.runs.base_checks(config["checks"])
+
+    @staticmethod
+    def preflight_message(evidence):
+        commit = (evidence.get("commit") or "")[:12]
+        bad = next((c for c in evidence.get("checks", []) if c.get("status") != 0), None)
+        if bad is None:
+            what = "The required checks could not run on the base (%s)" % evidence.get("refused", "no checks ran")
+            tail = ""
+        else:
+            what = "The required check %s failed on the base (status %s%s)" % (
+                bad.get("name"), bad.get("status"), changed_text(bad))
+            tail = "\n".join(str(bad.get("tail", "")).splitlines()[-20:])
+        return "%s, commit %s.%s Fix the check or the base, then start again." % (
+            what, commit, "\n" + tail + "\n" if tail else " ")
 
     def admission(self, exclude=None):
         """The one service guard every path that creates an attempt runs on the worker, before any side effect
@@ -889,6 +954,9 @@ class Delivery:
         if len(mine) + 1 != preview.attempt:
             raise Changed("attempt %s is already started" % (len(mine)))
         self.admission()  # the profile's cap of parallel attempts, before the attempt exists
+        evidence = self.base_checks()  # D1: the required checks on the base, before anything is created
+        if evidence is not None and evidence.get("outcome") != "passed":
+            raise Blocked(self.preflight_message(evidence), family="milestone.preflight")
         return self.runs.start(preview.milestone, preview.plan_revision, roles)
 
     # Observation and stop ------------------------------------------------------
@@ -991,7 +1059,7 @@ class Delivery:
             return "Journal %s · attempt %s" % (item["id"], r["attempt"]), self.tail(r)
         if plan is None or not plan["run_id"]:
             raise Blocked("The planner has no run yet: no journal.", family="action.refused")
-        return "Planner journal r%s" % plan["version"], self.tail(None)
+        return "%s journal r%s" % (plan_worker(plan).capitalize(), plan["version"]), self.tail(None)
 
     @staticmethod
     def stop_question(r):
@@ -1100,6 +1168,10 @@ class Delivery:
                 if task["status"] == "open" and task.get("notes"):
                     body.append("  %s: %s" % (task["id"], one_line(task["notes"])))
             return build("blocked", body)
+        if state == PAUSED:
+            return build("paused · provider limit",
+                         [self.reason(r)] + self.cause_lines(r)
+                         + ["  zplan continues it by itself at %s, once." % local_time(r["resume_at"])])
         if state == "failed_recoverable":
             return build("failed, can continue",
                          [self.reason(r)] + self.cause_lines(r)
@@ -1142,7 +1214,7 @@ class Delivery:
     def merge_question(r):
         return "Merge the result of %s into %s?" % (r["milestone"], r["destination"]["branch"])
 
-    def merge(self, r, slice=CRITIC_SLICE, expected=None, vet=None):
+    def merge(self, r, slice=CRITIC_SLICE, expected=None, vet=None, allow_unverified=False):
         """The confirmed merge. A conflict keeps the attempt open (its end view names the files).
 
         A gated merge runs the merge critic (`critic_authorize`) between the checks and the landing: `slice` bounds
@@ -1150,13 +1222,18 @@ class Delivery:
         is the profile digest a caller decided on (the architect's merge policy): the merge's own profile read must
         be that profile, else `ProfileChanged` and nothing is merged; without a gate the landing is bound to that
         digest (else to the profile read here), so a profile that changes during the merge lands nothing. `vet(paths)`
-        is the caller's last word on an ungated candidate's own changed paths (`MilestoneRuns.merge`)."""
+        is the caller's last word on an ungated candidate's own changed paths (`MilestoneRuns.merge`). The default
+        refuses unverified work; only an explicit owner frontend passes `allow_unverified=True` and gets the label."""
         try:
             status = self.guard("merge")
             if expected is not None and (status is None or status.digest != expected):
                 raise ProfileChanged("The process profile changed after the merge decision: check the new values and "
                                      "repeat the merge.")
             resolved = status.resolved if status is not None else None
+            verified = resolved is not None and resolved.config["gates"]["merge"] == "required"
+            require(allow_unverified or verified,
+                    "Automatic merge requires at least one passing project check; ask the owner to merge explicitly.",
+                    family="merge.no_checks")
             self.runs.merge(r, resolved,
                             critic=lambda rr, gate, paths: self.critic_authorize(rr, gate, paths, resolved, slice),
                             pinned=expected if expected is not None else (status.digest if status is not None else None),
@@ -1170,8 +1247,11 @@ class Delivery:
             left = self.cleanup(r)
             tail = "; left in place: %s." % ", ".join(left) if left else "."
             landing = extended(r)["integration"].get("landing")
-            return Merge("integrated", "Merged: %s → %s%s%s" % (r["milestone"], r["destination"]["branch"], tail,
-                                                                " Note: " + landing if landing else ""), False)
+            line = "Merged: %s → %s%s%s" % (r["milestone"], r["destination"]["branch"], tail,
+                                            " Note: " + landing if landing else "")
+            if not verified:
+                line += " Unverified merge: no project checks or merge critic ran."
+            return Merge("integrated", line, False)
         return Merge("open", "", True)
 
     # Merge critic (A7b2) ----------------------------------------------------------
@@ -1473,7 +1553,7 @@ class Delivery:
                 lines += ["Journal %s (attempt %s):" % (m["id"], r["attempt"])] + list(entries)
         entries = self.journal_lines(plan.get("live"))
         if entries:
-            lines += ["Planner journal r%s:" % plan["version"]] + list(entries)
+            lines += ["%s journal r%s:" % (plan_worker(plan).capitalize(), plan["version"])] + list(entries)
         return lines + [""] if lines else lines
 
     def plan_section(self, plan):
@@ -1490,7 +1570,7 @@ class Delivery:
         """The tail for diagnosing: receipts, worktrees, run ids and ready-to-copy Zeroshot commands."""
         lines = []
         if plan["run_id"]:
-            lines.append("Planner r%s: run %s" % (plan["version"], plan["run_id"]))
+            lines.append("%s r%s: run %s" % (plan_worker(plan).capitalize(), plan["version"], plan["run_id"]))
             if plan.get("diagnostic"):
                 lines.append("  " + summary(plan["diagnostic"]))
             lines += self.planning.planner_commands(plan)

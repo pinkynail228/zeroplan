@@ -449,7 +449,7 @@ class DoctorTests(unittest.TestCase):
     def test_ready_prints_one_ok_line_per_check(self):
         code, text = self.run_doctor()
         self.assertEqual(code, 0, text)
-        for line in ("OK: native socket path 81 bytes", "OK: zeroshot 10.16.0", "OK: codex " + str(setup.tool_paths()[1]),
+        for line in ("OK: native socket path 81 bytes", "OK: zeroshot 11.0.0", "OK: codex " + str(setup.tool_paths()[1]),
                      # R-5: an override home names itself, and the profile line belongs to zplan's own home alone
                      "OK: CODEX_HOME %s (your $CODEX_HOME, not zplan's profile) · provider openai "
                      "(no config.toml: Codex defaults)" % self.codex_home.resolve(),

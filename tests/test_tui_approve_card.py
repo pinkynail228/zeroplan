@@ -21,7 +21,7 @@ Interpretations this run had to make (the worker's summary never reaches the rev
   the task says a card without counts must still be shown, without a new catalog id (the run's write-set holds no
   `strings.py`; the parallel card rule adds new `card.*` ids, and none is needed here).
 - The card's `at` is the wall clock the source is read at (`card_clock()`): the plan summary line carries no time
-  of its own (unlike the goal-draft card, whose `at` is the reply's `HH:MM`). The receipt's time stays the clock
+  of its own (unlike the goal-draft card of earlier releases, whose `at` was the reply's `HH:MM`). The receipt's time stays the clock
   read when the owner acts, as `card.plan_done` wants.
 - A5 is checked through the decision's *real* contract: `ZplanApp.decide` only queues the approval on the worker and
   its verdict comes back later through the callback it hands the controller (`done(outcome, error)`), never as a
@@ -91,7 +91,7 @@ def proposal():
     """The proposed joint-example snapshot the unit stand-ins read: version 1, status `proposed`, the summary line
     the criteria quote, and the plan view that carries it."""
     view = PlanView("proposal", 1, "proposed", ("", SUMMARY),
-                    ("approve", "revise", "reject", "requirements"))
+                    ("approve", "revise", "requirements"))
     return Snapshot(project="P", branch="main", clean=True, version=1, status="proposed", lines=(SUMMARY,), roles=(),
                     plan=view)
 
@@ -192,7 +192,7 @@ class _Screen:
 
     def __init__(self, snapshot=None):
         self.box, self.app = _Slot(), _App(snapshot)
-        self.card_widgets, self.card_specs, self.draft_cards, self.cards_seen = {}, {}, {}, set()
+        self.card_widgets, self.card_specs, self.cards_seen = {}, {}, set()
 
     def query_one(self, selector, *args):
         if selector == "#chat":
@@ -232,7 +232,7 @@ class PlanCardSourceTests(unittest.TestCase):
         approved, so its card keeps the key and the counts but offers «доработать» alone and says why."""
         snapshot = proposal()
         stale = replace(snapshot, plan=PlanView("proposal", 1, "proposed", snapshot.plan.lines,
-                                                ("revise", "reject", "requirements"), family="plan.stale"))
+                                                ("revise", "requirements"), family="plan.stale"))
         spec = list(ui.CARD_SOURCES["plan"](_Screen(stale)))[0]
         self.assertEqual(spec.key, "plan:1")
         self.assertEqual(spec.title, "Plan · 1 этап · 3 задачи")
@@ -455,10 +455,17 @@ class NarrowApproveCardTests(ApproveCardShell):
         confirmation) ends the proposed state, so the source returns nothing and the card is off the main screen on
         the next render — no card-side code runs for that path."""
         self.propose_joint()
+        clock = ["21:00"]
+        clock_patch = patch("terminal_planner.tui.card_kinds.card_clock", side_effect=lambda: clock[0])
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
         async with self.shell(size=(80, 24)) as pilot:
             await self.loaded(pilot)
             card = await self.card_shown(pilot)
             self.assert_card_under_the_chat(card, (80, 24))
+            # Tab's render refreshes the existing approval card. A minute rollover must
+            # not reveal the chat again and blur the plan pane the owner just chose.
+            clock[0] = "21:01"
             await self.panel(pilot)
             await self.command(pilot, "/view")
             await self.until(pilot, lambda: type(self.app.screen).__name__ == "PlanScreen")

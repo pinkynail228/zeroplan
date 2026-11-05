@@ -274,7 +274,7 @@ class WakeTests(FeedWiringCase):
         with patch("terminal_planner.autonomy.level", return_value="auto"):
             if acting:
                 with patch.object(controller, "_run_tool",
-                                  lambda app, tool, args, planning=None: app.authority.approve(1)):
+                                  lambda app, tool, args, planning=None, request=None: app.authority.approve(1)):
                     ok, error = controller._bridge_action("c1b-approve", "zplan_approve_plan", {})
                 self.assertIsNone(error, error)
             else:

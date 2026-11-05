@@ -57,9 +57,10 @@ class HintTests(unittest.TestCase):
                 self.assertEqual(ui.plan_tab_line(line), shown)
 
     def test_h3_where_the_architect_approves_the_canvas_does_not_wait_for_a_yes(self):
-        for level, auto in (("auto", True), ("supervised", False), ("manual", False)):
-            with self.subTest(level=level), patch.object(ui, "screen_slash_state", return_value="plan_ready"):
-                snapshot = snapshot_at(level)
+        for level, chain, auto in (("auto", True, True), ("supervised", True, True), ("manual", True, False),
+                                   ("auto", False, False), ("supervised", False, False), ("manual", False, False)):
+            with self.subTest(level=level, chain_approved=chain), patch.object(ui, "screen_slash_state", return_value="plan_ready"):
+                snapshot = snapshot_at(level, chain_approved=chain)
                 self.assertIs(ui.plan_auto_approves(snapshot), auto)
                 title, step = ui.canvas_title(SimpleNamespace(snapshot=snapshot)), ui.plan_tab_line(APPROVE, auto)
                 self.assertEqual(title == strings.text("canvas.scheme_approve"), not auto)
@@ -95,38 +96,26 @@ class HintTests(unittest.TestCase):
         self.assertEqual(ui.command_hints("Goal: x — [i] details"), "Goal: x — /details")
         self.assertEqual(ui.command_hints("Goal: x — [l] refresh login"), "Goal: x — /setup → log in")
 
-    def decided(self, level, kind):
-        """The note `ZplanApp.decide` says when the owner's decision came back as `kind`, on a stand-in app."""
+    def decided(self, kind):
+        """The note `ZplanApp.decide` says when the owner's decision came back as `kind` with the result's own line."""
         said = []
-        outcome = SimpleNamespace(kind=kind)
+        line = "Plan r1 approved%s." % (" despite the check" if kind == "overridden" else "")
+        outcome = SimpleNamespace(kind=kind, lines=(line,))
         app = SimpleNamespace(
             controller=SimpleNamespace(approve_plan=lambda version, done: done(outcome, ""),
                                        override_plan=lambda version, reason, done: done(outcome, "")),
             deliver=lambda callback: callback, plan_approved=lambda version: None, progress=[], finish_note="x",
-            snapshot=snapshot_at(level), approval_note=None, say_note=said.append, request_refresh=lambda: None,
-            changed=lambda: None)
+            say_note=said.append, request_refresh=lambda: None, changed=lambda: None)
         ui.ZplanApp.decide(app, "override" if kind == "overridden" else "approve", 1, "reason")
-        return said[0], app
+        return said[0]
 
-    def test_c7_n2_where_zplan_starts_the_work_the_approval_notes_say_so(self):
+    def test_v2a_a1_the_approval_note_is_the_results_own_line_and_never_promises_a_start(self):
+        """v2a A1: the note is the line the controller's result carries; the screen has no guess about starting
+        (the level and the chat no longer matter, so the stand-in app has neither)."""
+        self.assertEqual(self.decided("approved"), "Plan r1 approved.")
+        self.assertEqual(self.decided("overridden"), "Plan r1 approved despite the check.")
         for kind in ("approved", "overridden"):
-            for level in ("auto", "supervised", "manual"):
-                note, _ = self.decided(level, kind)
-                with self.subTest(kind=kind, level=level):
-                    self.assertTrue(note.startswith("Plan r1 approved"), note)
-                    starts = ui.autonomy.decide(level, "start") == "allow"
-                    self.assertEqual("zplan starts the first stage." in note, starts, note)
-                    self.assertEqual("/run" in note or "not started" in note, not starts, note)
-        self.assertEqual(self.decided("auto", "approved")[0], "Plan r1 approved. zplan starts the first stage.")
-
-    def test_c7_n3_once_a_run_of_the_approved_revision_started_the_approval_note_is_gone(self):
-        note, app = self.decided("manual", "approved")
-        app.run_note, app.plan_lines = note, (note,)  # said on the home and on the plan screen
-        row = lambda token: SimpleNamespace(token=token)  # noqa: E731
-        ui.ZplanApp.approval_note_over(app, SimpleNamespace(rows=(row(None),)))
-        self.assertEqual((app.run_note, app.plan_lines), (note, (note,)))  # no run yet: the note stays
-        ui.ZplanApp.approval_note_over(app, SimpleNamespace(rows=(row(SimpleNamespace(plan_revision=1)),)))
-        self.assertEqual((app.run_note, app.plan_lines, app.approval_note), ("", (), None))
+            self.assertNotIn("start", self.decided(kind))
 
 
 @unittest.skipUnless(HAVE_TEXTUAL and modals is not None, "Textual (or ZPLAN_TEST_WHEELHOUSE) is required")

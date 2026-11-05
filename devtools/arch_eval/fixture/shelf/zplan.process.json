@@ -1,0 +1,8 @@
+{
+  "preset": "zplan.default/2",
+  "autonomy": {"level": "supervised"},
+  "gates": {"plan": "required", "task": "off", "merge": "required"},
+  "checks": [
+    {"name": "unit", "argv": ["python3", "-m", "unittest", "discover", "-s", "tests"], "timeout_s": 600}
+  ]
+}
