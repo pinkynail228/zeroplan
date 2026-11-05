@@ -31,12 +31,17 @@ ALL_REQUIREMENTS = "Every requirement of the milestone is satisfied."
 REVIEW_BAR = ("A review rejects only when a check or the title of input.task fails on a realistic path, or the change "
               "breaks existing behaviour on a realistic path; anything else goes into diagnostic.message as a "
               "non-blocking note marked `note:` and never rejects the change.")
-# The verification rule the worker follows (H3): proportionate to the change, the project's own way. Tests assert it.
-VERIFY_RULE = ("Verify the change the project's own way and in proportion to it: in a project with a test setup, a "
-               "behaviour change (a new feature included) that existing tests do not cover gets a relevant test (extend an "
-               "existing test first), and a test the task asks for (a project's first included) is written; a change "
-               "to docs, copy or config files alone gets no new test, only the project's existing checks. A test is "
-               "the smallest one that proves its criterion.")
+# The verification rule of the worker and both repairs (R1, docs/designs/2026-11-05-r1-tests-in-proportion.md): prove
+# by running, keep a durable test only when asked. Repair has no single task, so the text names none. Tests assert it.
+WHEN_A_TEST = ("a brief's criteria or done-when ask for one, the project's root AGENTS.md asks for tests, the change "
+               "introduces the project's first check, or it fixes a defect that escaped a merge")
+VERIFY_RULE = ("Prove what you change by running it the project's own way, and report every command you ran with its "
+               "output. Add or extend a durable test only when " + WHEN_A_TEST + ". Such a test goes through a public "
+               "boundary: it may assert output that is the contract (a command's format, words the owner must see), "
+               "and it does not break on a change of wording or private structure that changes no behaviour. Any "
+               "other check you write is throwaway: write it outside the workspace (the system temp directory) and "
+               "leave nothing of it in the workspace. A change to docs, copy or config files alone gets only the "
+               "project's existing checks.")
 # Workers never commit; zplan records the candidate after the final check. A brief sentence such as "nothing is left
 # uncommitted, the files are in Git" is a fact from planning, so no verifier may turn it into a completion rule (diagnostic run
 # 2026-11-05: three repairs could not satisfy it).
@@ -415,8 +420,9 @@ def milestone_graph(tool=TOOL):
             return prefix + name
         final_inputs = context + ["finalFindings", "scopeFindings"]
         final_body = read_only + (
-            "Final milestone verification: check the workspace against every frozen requirement and every derived "
-            "milestone check in input.baseline, with fresh evidence you gather yourself. verdict=accepted only when all "
+            "Final milestone verification: check the workspace against every frozen requirement, every acceptance "
+            "criterion of the frozen task briefs and every derived milestone check in input.baseline, with fresh "
+            "evidence you gather yourself. verdict=accepted only when all "
             "hold; verdict=rejected with actionable findings in diagnostic.message only for a defect you saw; "
             "verdict=incomplete when a required check could not run to the end (a missing tool, a "
             "timeout, evidence you could not gather), naming that check in diagnostic.message. A non-empty "
@@ -517,8 +523,9 @@ def milestone_graph(tool=TOOL):
         context + ["task", "acceptanceVerdict", "acceptanceFindings", "codeVerdict", "codeFindings"],
         writes=[write("workerReport", "worker", "out", "report")], timeout=WORKER_TIMEOUT)
     acceptance = verifier("acceptance_review", read_only + (
-        "Fresh acceptance review of input.task. Judge the diff, the tests and the results workerReport reports; run "
-        "no checks (the final check runs them); do not accept a worker claim without evidence in the diff or tests. "
+        "Fresh acceptance review of input.task. Judge the diff together with the commands workerReport reports and "
+        "their output; run no checks (the final check runs them). Accept a criterion only with evidence in the diff "
+        "or in a reported command and its output. A missing test is not a defect unless " + WHEN_A_TEST + ". "
         + REVIEW_BAR + " On rejection diagnostic.message names the failing check or title and how to "
         "reproduce it; when the review accepts, it carries the notes, each prefixed `note:`. " + CONFLICT_BAR),
         context + ["task", "workerReport"], "verdict", ["accepted", "rejected", "conflict"], "acceptanceVerdict",

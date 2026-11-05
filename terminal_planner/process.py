@@ -756,12 +756,13 @@ def parallel_runs(value):
     return min(value, PARALLEL_RUNS_CAP) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-CHANGE_KEYS = ("level", "max_runs", "merge", "roles")
+CHANGE_KEYS = ("level", "max_runs", "merge", "roles", "checks")
 
 
 def apply_changes(document, changes):
     """A copy of the profile `document` with the owner's `changes` set and nothing else touched, validated like a
-    file: {"level", "max_runs", "merge", "roles": {name: {"model", "effort"}}}, each only when the owner changed it.
+    file: {"level", "max_runs", "merge", "roles": {name: {"model", "effort"}}, "checks": [check]}, each only when the
+    owner changed it (R2b: `checks` replaces the list, before the merge gate's rule reads it).
     Keys the editor does not offer, other sections and unknown parts of `document` stay as they were. Raises
     Blocked(process.invalid) naming the key, so nothing is written for a refused value."""
     if not set(changes) <= set(CHANGE_KEYS):
@@ -774,6 +775,8 @@ def apply_changes(document, changes):
         result.setdefault("gates", {})["merge"] = changes["merge"]
     for name, bound in changes.get("roles", {}).items():
         result.setdefault("roles", {})[name] = dict(bound)
+    if "checks" in changes:
+        result["checks"] = [dict(check) for check in changes["checks"]]
     validate_profile(result)
     if changes.get("merge") == "required" and not result.get("checks"):
         raise invalid("gates.merge", "merging on checks requires at least one check, and there are none",
@@ -1302,8 +1305,13 @@ def bootstrap_lines(status):
         lines = ["Project process profile (%s): proposal." % (resolved.config["preset"] if resolved is not None
                                                              else PRESET_V3)]
     rules = [p for p, _ in resolved.rules] if resolved is not None else []
-    lines.append("  Rules for agents (apply when planning): %s" % (", ".join(rules) if rules
-                                                                             else "none found (AGENTS.md, CLAUDE.md)"))
+    if rules:
+        listed = ", ".join(rules)
+    elif status.present:  # a found profile that lists none: the agents still read the root AGENTS.md natively
+        listed = "none listed in %s (Codex agents read the root AGENTS.md themselves)" % PROFILE_FILE
+    else:
+        listed = "none found (AGENTS.md, CLAUDE.md)"
+    lines.append("  Rules for agents (apply when planning): %s" % listed)
     checks = resolved.config["checks"] if resolved is not None else []
     if checks:
         lines.append("  Check (qualification, %s): %s" % (NEXT_STAGES, "; ".join(" ".join(c["argv"]) for c in checks)))

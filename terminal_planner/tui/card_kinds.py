@@ -343,6 +343,10 @@ def merge_card_source(screen):
         spec = merge_spec(key, screen.merge_card_at(key), row.id, counts, overlap)
         if merge_unchecked(snapshot) and not overlap:  # no project check ran: the change is unverified
             spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_unverified")]))
+        red = next((found for found in getattr(snapshot, "red_merges", ()) if found[0] == row.id), None)
+        if red is not None:  # R2a: the named-base exception is the owner's: the card names the base and its failure
+            spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_base_red", stage=row.id,
+                                                                        commit=red[1], checks=red[2])]))
         if asked.get("merge") == row.id and not overlap:  # P6: the architect asked for this merge; the card is its answer
             spec = replace(spec, text="\n".join([spec.text, strings.text("card.merge_asked", stage=row.id)]))
         shown.append(spec)
@@ -752,6 +756,10 @@ def plan_card_source(screen):
         listed = [row for row in listed if row]
     if merge_unchecked(snapshot):  # no project check will verify a merge: each one waits for the owner
         listed.append(strings.text("card.plan_no_check"))
+    base = next((line for line in tuple(getattr(snapshot.plan, "lines", None) or ())
+                 if line.startswith("Checks on the base:")), None)
+    if base is not None:  # R2a: the base result the owner's yes accepts (`Planning.base_line`)
+        listed.append(base)
     for number, title, count in found[:5]:
         tasks = strings.text("canvas.count_task_one" if count == 1 else "canvas.count_task_many", n=count)
         line = strings.text("card.plan_milestone", number=number, title=title, tasks=tasks)

@@ -91,6 +91,17 @@ Stop rules (slice runner defaults): 2 rounds per slice, the same failure twice s
 after each `wake_after_passed` passes and on any failure, silent worker killed after 11 min, 1 h wall per agent.
 Do not ask for confirmation of routine technical decisions.
 
+Proportion (a lesson of 2026-11-05: a day of rig-gated format patches and three contract-review rounds did not move
+the target flow; the first live run on a real project then found the real gaps in 30 minutes):
+- A small change (a few files, the code in context) is the architect's direct commit, checked by the fast tests of
+  the modules it touches. The slice runner, its contract review and a Goldfish pass are for risky changes (merge,
+  verification, stores, engine, security) and for work too large for one sitting.
+- The expensive checks run once per release, on the exact candidate: the full lane, live runs on a real project, the
+  qualification of `PRODUCT_CONTRACT.md` section 9. A rig is a diagnostic tool, never a gate for every change.
+- A new mechanism needs an observed failure. A reviewer's finding without a failure scenario is recorded as a risk,
+  not turned into a requirement.
+- The roadmap changes after a live run, not after a rig run.
+
 Working with the owner (a lesson of 2026-11-05, after hours of technical questions put to him): the owner states goals
 and says yes to plans; every technical decision is the architect's. A question reaches the owner only when its answer
 changes a goal, a requirement or a non-goal, and then as one question with the default already taken. A design reaches
@@ -120,13 +131,14 @@ The final LLM reviewer may add semantic findings, but its accepted verdict is ne
 
 ## 4. Test layers
 
-The suite is being rebuilt from scratch (owner, 2026-11-04; roadmap T2): minimal tests from the owner's jobs to be
-done and the named risks, by module contract. Until the T2 design lands, a new test checks behaviour through a public
+The deep tests stay (merge, durability, concurrency, scrubbing, process safety). A shallow test (wording, structure,
+a pinned sentence the owner does not depend on) goes when it blocks a change, declared in `[ratchet] removes`; there
+is no batch rebuild (roadmap revision 12 cancelled T2's batches). A new test checks behaviour through a public
 boundary and pins text only where the owner must see those words.
 
-A change to the architect's behaviour (its prompt, tools or modes) is gated by the evaluation rig
-`devtools/arch_eval/`: on a frozen snapshot, real model, at most two runs at once, it must not be worse than the
-baseline on premature plans and missed plans.
+A change to the architect's behaviour (its prompt, tools or modes) is checked on live runs at the release. The
+evaluation rig `devtools/arch_eval/` (a frozen snapshot, the real model, scripted owner messages) diagnoses a
+suspected regression; it is not a gate for every change.
 
 ### Pure behavior tests
 

@@ -35,7 +35,7 @@ def home_next_lines():
         stand_in = SimpleNamespace(plan=lambda: plan, authority=SimpleNamespace(fresh=lambda: fresh), runs=SimpleNamespace(overview=list), planner_panel=none,
                                    journal=lambda record=None: (), overview_lines=lambda *args: [], focus_item=none,
                                    slots=none, g_id=none, tail_item=none, g_item=none, busy=none,
-                                   panel_flow=lambda record: ((), None), row=none)
+                                   panel_flow=lambda record: ((), None), row=none, item_text=none)
         return [line for line in Delivery.home(stand_in).lines if line.startswith("Next:")]
     goal = {"goal": "Add a README paragraph", "version": 1, "run_id": None}
     lines = home(None)

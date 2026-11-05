@@ -27,7 +27,7 @@ import json
 from datetime import datetime, timezone
 
 from . import autonomy
-from .authority import PLAN_STATUSES, Blocked, PersistenceError, chain_approved, chain_budget, require
+from .authority import PLAN_STATUSES, Blocked, PersistenceError, chain_approved, chain_budget, red_base, require
 
 # The one optional schema-2 key this module owns.
 SCHEMA_KEYS = frozenset({"seq", "handled", "last", "verdicts", "events"})
@@ -191,7 +191,8 @@ def _plan_wakes(authority, status):
         return False
     level = autonomy.level(authority.profile)
     if action == "approve":
-        return autonomy.approves_alone(level, chain_approved((authority.state or {}).get("revisions") or []))
+        revisions = (authority.state or {}).get("revisions") or []  # R2a: a red base is the owner's decision
+        return autonomy.approves_alone(level, chain_approved(revisions) and not red_base(revisions[-1] if revisions else None))
     return autonomy.decide(level, action) == "allow"
 
 

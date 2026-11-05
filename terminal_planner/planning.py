@@ -18,7 +18,7 @@ import time
 from typing import Optional, Tuple
 
 from . import catalog, live, runs
-from .authority import PARAPHRASE_LIMIT, Blocked, canonical, check_bounds, check_draft, validate_proposal
+from .authority import PARAPHRASE_LIMIT, Blocked, canonical, check_bounds, check_draft, digest, red_base, validate_proposal
 from .engine import STALE, STALE_BINDING, ObservationDetached, SliceEnded, Stale, binding_identity, recorded_home
 
 PLANNER_SLICE = 15  # seconds per bounded planner watch: phases reach the owner while the planner runs
@@ -260,6 +260,12 @@ class Watch:
                 return "failed"
             raise
         self.record(cursor=cursor, begun=begun)
+        if self.planning.settle_due():  # R2a: proposed, or review_exhausted for an override; the card waits for it
+            self.progress("Running the project checks on the base…")
+            try:
+                self.planning.settle_base()
+            except (Blocked, OSError, ValueError):
+                pass  # unsettled: the approval settles it first (`Planning.settled`), so nothing red is approved unseen
         return "done"
 
 
@@ -279,6 +285,66 @@ class Planning:
         self.identities = {}  # native binary identity per (executable, state root, file stamp): hashed once
 
     # Reading -----------------------------------------------------------------
+
+    def base_profile_checks(self):
+        """R2a: the checks the base runs before a start (D1), read without side effects: the profile's `checks` when
+        its merge gate is `required`, [] when it runs none (no check, or the gate off), None without an enforced or
+        readable profile."""
+        profile = self.profile or getattr(self.authority, "profile", None)
+        if profile is None:
+            return None
+        try:
+            status = profile.status(write=False)
+        except (Blocked, OSError, ValueError):
+            return None
+        resolved = getattr(status, "resolved", None)
+        if resolved is None:
+            return None
+        if resolved.config["gates"].get("merge") != "required" or not resolved.config.get("checks"):
+            return []
+        return resolved.config["checks"]
+
+    def settle_due(self):
+        """R2a: whether the current revision has a verdict, lists checks to run and has no base result yet."""
+        current = self.authority.current if self.authority.state and self.authority.state["revisions"] else None
+        return (current is not None and current["status"] in ("proposed", "review_exhausted")
+                and "base_checks" not in current and bool(self.base_profile_checks()))
+
+    def settle_base(self):
+        """R2a: run the base checks once the plan check has a verdict, before the card shows, and keep their result
+        on the revision (`base_checks`) so the card, the status and the approval read exactly what was shown. Nothing
+        when the profile runs no check; a revision already settled is not run again."""
+        if not self.settle_due():
+            return
+        a = self.authority
+        current, listed = a.current, self.base_profile_checks()
+        evidence = self.runs.base_checks(listed)
+        failed = self.runs.failing(evidence)  # ran and failed: a milestone can fix them
+        passed = evidence.get("outcome") == "passed"
+        unrun = [c["name"] for c in evidence.get("checks", ()) if c.get("status") in ("spawn_failed", "candidate_changed")]
+        reason = evidence.get("refused") or ("%s could not start" % ", ".join(unrun) if unrun else "the checks did not run")
+        refused = "" if passed or failed else str(reason)[:1000]
+        current["base_checks"] = {"commit": evidence["commit"], "tree": evidence["tree"], "checks_digest": digest(listed),
+                                  "outcome": "passed" if passed else "failed",
+                                  "failed": [] if passed else [c["name"] for c in failed], "refused": refused,
+                                  "tail": "" if passed or not failed else str(failed[0].get("tail") or "")[-1000:]}
+        a.save()
+
+    def base_line(self, current):
+        """R2a: the plan card's one line on the base checks (three forms)."""
+        found = current.get("base_checks")
+        if found is None:
+            return "No project check: merges wait for your yes." if self.base_profile_checks() == [] else None
+        if found["outcome"] == "passed":
+            names = ", ".join(c["name"] for c in self.base_profile_checks() or ())
+            return "Checks on the base: all passed%s." % (" (%s)" % names if names else "")
+        if not found["failed"]:  # an environment the plan cannot fix: the start stays refused
+            return ("Checks on the base: they could not run on %s (%s). Fix that first: no milestone can start."
+                    % (found["commit"][:12], one_line(found["refused"], 120)))
+        names = found["failed"]
+        return ("Checks on the base: %s %s on %s. The first milestone must fix %s; merges on this base wait for your yes."
+                % (", ".join(names), "fails" if len(names) == 1 else "fail", found["commit"][:12],
+                   "it" if len(names) == 1 else "them"))
 
     def plan(self):
         a = self.authority
@@ -505,12 +571,25 @@ class Planning:
     def approve(self, version):
         """The approval of the current plan; a gate argued under another configuration than the live one is stale.
         The live digest is Authority's own (the session-bound profile): no caller supplies or can disable it."""
+        self.settled(version)
         self.authority.approve(version)
 
     def override(self, version, reason):
         """The owner approves a plan the critic rejected, with a typed reason; the same live-configuration check as
         `approve`, likewise read from Authority's bound profile. Every UI path comes here; the rule is Authority's."""
+        self.settled(version)
         self.authority.override(version, reason)
+
+    def settled(self, version):
+        """R2a: a revision the plan job could not settle (an interrupted slice, a reopen) gets its base checks now;
+        when they turn out red the approval is refused, so the owner approves only a red base his card showed."""
+        current = self.plan()
+        if current is None or current["version"] != version or not self.settle_due():
+            return
+        self.settle_base()
+        if red_base(self.authority.current):
+            raise Blocked("The checks fail on the base: the plan card shows them now; approve again to accept the "
+                          "red base its first milestone fixes.", family="action.refused")
 
     # Observation -------------------------------------------------------------
 
@@ -728,6 +807,9 @@ class Planning:
                 for t in s["tasks"]:
                     lines.append("    %s %s · %s" % (t["id"], one_line(t["title"], 80),
                                                      plural(len(t["checks"]), "check", "checks", "checks")))
+        base = self.base_line(current)
+        if base:
+            lines.append(base)
         if status == "review_exhausted" or override:
             lines.append('The plan check did not accept it: "%s"' % one_line(current["evidence"]["findings"], 300))
         if override:

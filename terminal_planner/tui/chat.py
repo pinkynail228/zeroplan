@@ -1280,7 +1280,7 @@ PLAN_TONES = {"planning": "run", "submission_unknown": "run", "observing": "run"
               "proposed": "ok", "approved": "ok", "stopped": "bad"}
 RUN_TONES = {"waiting": "idle", "ready": "idle", "unknown": "idle", "paused": "idle", "preparing": "run", "submission_unknown": "run",
              "submitted": "run", "running": "run", "stopping": "run", "resume_pending": "run", "finished": "ok",
-             "integrated": "ok", "awaiting_merge": "ok", "stopped": "bad", "conflict": "bad", "needs_owner": "bad",
+             "integrated": "ok", "awaiting_merge": "idle", "stopped": "bad", "conflict": "bad", "needs_owner": "bad",
              "blocked": "bad", "failed_recoverable": "bad", "failed": "bad"}
 VERDICT_PASS = ("approve", "approved", "accepted")  # a reviewer's verdict that passes; any other is a remark
 STEP_GAP = "  "  # between a step's words and its dim detail

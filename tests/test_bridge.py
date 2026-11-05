@@ -530,7 +530,7 @@ class BridgeCase(tp.ProjectTest):
         """v1b A1/A2/A3: with a readiness whose `identity` item blocks (a warning and a passing item beside it), the
         status `readiness` lists only that item as {id, line, fix} (`fix` the item's detail, scrubbed); an accepted
         profile at level auto with max_runs 3 gives `profile` {state, digest (the 12-character short digest), level,
-        parallel_runs}; without a profile `profile` is None and without a readiness check `readiness` is []. The rows
+        parallel_runs, merge, checks}; without a profile `profile` is None and without a readiness check `readiness` is []. The rows
         job reads `autonomy.status_of` once per status, with or without a row awaiting merge. Interpretation: the
         fixture session skips `origin`, so `identity` stands for the blocking item; `state`/`digest` are the
         profile status' own."""
@@ -555,7 +555,7 @@ class BridgeCase(tp.ProjectTest):
         self.assertNotIn("hunter2", payload["readiness"][0]["fix"])
         self.assertIn("Run git config", payload["readiness"][0]["fix"])
         profile = payload["profile"]
-        self.assertEqual(set(profile), {"state", "digest", "level", "parallel_runs"})
+        self.assertEqual(set(profile), {"state", "digest", "level", "parallel_runs", "merge", "checks"})
         self.assertEqual((profile["level"], profile["parallel_runs"], len(profile["digest"])), ("auto", 3, 12))
 
     def test_v1b_the_rows_job_reads_the_profile_once_with_a_row_awaiting_merge(self):
@@ -1748,6 +1748,27 @@ class BridgeCase(tp.ProjectTest):
         self.assertIn("set max_runs to 1", refused["message"])
         self.assertEqual((self.project / process.PROFILE_FILE).read_bytes(), before)
         self.assertEqual(self.call("zplan_status")["ok"]["profile"]["level"], "auto")
+
+    def test_the_first_check_and_the_merge_gate_change_together_on_the_owners_yes(self):
+        """R2b (docs/designs/2026-11-05-r2-base-checks.md): after a plan added a project's first tests, one settings
+        card on the owner's word puts the check and `merge: required` into the snapshot together; the card names the
+        exact command; the gate alone without a check is refused."""
+        with tp.Authority(self.state, self.project) as authority:
+            process.Profile.of(authority).accept()  # a snapshot, no file
+        controller = self.controller(profile=True)
+        token = controller.begin_turn("Make the new tests the project check", 2)
+        alone = self.call("zplan_settings", {"merge": "required"}, rid="alone", turn=token)
+        self.assertEqual(alone["error"], "process.invalid")
+        check = {"name": "unit", "argv": ["python3", "-m", "unittest", "discover", "-s", "tests"], "timeout_s": 600}
+        asked = self.call("zplan_settings", {"checks": [check], "merge": "required"}, rid="checks", turn=token)
+        self.assertEqual(asked["ok"]["status"], "awaiting_owner")
+        outcome, error = self.owner(controller.consent, controller.consent_request.id)
+        self.assertIsNone(error)
+        status = self.call("zplan_status")["ok"]
+        lines = status["results"][-1]["lines"]
+        self.assertTrue(any(line.startswith("checks: none -> unit: python3 -m unittest discover -s tests (600 s)")
+                            for line in lines), lines)
+        self.assertEqual((status["profile"]["checks"], status["profile"]["merge"]), (["unit"], "required"))
 
     def test_format_refusals_stay_off_the_owners_screen_until_the_cap(self):
         """A0 3.5: the model gets each plan format refusal whole; the owner sees one line at the cap (FORMAT_REFUSALS) in an owner turn,

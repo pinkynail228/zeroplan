@@ -5,7 +5,7 @@ Updated: 2026-11-05 (evening). Snapshot only: replace lines in place; history is
 
 ## Production
 
-v0.9.0 (Codex + Zeroshot) remains the latest public release. Nothing was pushed, tagged or released since.
+v0.11.0 published 2026-11-05 on the owner's go: export 8e5ca98 of a3af5a6 to pinkynail228/zeroplan (main and tag v0.11.0, GitHub release). Qualified: full lane 2710 OK on 3d1fa22 (a3af5a6 changes wording only: docs and devtools tests green); a fresh install from the export (install.sh, setup with Zeroshot 11.0.0, doctor); two real-provider runs of the target flow on a FigmaPot copy. The owner's Mac still runs 0.10.0 until he runs `zplan update`. The private repository's main is not pushed.
 
 ## Direction
 
@@ -39,7 +39,7 @@ Decided by the owner on 2026-11-04:
 - The line UI (`zplan --plain`) is removed; zplan is the full-screen TUI only. Non-interactive subcommands (status,
   doctor, setup, login, exec) stay.
 
-Roadmap: `docs/plans/2026-11-03-roadmap.md` (revision 11): the plan P1-P10 from `main` to the target flow.
+Roadmap: `docs/plans/2026-11-03-roadmap.md` (revision 12, the plan review with the owner on 2026-11-05): R1-R4 and release 0.12.
 Development (`docs/DEVELOPMENT.md`): an Opus architect, Sonnet workers under `devtools/slice_run.py`, Opus
 reviewers, Goldfish ("Astra" in the owner's words) via `devtools/goldfish.sh`.
 
@@ -68,36 +68,22 @@ reviewers, Goldfish ("Astra" in the owner's words) via `devtools/goldfish.sh`.
 
 ## Plan (resume here)
 
-The target flow: `docs/designs/2026-11-04-w0-worker-contract.md` section 0. The plan and its distance table: roadmap
-revision 11. Technical decisions are the Elephant's (`docs/DEVELOPMENT.md` section 1, the 2026-11-05 lesson).
+The target flow: `docs/designs/2026-11-04-w0-worker-contract.md` section 0, as roadmap revision 12 amends it. The
+plan: `docs/plans/2026-11-03-roadmap.md` revision 12 (the plan review with the owner, 2026-11-05: rig-gated work cancelled,
+P2/P6-P9/T2 deferred or cancelled with their triggers). How we work: `docs/DEVELOPMENT.md` section 2, Proportion.
 
 | Step | State |
 |---|---|
-| F0 Development foundation (Elephant) | Done: Goldfish on the change as built (`.local/goldfish/2026-11-05-f0/`), every finding resolved in W0 design section 9 (the oracle cannot be faked or land; red on behaviour enforced; new tests declared in `new_tests`; direct commits ratcheted by the `commit-msg` hook; the lane with a baseline per tree; earlier slices' checks rerun; the tree unchanged by checks). devtools tests 78 OK |
-| P1 Zeroshot 11 (Elephant) | 9e46cd6 on `main`; full lane 2706 OK (the lane read HEAD cc71466, STATE only; docs edited during it, `test_docs`+`test_toolchain` re-run green). No Linux testing (owner, 2026-11-05). Left: one real-provider milestone on the installed product |
-| P2 Profiles v1 | P2a on `main` 19894c7: one milestone graph for every milestone (task and review loops carry the ceilings of the largest milestone and read `taskLoopBound`/`reviewLoopBound` from the input); full lane 2709 OK; driver_qual a, b, d, f on Zeroshot 11.0.0 pass (the driver cannot run inside the gate seatbelt, so the Elephant runs it at integration). Next: P2b, the three profiles installed into zplan's Zeroshot config, the profile gate, the exact content frozen at approval |
-| P3 Plan format, P4 The yes | On `main`: P3a, P4a, P3b, P4b, P4c (settings as the owner's consent card, `Profile.preview`) and P4c2 (the rules and the tool say so); full lanes green (2709 on 5b5e27f). The contract review caught three holes of P4c before any worker; P4c and P4c2 then passed in one round each. P4d (goal drafts) moves to P10 with T2.1: the prompt no longer asks for goal drafts, so the protocol is dormant, and test_tui_draft_card is in T2.1's batch. P3c on main 19316e1. The A0 rig on 19316e1 (the A0 report (private evidence), section 9): answers 18/18, unwanted plans 0/14 (was 1/14), format refusals 2.8 per plan turn (was 6.3), but missed plans 9/16: the cap of 3 cut converging plans off one fix short; the two wrong approvals followed a missed plan. P3d (88d6f63): cap 6, a plan sent as JSON text is read. P3d's rig (17 of 18 plan cases, stopped when the owner closed the Mac, `.local/a0/eval/p3d/`): missed plans 8/15, 96 format refusals in 19 plan turns (5.1): a patch again, not a fix. Decided (the reflection with the owner, 2026-11-05): no more format patches. Design r2 `docs/designs/2026-11-05-plan-as-text.md` after its Goldfish pass (every finding resolved, section 7; the second call is lean JSON in 30 of 35, so one normalizer takes text and lean JSON; fidelity over shape; criteria become the task's checks). Re-planned with the owner (2026-11-05 evening): PT stopped (a prose grammar fitted to one fixture was whack-a-mole); no per-change rig or end-to-end runs: aim at a release, cheap tests between changes, the expensive runs once at the end. The format cap became a runaway bound (7ed30b2, 25). Diagnostic run 1 on a FigmaPot copy (private evidence under `.local/diag/`): goal to merged branch in 30 min, one yes, no owner intervention, on Zeroshot 11.0.0 with the real provider (closes P1's real-provider milestone). Found: the final check demanded a clean tree from a DoD sentence the architect wrote at planning (attempt 1 lost); scope_verify rejects every repair against the select-time snapshot; test weight 4.4 to 1; UI wording. The plan format was not the bottleneck (6 hidden refusals, 3 minutes). Release 0.11 fixes on main (b11051d, afab5ff): the final and scope checks never require a commit or judge .zplan/; dod is the finished change; event turns in the owner's language; transcript scrubbed per line. Release acceptance: full lane 2709/2710 on b11051d (the red K5 text check fixed in afab5ff, module green); run 2 (two milestones, M2 after M1) merged both at attempt 1 in 22 min with one yes and 0 format refusals. Left open: test weight (about 5 to 1; one sentence did nothing), worktrees left when a .pnpm-store/ is inside, end lines out of order, the Drafts pointer. Next: the owner's version and tag decision. r1 was: the architect writes the plan as a labelled text (32 of 35 first calls already send text; the corpus `.local/a0/plan-corpus/`), `plan_text.parse` derives the stored plan (one task, slice and requirement per milestone; the stored format unchanged); a prototype turns 30 of 32 corpus texts into a valid plan. Then slices PT1 (parser) and PT2 (the tools and rules, A0 rig gate); then a live run of the target flow on a copy of PenPot (closes P1's real-provider milestone and A0's acceptance) before P2b, P5, P6-P7 |
-| P5-P10 | In order (roadmap) |
+| 0.11.0 | Published 2026-11-05 (Production above). Live runs on a FigmaPot copy: private evidence under `.local/diag/` |
+| Roadmap rev 12 | Written 2026-11-05; Goldfish pass resolved in the roadmap (R2 keeps the contract: the milestone introducing a project's first check waits for the owner's merge yes; R1 measured by unrequested test lines with a follow-up goal and a revert rule; R4 a code-made facts entry at plan end) |
+| R1 Tests in proportion | Built 97bdd77; measured on the two FigmaPot goals (private `.local/diag/r1/`): correctness held (every held-out check, the follow-up included; every goal at attempt 1), test lines not lower (358 vs 324): the architect names a risk and asks for tests in every brief. Waiting for the owner's call on volume (default: keep) |
+| R2 A red base, a first check (F14) | Built: R2a 2a2144d + 2876d12 (after a review of the change as built), R2b cb665ee; default lane green |
+| R3 Small fixes, R4 The report | Done: R3 11b497f, b8a36d9 (pnpm store cleanup, profile wording, dim 'awaiting merge', ARCHITECTURE); R4 dc5cdaf (facts of each merged milestone in the plan view and the status) |
+| Release 0.12 | Candidate 574bfb8 qualified (private evidence under `.local/diag/`): full lane 2717/2718 on 9f05934, the red test fixed in 574bfb8; installed from the export in a clean HOME; live runs L1 (two milestones, reopen, /new, stop and try again), L2 (red base fixed, merge card, then automatic), L3 (no checks, settings card, then automatic); all eight items of contract section 9. Waiting for the owner's go to publish |
+| 0.13 | The plan check as the full Goldfish protocol (readiness before the yes), from the role outcomes of 0.12 (roadmap; backlog) |
 
-Evidence folders: `.local/z11/`, `.local/w0/`, `.local/a0/`, `.local/goldfish/`.
+Evidence folders (private): `.local/diag/`, `.local/z11/`, `.local/w0/`, `.local/a0/`, `.local/goldfish/`.
 
 ## Open
 
-- UI defects:
-  - `/details` says "the planner keeps working" after the plan check finished;
-  - end lines arrive out of order ("merged" before "awaiting merge");
-  - a stale "waits for the owner" note stays after a merge;
-  - the "[g] continue" view text lost its only assertion with D4a.
-- Product gaps:
-  - the owner's own `p`, `r`, `/plan` and steward proposals still use the planner (R1b);
-  - no continuous no-screen observation after the initial dispatch;
-  - task and milestone verification are not one acceptance boundary;
-  - `docs/ARCHITECTURE.md` describes the old direction.
-- Flake (diagnosed, kept): driver_qual `f_outer_exhausted` failed once at P2a's integration under heavy load (the full lane and the A0 rig at once): a 50 s provider call made the engine re-execute `steward_decide` and `select`, which used up the scripted entries ("unexpected call #17"); alone it passed (156 s). Run the driver qualification without other load.
-- Harness gaps:
-  - a wake can fail to reach the architect: on 2026-11-04 it idled 12:07-14:24, until the owner wrote;
-  - `start` does not run `preflight` (its 10-minute hang on 2026-11-04 was a loop on the first contract problem, fixed in F0);
-  - a runner change cannot be gated by its own red-on-base when the check needs the outer context;
-  - unattended nights need `notify_cmd`, the launchd watchdog, and an architect resume path for this harness.
-- Old branches kept unmerged: int-s2a2, prep-05, zs-disk-guard, zs-p1b-copy-layout, zs-s1b1b-check-supervisor,
-  zs-s1b1b1-check-guard, zs-v4c (abandoned UX v4c WIP). `.dev-runs/` holds 0.9-era run data (923 MB).
+Known defects, gaps, ideas and housekeeping: `docs/plans/backlog.md` (one list; nothing kept only here).

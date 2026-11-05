@@ -512,15 +512,18 @@ class GraphStructureTests(unittest.TestCase):
         self.assertIn("`note:` are non-blocking and may be left", worker)
 
     def test_the_worker_and_repair_verify_in_proportion_to_the_change(self):
-        """H3 P1/P2/P4: the worker and both repair texts carry the one VERIFY_RULE constant (own way, in proportion; a
-        behaviour change that existing tests do not cover gets a relevant test, a requested test is written,
-        docs/copy/config alone get none), "with tests" is in no node's instructions, the acceptance review runs no
-        checks (the final check runs them) while the code review is not told so, and the final check's `incomplete`
-        no longer lists a failed command (a check that runs and fails is rejected) while a missing tool stays. Interpretation: none."""
+        """R1: the worker and both repair texts carry the one VERIFY_RULE constant (prove by running and report the
+        commands; a durable test only when a brief, the root AGENTS.md, a project's first check or an escaped defect
+        asks; contract output may be asserted; throwaway checks outside the workspace; docs/copy/config alone get
+        none), "with tests" is in no node's instructions, the acceptance review accepts a reported command and treats
+        a missing test as no defect unless asked, runs no checks (the final check runs them) while the code review is
+        not told so, the final check verifies every criterion of the briefs, and its `incomplete` no longer lists a
+        failed command (a check that runs and fails is rejected) while a missing tool stays. Interpretation: none."""
         rule = milestone.VERIFY_RULE
-        for part in ("the project's own way and in proportion", "behaviour change (a new feature included) that "
-                     "existing tests do not cover gets a relevant test (extend an existing test first)",
-                     "a project's first included", "docs, copy or config files alone gets no new test"):
+        for part in ("report every command you ran with its output", "only when a brief's criteria or done-when ask "
+                     "for one", "the project's root AGENTS.md", "the project's first check", "a defect that escaped a "
+                     "merge", "outside the workspace", "output that is the contract",
+                     "docs, copy or config files alone gets only the project's existing checks"):
             self.assertIn(part, rule)
         by_name = {n["name"]: n for n in nodes(milestone.milestone_graph()["root"])}
         for name in ("worker", "repair", "empty_repair"):
@@ -528,12 +531,14 @@ class GraphStructureTests(unittest.TestCase):
         for node in by_name.values():
             self.assertNotIn("with tests", node.get("instructions", ""), node["name"])
         self.assertIn("run no checks", by_name["acceptance_review"]["instructions"])
+        self.assertIn("A missing test is not a defect unless", by_name["acceptance_review"]["instructions"])
         self.assertNotIn("run the checks", by_name["acceptance_review"]["instructions"])
         self.assertNotIn("run no checks", by_name["code_review"]["instructions"])
         for name in ("final_verify", "final_reverify", "empty_final_verify", "empty_final_reverify"):
             text = by_name[name]["instructions"]
             self.assertNotIn("a failed command", text, name)
             self.assertIn("a missing tool", text, name)
+            self.assertIn("every acceptance criterion of the frozen task briefs", text, name)
 
     def test_the_review_loop_bound_follows_the_frozen_task_rounds(self):
         """A2/D2: the review loop's bound is one implementation pass plus the revision's frozen limits.task_rounds

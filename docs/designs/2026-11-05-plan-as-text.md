@@ -1,6 +1,7 @@
 # The architect writes the plan in its own shape; zplan derives the stored plan
 
-Status: revision 2 (2026-11-05), after one Goldfish pass on revision 1 (`.local/goldfish/2026-11-05-plan-as-text/`:
+Status: CANCELLED by roadmap revision 12 (2026-11-05): on a real project the format was not the bottleneck. Kept as a
+record. Revision 2 (2026-11-05), after one Goldfish pass on revision 1 (`.local/goldfish/2026-11-05-plan-as-text/`:
 comprehension, design_critic, zoom_out; section 7 resolves every finding). It is the step the A0 design plans when
 the typed schema misses G4 (`docs/designs/2026-11-04-a0-architect.md` 3.5: "a lean shape normalized into the stored
 one").

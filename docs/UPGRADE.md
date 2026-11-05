@@ -10,6 +10,17 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
 
 ## For users: update zplan
 
+### What changes in 0.12
+
+- Workers prove each criterion by running it and keep a durable test only when the brief, the project's root
+  `AGENTS.md`, a project's first check or an escaped defect asks; the final check verifies every criterion itself.
+- Before the plan card shows, the project's checks run on the base, and the card says what they found. On a red base
+  your yes lets the plan start on exactly that base; the first milestone fixes it, and every merge of an attempt
+  started on that base waits for your yes.
+- The plan view shows, for each merged milestone, the checks that passed and the code and test lines it added.
+- A store holding a plan revision with base checks (`base_checks`) cannot be opened by zplan 0.11 or older; roll
+  back to the store copy the installer printed.
+
 ### What changes in 0.11 (since 0.9; 0.10 was not published)
 
 - Zeroshot 11.0.0: `zplan setup` installs the new toolchain into its own directory next to the old one.

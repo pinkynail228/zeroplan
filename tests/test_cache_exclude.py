@@ -30,7 +30,7 @@ class CacheExcludeTest(RunsTest):
         self.exclude().write_text("/.zplan/\nmine")  # no final newline
         self.start()
         self.assertEqual(self.exclude().read_text().splitlines(), ["/.zplan/", "mine"] + LINES)
-        self.assertEqual(len(LINES), 5)
+        self.assertEqual(len(LINES), 6)
         self.assertTrue(all(not line.startswith("/") for line in LINES))
         before = self.exclude().read_bytes()
         project_state.exclude_caches(self.project)  # a later start repeats exactly this call

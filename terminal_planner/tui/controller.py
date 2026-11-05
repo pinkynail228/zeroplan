@@ -20,7 +20,7 @@ import uuid
 from .. import autonomy, bridge, catalog, engine, feed, live, planning as planning_module, process, setup, user_commit
 from ..architect import NO_PLAN, ArchitectStore
 from ..application import ApplicationService, request_snapshot
-from ..authority import Authority, Blocked, FormatRefused, atomic_state, chain_approved, chain_budget
+from ..authority import Authority, Blocked, FormatRefused, atomic_state, chain_approved, chain_budget, red_base
 from ..cli import App, fixture_driver, refusal, safe, summary
 from ..delivery import ACTIVE, ApprovedPlan, CRITIC_SLICE, Changed, END_ACTIONS, Row, Token
 from ..planning import PlanView
@@ -61,7 +61,7 @@ TOOL_ARGUMENTS = {"zplan_start": frozenset(("milestone", "revision")),
                   "zplan_edit_plan": frozenset(("revision", "plan", "response", "request")),
                   "zplan_merge": frozenset(("milestone", "token")),
                   "zplan_propose_commit": frozenset(("paths", "message")),
-                  "zplan_settings": frozenset(("level", "max_runs", "merge", "roles"))}
+                  "zplan_settings": frozenset(("level", "max_runs", "merge", "roles", "checks"))}
 
 # The action tools whose admission is one `_plan_job` (`Planning.edit` is the plan service's own rule; `zplan_plan`
 # is the owner's own start-planning work, only on the owner's word): they are
@@ -159,6 +159,7 @@ class Snapshot:
     scripted: bool = False  # the architect is the fixture script: it never approves, the owner does
     goldfish: bool = False  # the plan is a Goldfish one: no planner runs, the owner's texts say "plan check"
     chain_approved: bool = False  # a later revision of a chain the owner approved: the architect may approve it
+    red_merges: Tuple[Tuple[str, str, str], ...] = ()  # R2a: (milestone, base commit, failed checks) of merges on a red base
 
     @property
     def stale(self):
@@ -290,6 +291,10 @@ def plan_fields(plan, revisions=None):
               "verdict": evidence.get("verdict") if isinstance(evidence, dict) else None,
               "findings": findings if len(findings) <= PLAN_FINDINGS else findings[:PLAN_FINDINGS - 1] + "…",
               "proposal": plan.get("proposal")}
+    if plan.get("base_checks") is not None:  # R2a: the base result the plan card showed
+        found = plan["base_checks"]
+        fields["base_checks"] = {"outcome": found["outcome"], "failed": list(found["failed"]), "commit": found["commit"],
+                                 "refused": found["refused"][:200]}
     if is_goldfish(plan):  # the evidence's paraphrase, and the architect's plan before a review has produced a proposal
         fields["paraphrase"] = evidence.get("paraphrase") if isinstance(evidence, dict) else None
         fields["draft"] = plan.get("draft") if plan.get("proposal") is None else None
@@ -347,6 +352,12 @@ def changed_paths(app, r):
     if listing.returncode:
         return None
     return [name for name in listing.stdout.decode(errors="replace").split("\0") if name]
+
+
+def architect_may_approve(revisions):
+    """Whether the chain lets the architect approve its last revision itself (`autonomy.approves_alone`): a later
+    revision of an owner-approved chain whose card showed no red base (R2a: a red base is the owner's decision)."""
+    return chain_approved(revisions) and not red_base(revisions[-1] if revisions else None)
 
 
 def merge_tier(status, paths):
@@ -408,14 +419,16 @@ def gate_result(app, r, commit):
 
 def profile_fields(status):
     """The effective profile as `zplan_status` shows it, from the one `autonomy.status_of` read: its state, short
-    digest, autonomy level and parallel runs. None without a status (no profile, or one that cannot be read)."""
+    digest, autonomy level, parallel runs, merge gate and check names (R2b: whether the project has a check yet).
+    None without a status (no profile, or one that cannot be read)."""
     if status is None:
         return None
     resolved = status.resolved
     config = resolved.config if resolved is not None else {}
     return {"state": status.state, "digest": resolved.short if resolved is not None else None,
             "level": autonomy.level_of(status),
-            "parallel_runs": process.parallel_runs(config.get("autonomy", {}).get("max_runs"))}
+            "parallel_runs": process.parallel_runs(config.get("autonomy", {}).get("max_runs")),
+            "merge": config.get("gates", {}).get("merge"), "checks": [c["name"] for c in config.get("checks", [])]}
 
 
 def readiness_fields(app):
@@ -473,6 +486,22 @@ def frozen_graph(app):
         return None
 
 
+def red_merges(app, rows):
+    """R2a: the awaiting-merge rows whose attempt started on the red base the owner approved, with that base's commit
+    and failing checks, for the merge card to name (the contract's named-base exception)."""
+    found = []
+    for row in rows:
+        if row.state != "awaiting_merge":
+            continue
+        r = app.delivery.latest(row.id)
+        if r is None or not app.delivery.base_red(r):
+            continue
+        plan = next((rev for rev in app.authority.state["revisions"] if rev["version"] == r["plan_revision"]), {})
+        base = plan.get("base_checks") or {}
+        found.append((row.id, (base.get("commit") or "")[:12], ", ".join(base.get("failed") or ())))
+    return tuple(found)
+
+
 def take_snapshot(app, name):
     """Plain `home` of the session, frozen. Read-only: the overview only detects integration (ancestry)."""
     branch, clean = app.controller.workspace()
@@ -492,8 +521,9 @@ def take_snapshot(app, name):
                     profile=process.view(app.profile) if app.profile is not None else None,
                     plan_state=plan_state(plan), uncommitted=tuple(app.controller.uncommitted()), approved=approved,
                     goldfish=bool(plan and is_goldfish(plan)),
-                    chain_approved=chain_approved(getattr(getattr(app, "authority", None), "state", None) and
-                                                  app.authority.state.get("revisions") or []))
+                    chain_approved=architect_may_approve(getattr(getattr(app, "authority", None), "state", None) and
+                                                         app.authority.state.get("revisions") or []),
+                    red_merges=red_merges(app, home.rows) if plan else ())
 
 
 @dataclass(frozen=True)
@@ -961,7 +991,9 @@ class Controller:
                           "run_id": row.token.run_id if row.token else None, "token": token_fields(row.token),
                           **({"merge": merge_fields(app, row, status)}
                              if row.state == "awaiting_merge" and row.token else {}),
-                          **({"reason": reason_of(app, row)} if row.state in REASON_STATES and row.token else {})}
+                          **({"reason": reason_of(app, row)} if row.state in REASON_STATES and row.token else {}),
+                          **({"merged": app.delivery.merged_facts(app.delivery.latest(row.id))}
+                             if row.state == "integrated" and app.delivery.latest(row.id) is not None else {})}
                          for row in home.rows)
         else:
             revision, rows = None, ()
@@ -1391,7 +1423,7 @@ class Controller:
         level = autonomy.level_of(status)
         if turn is not None and turn.get("shown_plan") != revision:
             turn = None  # a word approves only the plan the screen showed when the owner wrote
-        asked = not autonomy.approves_alone(level, chain_approved(app.authority.state["revisions"]))
+        asked = not autonomy.approves_alone(level, architect_may_approve(app.authority.state["revisions"]))
         if asked and turn is None:
             return self._ask("approve", revision, "plan")
         app.planning.approve(revision)
@@ -1751,15 +1783,18 @@ class Controller:
         """The `changes` of `Profile.revise` from the tool's arguments: at least one key, each of its own type (the
         values themselves are the profile's to judge). Anything else is an invalid argument."""
         if not args:
-            raise Blocked("Missing argument: at least one of level, max_runs, merge, roles.",
+            raise Blocked("Missing argument: at least one of level, max_runs, merge, roles, checks.",
                           family="architect.request_invalid")
         changes = {}
-        for name, kind in (("level", str), ("max_runs", int), ("merge", str), ("roles", dict)):
+        for name, kind in (("level", str), ("max_runs", int), ("merge", str), ("roles", dict), ("checks", list)):
             if name in args:
                 changes[name] = Controller._argument(args, name, kind)
         roles = changes.get("roles")
         if roles is not None and (not roles or not all(isinstance(bound, dict) and bound for bound in roles.values())):
             raise Blocked("Invalid argument roles.", family="architect.request_invalid")
+        found = changes.get("checks")
+        if found is not None and not all(isinstance(check, dict) for check in found):
+            raise Blocked("Invalid argument checks.", family="architect.request_invalid")
         return changes
 
     @staticmethod
@@ -1784,6 +1819,10 @@ class Controller:
                     parts.append("%s.%s: %s -> %s" % (role, field, old, new))
         if parts:
             lines.append("roles: " + "; ".join(parts))
+        old, new = before.get("checks") or [], after.get("checks") or []
+        if "checks" in changes and old != new:  # R2b: the exact commands the owner's yes makes the project's checks
+            lines.append("checks: %s -> %s" % ("; ".join(process.check_text(c) for c in old) or "none",
+                                                "; ".join(process.check_text(c) for c in new) or "none"))
         return lines
 
     def _propose_commit_tool(self, app, args):
@@ -2023,7 +2062,7 @@ class Controller:
         gate, level = autonomy.merge_gate(status), autonomy.level_of(status)
         # A conversational owner turn is not consent to an unverified merge. Only the
         # deterministic owner merge card may opt in, irrespective of risk or autonomy.
-        if gate != "required":
+        if gate != "required" or delivery.base_red(r):  # R2a: a merge on the red base the owner approved is his
             return self._ask("merge", milestone, "merge"), None
 
         def asks(tier):

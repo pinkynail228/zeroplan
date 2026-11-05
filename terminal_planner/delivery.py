@@ -22,11 +22,38 @@ from typing import Optional, Tuple
 from . import catalog, live, merge_critic, process, task_gate
 from .engine import (NativeEngine, ObservationDetached, SliceEnded, gate_owner_rules, gate_prepared,
                      merge_critic_documents, reset_value, task_gate_documents)
-from .authority import Blocked, baseline, canonical, decode, git, require
+from .authority import Blocked, baseline, canonical, decode, digest, git, red_base, require
 from .planning import OVERRIDDEN, Planning, brief_lines, goal_line, one_line, plan_worker, summary
 from .process import ProfileChanged
 from .runs import (ACTIVE as RUN_ACTIVE, CONTROL, MAX_RUNS, amendment_text, changed_text, critic_identity,
                    diagnostic_commands, extended, git_call, now, review_rounds, run_state, stamp_time, Overlap)
+
+# R4: a test file by its path (the W0 3.7 list): a `test`/`tests`/`__tests__` directory, `test_*.py`, `*_test.py`,
+# `*.test.*` and `*.spec.*`. Every other added line is product.
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__)/|(^|/)test_[^/]*\.py$|_test\.py$|\.(test|spec)\.[^/.]+$")
+
+
+def added_lines(project, base, commit):
+    """R4: the lines `commit` adds against `base`, as `{"product": n, "tests": m}` (binary files count none), or None
+    when Git cannot tell."""
+    listing = git_call(project, "diff", "--numstat", "--no-renames", "-z", base, commit)
+    if listing.returncode:
+        return None
+    counts = {"product": 0, "tests": 0}
+    for entry in listing.stdout.decode(errors="replace").split("\0"):
+        added, _, rest = entry.partition("\t")
+        path = rest.partition("\t")[2]
+        if added.isdigit() and path:
+            counts["tests" if TEST_PATH.search(path) else "product"] += int(added)
+    return counts
+
+
+def facts_text(facts):
+    """R4: one merged milestone's facts as the plan view shows them."""
+    checks = ("checks passed: " + ", ".join(facts["checks"])) if facts["checks"] else "no project check ran"
+    lines = facts["lines"]
+    return checks + ("" if lines is None else " · +%d code, +%d test lines" % (lines["product"], lines["tests"]))
+
 
 def task_gate_roles(config):
     """The gate graph's node bindings from the resolved configuration (R-3): the worker presents the frozen briefs
@@ -75,7 +102,8 @@ CRITIC_SLICE = 5.0
 # A7c: after an integrated merge the attempt's worktree goes, but only while it still holds exactly the merged
 # product tree and no ignored path outside zplan's control files (`CONTROL`) or the disposable caches below (at any
 # depth); any other ignored leftover keeps the worktree (and its branch) for the owner.
-CLEANUP_CACHES = frozenset({"__pycache__", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+# `.pnpm-store`: pnpm's content store inside a worktree kept every FigmaPot attempt in place (live run, 2026-11-05).
+CLEANUP_CACHES = frozenset({"__pycache__", "node_modules", ".pnpm-store", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 # Immediate local feedback of a confirmed action, shown until the engine confirms (the UI owns the state).
 PENDING = {"start": "starting %s…", "stop": "stopping %s…", "merge": "merging %s…",
            "attempt": "starting a new attempt of %s…", "resume": "continuing %s…", "check": "checking %s…"}
@@ -417,6 +445,7 @@ class Delivery:
     def __init__(self, authority, runs, planning):
         self.authority, self.runs, self.planning = authority, runs, planning
         self.home_read = None  # (version, overview items) of the last approved `home`, for `approved` to reuse once
+        self.facts_read = {}  # R4: merged facts by integration commit (a merged commit never changes)
 
     # Reading -----------------------------------------------------------------
 
@@ -434,6 +463,29 @@ class Delivery:
         `latest_only`, `journal_sections` and `plan_section` read: its latest attempt of this revision, a carried
         integrated result, or the carried attempt whose result is still to deliver (`runs.current_record`)."""
         return self.runs.current_record(milestone_id)
+
+    def merged_facts(self, r):
+        """R4: what one integrated attempt merged, derived by code from its record: the integration commit, the names
+        of the project checks that passed on its exact candidate (none for an unverified merge), and the code and test
+        lines its result added against its base (`added_lines`)."""
+        x = extended(r)
+        commit = x["integration"]["commit"] or x["result"]["commit"]
+        if commit not in self.facts_read:
+            gate = r.get("gate") if isinstance(r.get("gate"), dict) else {}
+            evidence = gate.get("evidence") or {}
+            passed = gate.get("result") == x["result"]["commit"] and evidence.get("outcome") == "passed"
+            self.facts_read[commit] = {
+                "commit": commit,
+                "checks": [c["name"] for c in evidence.get("checks", ()) if c.get("status") == 0] if passed else [],
+                "lines": added_lines(self.authority.project, r["destination"]["base"], x["result"]["commit"])}
+        return copy.deepcopy(self.facts_read[commit])
+
+    def item_text(self, item):
+        """`state_text` with R4's facts after a merged milestone's commit."""
+        text = self.state_text(item)
+        if item["state"] == "integrated" and item["record"] is not None:
+            text += " · " + facts_text(self.merged_facts(item["record"]))
+        return text
 
     @staticmethod
     def state_text(item):
@@ -490,7 +542,7 @@ class Delivery:
         if item["state"] == "integrated":
             x = extended(r)
             commit = x["integration"]["commit"] or x["result"]["commit"]
-        return Row(item["id"], item["title"], item["state"], self.state_text(item), Token.of(r) if record else None,
+        return Row(item["id"], item["title"], item["state"], self.item_text(item), Token.of(r) if record else None,
                    item["carried"], tuple(item["waiting"]), commit)
 
     def rows(self, items=None):
@@ -584,7 +636,7 @@ class Delivery:
             return Home("pending", tuple(lines), tuple(ids), panel=self.planner_panel(), journal=self.journal(None))
         items = self.runs.overview()
         self.home_read = (plan["version"], items)
-        lines += self.overview_lines(plan, items)
+        lines += self.overview_lines(plan, items, self.item_text)
         found = self.focus_item(items)
         slots = self.slots()
         ids = []
@@ -628,7 +680,7 @@ class Delivery:
         reuse = read is not None and current is not None and read[0] == plan["version"] == current["version"]
         items = read[1] if reuse else self.runs.overview(revision=plan)
         return ApprovedPlan(plan["version"], tuple([goal_line(plan["goal"], 100, "home.details")]
-                                                   + self.overview_lines(plan, items)))
+                                                   + self.overview_lines(plan, items, self.item_text)))
 
     @staticmethod
     def next_view(home):
@@ -739,6 +791,31 @@ class Delivery:
         if config["gates"]["merge"] != "required" or not config.get("checks"):
             return None
         return self.runs.base_checks(config["checks"])
+
+    def accepted_red(self, plan, evidence):
+        """R2a: whether a failed base result is the red base the owner approved on this plan's card: the same tree,
+        the same checks and the same failing checks (a flaky or a new failure is not what he accepted)."""
+        found = (plan or {}).get("base_checks")
+        if not red_base(plan) or plan.get("approval") is None:
+            return False
+        listed = self.planning.base_profile_checks()
+        failed = [c["name"] for c in self.runs.failing(evidence)]
+        # a check that could not run is an environment no milestone fixes: never an accepted red base
+        return (evidence.get("tree") == found["tree"] and bool(listed) and digest(listed) == found["checks_digest"]
+                and bool(failed) and failed == found["failed"])
+
+    def base_red(self, r):
+        """R2a: whether the attempt started on its plan revision's red base (the card showed it, the owner approved
+        it). Derived from the stored revision and run record, so a lost file cannot make it merge by itself."""
+        revisions = (self.authority.state or {}).get("revisions") or []
+        plan = next((rev for rev in revisions if rev["version"] == r["plan_revision"]), None)
+        if not red_base(plan):
+            return False
+        try:  # the base's tree, as the start compared it: a commit of the same tree is the same red base
+            tree = git(self.authority.project, "rev-parse", r["destination"]["base"] + "^{tree}").decode().strip()
+        except Blocked:
+            return True  # an unreadable base fails closed: the owner decides
+        return tree == plan["base_checks"]["tree"]
 
     @staticmethod
     def preflight_message(evidence):
@@ -955,9 +1032,10 @@ class Delivery:
             raise Changed("attempt %s is already started" % (len(mine)))
         self.admission()  # the profile's cap of parallel attempts, before the attempt exists
         evidence = self.base_checks()  # D1: the required checks on the base, before anything is created
-        if evidence is not None and evidence.get("outcome") != "passed":
+        if evidence is not None and evidence.get("outcome") != "passed" and not self.accepted_red(plan, evidence):
             raise Blocked(self.preflight_message(evidence), family="milestone.preflight")
-        return self.runs.start(preview.milestone, preview.plan_revision, roles)
+        return self.runs.start(preview.milestone, preview.plan_revision, roles,
+                               checked=evidence.get("commit") if evidence is not None else None)
 
     # Observation and stop ------------------------------------------------------
 
@@ -1225,6 +1303,9 @@ class Delivery:
         is the caller's last word on an ungated candidate's own changed paths (`MilestoneRuns.merge`). The default
         refuses unverified work; only an explicit owner frontend passes `allow_unverified=True` and gets the label."""
         try:
+            if not allow_unverified and self.base_red(r):  # R2a: the contract's named-base exception is the owner's
+                raise Blocked("%s started on a red base (%s): its merge waits for the owner's yes on the merge card."
+                              % (r["milestone"], r["destination"]["base"][:12]), family="merge.base_red")
             status = self.guard("merge")
             if expected is not None and (status is None or status.digest != expected):
                 raise ProfileChanged("The process profile changed after the merge decision: check the new values and "

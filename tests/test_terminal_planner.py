@@ -1565,7 +1565,7 @@ class TerminalTests(ProjectTest):
     def test_a1_plan_approve_two_milestones_in_dependency_order(self):
         output = self.run_session(PLAN + "a\n" + START + MERGE + START + MERGE + "q\n")
         home = output.split("Merged: M1 → main.")[1]
-        self.assertRegex(home, r"✓ M1 First usable increment    merged [0-9a-f]{7}\n  · M2 Independent verification  ready\n"
+        self.assertRegex(home, r"✓ M1 First usable increment    merged [0-9a-f]{7}[^\n]*\n  · M2 Independent verification  ready\n"
                                r"Next: \[g\] start M2")
         self.assertIn("T2 · implementation", home)
         self.assertIn("M2 · Independent verification — done, waiting for merge", home)
@@ -1723,7 +1723,7 @@ class TerminalTests(ProjectTest):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--version"], cwd=ROOT,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "zplan 0.11.0")
+        self.assertEqual(result.stdout.strip(), "zplan 0.12.0")
 
     def test_fixture_cli_journey(self):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--project", str(self.project),

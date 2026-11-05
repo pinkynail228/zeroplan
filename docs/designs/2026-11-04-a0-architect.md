@@ -1,6 +1,7 @@
 # A0 design: the architect is the owner's one interface
 
-Status: revision 2, accepted by the owner on 2026-11-04 with both open points (3.3: the first revision waits at every
+Status: done through S3 (roadmap revision 12, 2026-11-05); the S4 removal waits for a change in those modules, and
+the rig is no longer a gate. Revision 2, accepted by the owner on 2026-11-04 with both open points (3.3: the first revision waits at every
 level; 5: the residual secret risk). After one Goldfish pass on revision 1 (`.local/goldfish/2026-11-04-a0-architect/`:
 comprehension, design_critic, zoom_out; section 8 resolves every Blocker and Major). Roadmap:
 `docs/plans/2026-11-03-roadmap.md` A0. The owner's decisions it builds on: `STATE.md` ("Decided by the owner on

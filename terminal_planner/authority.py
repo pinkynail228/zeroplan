@@ -506,6 +506,26 @@ def _chain_start(revisions):
     return 0
 
 
+# R2a (docs/designs/2026-11-05-r2-base-checks.md): the base checks a plan revision's card showed, kept on the revision
+# as the optional `base_checks` (absent on older revisions and when the profile runs no check).
+BASE_CHECK_KEYS = frozenset({"commit", "tree", "checks_digest", "outcome", "failed", "refused", "tail"})
+
+
+def red_base(revision):
+    """Whether the revision's card showed a red base: its recorded base checks failed or could not run."""
+    return (revision or {}).get("base_checks", {}).get("outcome") == "failed"
+
+
+def valid_base_checks(value):
+    return (isinstance(value, dict) and set(value) == BASE_CHECK_KEYS and value["outcome"] in ("passed", "failed")
+            and all(nonempty(value[k]) for k in ("commit", "tree", "checks_digest"))
+            and isinstance(value["failed"], list) and all(nonempty(name) for name in value["failed"])
+            and isinstance(value["refused"], str) and len(value["refused"]) <= 1000
+            and isinstance(value["tail"], str) and len(value["tail"]) <= 1000
+            # passed: nothing failed; failed: a named failing check or the reason the checks could not run
+            and ((value["outcome"] == "passed") == (not value["failed"] and not value["refused"])))
+
+
 def chain_approved(revisions):
     """Whether the last revision is the architect's Goldfish revision in a chain where an earlier revision carries an
     approval (one owner approval per chain at supervised, section 5.6). The chain starts as `chain_budget`'s does."""
@@ -715,8 +735,10 @@ class Authority:
         # `execution` + `frozen` exist together on revisions of planner graph 2; a revision without them is v1 forever.
         # `override` is the owner's record of approving a rejected plan gate anyway; absent on every other revision.
         # `draft` is the full proposal of an owner edit that the plan run must present unchanged; absent otherwise.
-        require(isinstance(r, dict) and set(r) - {"live", "execution", "frozen", "override", "stop", "draft", "origin", "by", "response"} == fields
+        require(isinstance(r, dict) and set(r) - {"live", "execution", "frozen", "override", "stop", "draft", "origin", "by", "response",
+                                                  "base_checks"} == fields
                 and ("live" not in r or live.valid(r["live"])) and (("execution" in r) == ("frozen" in r)))
+        require("base_checks" not in r or valid_base_checks(r["base_checks"]), "Invalid base checks of the plan.")
         if "draft" in r:
             require("execution" in r, "Editing a plan requires a second-version plan check.")
             validate_proposal(r["draft"])
@@ -890,6 +912,8 @@ class Authority:
         identity = {"intent": r["intent"], "evidence": r["evidence"], "proposal": r["proposal"]}
         if r.get("override") is not None:  # records without an override keep their approval digest byte for byte
             identity["override"] = r["override"]
+        if r.get("base_checks") is not None:  # R2a: the approval binds the base result its card showed
+            identity["base_checks"] = r["base_checks"]
         return digest(identity)
 
     def assert_store_fresh(self):

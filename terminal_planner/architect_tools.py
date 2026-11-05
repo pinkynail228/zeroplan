@@ -151,15 +151,21 @@ TOOLS = [
                              "message": {"type": "string"}}, ["paths", "message"])},
     {"name": "zplan_settings",
      "description": "Ask the live Controller to change the process profile, only in a turn the owner started (their "
-                    "message asks for the change): `level`, `max_runs` (parallel runs), `merge` (the merge gate) and "
-                    "`roles` ({name: {model, effort}}), at least one, exactly what the owner asked. Events turns are "
+                    "message asks for the change): `level`, `max_runs` (parallel runs), `merge` (the merge gate), "
+                    "`roles` ({name: {model, effort}}) and `checks` ([{name, argv, timeout_s}], the project checks; "
+                    "with `merge: required` they gate merges), at least one, exactly what the owner asked. Events turns are "
                     "refused. The change waits for the owner's yes on a card: the call answers awaiting_owner and "
                     "nothing changes until he answers. A profile in the project's own file is refused with the proposed change. Running "
                     "attempts keep their profile: the change applies to what starts next.",
      "inputSchema": _schema({"level": {"type": "string"}, "max_runs": {"type": "integer"}, "merge": {"type": "string"},
                              "roles": {"type": "object",
                                        "additionalProperties": _schema({"model": {"type": "string"},
-                                                                        "effort": {"type": "string"}})}})},
+                                                                        "effort": {"type": "string"}})},
+                             "checks": {"type": "array",
+                                        "items": _schema({"name": {"type": "string"},
+                                                          "argv": {"type": "array", "items": {"type": "string"}},
+                                                          "timeout_s": {"type": "integer"}},
+                                                         ["name", "argv", "timeout_s"])}})},
 ]
 
 # The tools that act through the live Controller: their whole call travels over the socket, and every result, error

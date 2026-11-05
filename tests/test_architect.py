@@ -417,7 +417,7 @@ class ArchitectTests(unittest.TestCase):
         (self.project / "zplan.architect.md").write_text("# Our method\n- Small slices.")
         for text in (build_preamble(SNAPSHOT), build_preamble(SNAPSHOT, self.project), build_update(SNAPSHOT)):
             text = " ".join(text.split())
-            self.assertIn("zplan_settings {level?, max_runs?, merge?, roles?} changes the process profile", text)
+            self.assertIn("zplan_settings {level?, max_runs?, merge?, roles?, checks?} changes the process profile", text)
             self.assertIn("call it with exactly what they asked", text)
             self.assertIn("never change settings on your own initiative", text)
         self.assertLessEqual(len(architect.method().encode("utf-8")), 4600)

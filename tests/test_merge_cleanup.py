@@ -107,12 +107,14 @@ class MergeCleanupTests(tpr.ProfileTest):
         self.assertEqual((self.project / "ZPLAN_FIXTURE.md").is_file(), True)
 
     def test_c1_only_the_control_dir_and_disposable_caches_may_be_left(self):
-        self.ignores("__pycache__/")
+        self.ignores("__pycache__/", ".pnpm-store/")
         self.awaiting_merge()
         r = self.record()
         worktree = Path(r["worktree"])
         (worktree / "__pycache__" / "deep").mkdir(parents=True)
         (worktree / "__pycache__" / "deep" / "m.pyc").write_bytes(b"cache")
+        (worktree / ".pnpm-store" / "v11").mkdir(parents=True)  # pnpm's store inside the worktree (live run 2026-11-05)
+        (worktree / ".pnpm-store" / "v11" / "index").write_bytes(b"cache")
         self.assertTrue((worktree / ".zplan").is_dir())
         self.assertEqual(self.merged().line, UNVERIFIED)
         self.assertFalse(worktree.exists())

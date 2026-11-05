@@ -940,11 +940,12 @@ class MilestoneRuns:
 
     # Start -------------------------------------------------------------------
 
-    def start(self, milestone_id, plan_revision, roles, context=None, destination=None):
+    def start(self, milestone_id, plan_revision, roles, context=None, destination=None, checked=None):
         """Begin attempt n+1 of a milestone from destination HEAD: persist, prepare the worktree, submit.
 
         `context` (owner answer or accepted candidate) is frozen with the bootstrap manifest digest before
-        anything is prepared; `destination` pins the branch a fresh attempt must start from."""
+        anything is prepared; `destination` pins the branch a fresh attempt must start from; `checked` is the commit
+        the base checks just ran on (R2a): a HEAD that moved meanwhile refuses, the start never uses an unchecked base."""
         a = self.authority
         a.check_project()
         require(a.state is not None and a.state["revisions"], "There is no approved plan.", family="action.refused")
@@ -966,6 +967,8 @@ class MilestoneRuns:
         except Blocked as error:
             raise Blocked("HEAD is detached; switch to a branch (git switch <branch>) before starting a milestone.", family="readiness.branch") from error
         base = git(a.project, "rev-parse", "HEAD").decode().strip()
+        require(checked is None or checked == base, "The base moved while its checks ran; start again.",
+                family="action.refused")
         require(destination is None or destination == current,
                 "A new attempt starts from the HEAD of branch %s; switch to it (git switch %s)." % (destination, destination),
                 family="readiness.branch")
@@ -1777,6 +1780,13 @@ class MilestoneRuns:
                      "risk": risk, "critic": None}
         self.save(r)
         return r["gate"], paths
+
+    @staticmethod
+    def failing(evidence):
+        """R2a: the base evidence's checks that ran and failed (a non-zero exit or a timeout), which a milestone can
+        fix; a check that never started (`spawn_failed`), was not run or saw its tree change is not among them."""
+        return [c for c in (evidence or {}).get("checks", ())
+                if c.get("status") == "timeout" or (type(c.get("status")) is int and c["status"] != 0)]
 
     def base_checks(self, listed):
         """D1: the evidence of the `listed` checks run on the project's HEAD and its tree, as `gate_candidate` runs

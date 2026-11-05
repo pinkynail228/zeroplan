@@ -1,6 +1,7 @@
 # W0 design: the worker contract on Zeroshot 11
 
-Status: revision 2 (2026-11-05). Revision 1 had one Goldfish pass (`.local/goldfish/2026-11-04-w0-worker-contract/`:
+Status: partly superseded by roadmap revision 12 (2026-11-05): 3.2 is step R1 and 3.3 is done (F0). Deferred: 3.1
+(profiles), 3.4 (`BLOCKED`), 3.5-3.6 (tiers, record, proposal). Cancelled: the rig of 3.7. Revision 2 (2026-11-05). Revision 1 had one Goldfish pass (`.local/goldfish/2026-11-04-w0-worker-contract/`:
 comprehension, design_critic, zoom_out; section 8 resolves every Blocker and Major). Revision 2 also takes the owner's
 decision of 2026-11-05: zplan's graphs become fixed Zeroshot profiles that zplan ships and knows, now rather than
 after evidence (section 3.1). Builds on the accepted boundary (`docs/designs/2026-11-04-zplan-on-zeroshot-11.md`) and
