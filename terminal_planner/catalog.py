@@ -371,7 +371,7 @@ ERRORS = _entries(
      "A concurrent zplan holding the profile lock, an unwritable home, or an entry that is not a regular file.",
      "Retry; if it persists, fix the path named in the message."),
     ("setup.prerequisite", "Node.js >= 16 and npm are required.", "Not installed.", "Install Node.js/npm, rerun setup."),
-    ("setup.unsupported_platform", "No pinned release for this platform.", "Not macOS arm64 or Linux x86_64/aarch64.",
+    ("setup.unsupported_platform", "No pinned release for this platform.", "Not macOS on Apple silicon (arm64).",
      "Use a supported platform."),
     ("setup.tools_invalid", "The installed tools failed verification.", "Version or checksum mismatch.",
      "Remove the tools directory and rerun `zplan setup`."),

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run unittest on this Mac from the current checkout (the macOS half of the merge gate; Linux: devtools/linux-test.sh).
+# Run unittest on this Mac from the current checkout (the merge gate; zplan supports macOS only).
 # Usage: devtools/mac-test.sh [unittest args]   (default: discover -s tests)
 # Textual comes from the offline wheelhouse (tests/tui_support.py); without it the TUI tests skip silently,
 # so the preflight refuses to start instead of reporting a misleading result. ZPLAN_MAC_PYTHON default python3.13.

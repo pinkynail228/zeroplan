@@ -34,7 +34,7 @@ plan of runs, not roadmap planning.
 5. zplan acts only within the autonomy level the owner sets (0.6.0: `auto`, `supervised`, `manual`; up to 0.5.2 it never
    merges on its own); a red gate always stops; push, tags, publishing and deleting unmerged work are always the owner's.
 6. One zplan release is qualified against exactly one engine and agent CLI version; a new engine is a new zplan release.
-7. Unit tests run on deterministic fixtures; the installed product is qualified on Linux with Docker.
+7. Unit tests run on deterministic fixtures; the installed product is qualified on macOS with live runs.
 
 ## When plain Zeroshot is enough
 One self-contained change: write the input and runtime files, run it in a clean worktree, watch it, merge the branch.

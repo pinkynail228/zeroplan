@@ -1,4 +1,4 @@
-"""Native qualification of the argued plan gate (orchestrator, Linux test host).
+"""Native qualification of the argued plan gate (orchestrator, on this Mac).
 
 Runs the production planner adapter (NativeEngine over an Authority revision of planner graph 2) against the pinned
 native binary and a scripted synthetic Responses provider on loopback. Answers are scripted per node (dispatch by
@@ -12,7 +12,6 @@ Every later call of a node must carry that node's earlier answer as an assistant
 the previous response id): a critic switched to `sessionScope: execution` starts a fresh conversation and fails.
 
     PYTHONPATH=. python3 devtools/plan_qual.py --binary "$ZEROSHOT_TEST_BINARY" [SCENARIO ...]
-    devtools/linux-test.sh --py devtools/plan_qual.py
 """
 
 import argparse

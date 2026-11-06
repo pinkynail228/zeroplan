@@ -80,8 +80,8 @@ STATE_NAMES = {"never": "not accepted", "later": "not saved (postponed)", "accep
 # The frozen preset zplan.default/1: today's role defaults (critic is the plan verifier), plan gate on, task and
 # merge gates off. A change ships as /2 with a migration shown to the owner, never as an edit of /1.
 #
-# zplan.default/2 is the same roles, gates and limits plus the `autonomy` section the later slices read (the foreman,
-# the autonomy gate, the wake-up and stuck rules, admission): the autonomy level and `max_runs` act today and are
+# zplan.default/2 is the same roles, gates and limits plus the `autonomy` section the later slices read (the autonomy
+# gate, the wake-up and stuck rules, admission): the autonomy level and `max_runs` act today and are
 # shown as they are; the rest of the section is shown "for later stages". The whole-number defaults and bounds come from ARCHITECT_DESIGN 4.2/4.3 (a worker
 # round past 45 min, a run past 2 h, round 3, three runs, the wake-up hourly cap, the architect retry limit).
 #

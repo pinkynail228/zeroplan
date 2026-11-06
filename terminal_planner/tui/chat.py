@@ -39,7 +39,6 @@ NOTE_CHARS = 300         # characters of the last note line
 QUIT_GRACE = 3.5         # seconds quit waits for a cancelled turn to take its process group down (cancel: 2 s)
 # i9/A5: how long a running turn re-reads the store for its own owner row. The row is written before Codex starts
 # (`architect._turn`), so the wait is a moment; the bound only keeps a store that cannot be read from spinning.
-STAMP_SECONDS = 5.0
 STAMP_EVERY = 0.02       # the re-read interval while the row is not there yet
 # A6b2a: an event-driven architect turn is a transcript role of its own ("events"), never the owner's line: the row
 # the adapter writes (`role "events"`) is shown as its own entry like every other role.
@@ -1139,36 +1138,6 @@ class ArchitectChat:
         self._check_requested = True
         self._advance()
 
-    def _stamp_owner_line(self, occurrence, message):
-        """i9/A5: put the store's own `ts` on the running turn's line, while the turn still runs.
-
-        The line `send` posts is the optimistic one — the owner row it will reconcile with does not exist yet — so
-        it carries no time. The turn writes that row before Codex starts (`architect._turn`), so
-        the store holds the message with its time a moment later: re-read the transcript until the row at this
-        turn's own place in it (`occurrence`) appears and hand the UI the `ts` of that row alone (`stamp`), which
-        stamps the entry standing at that place — same place in the window, now with its time — and the entry
-        can stand behind a time line for the rest of the turn. A targeted stamp, never a whole reload: a re-read can finish
-        after the turn's own reload has already brought the reply back, and replacing the entries with such a
-        captured window would drop that reply from the UI (it stays in the store, but the window would lie until the
-        next reload). Bounded and quiet: a store that cannot be read, and a message the turn never persisted
-        (cancelled before the write), leave the optimistic line for the turn's own reload to settle."""
-        store = self._store()
-        deadline = time.monotonic() + STAMP_SECONDS
-        while time.monotonic() < deadline and not self._cancelled:
-            try:
-                rows = store.transcript()
-            except (Blocked, OSError, ValueError):
-                return
-            roles = [row for row in rows if isinstance(row, dict) and row.get("role") in ROLES]
-            for index in range(occurrence, len(roles)):
-                row = roles[index]
-                if row.get("role") == "owner" and row.get("text") == message:
-                    self._send(("stamp", index, row.get("ts")))
-                    return
-            time.sleep(STAMP_EVERY)
-
-    # UI thread ----------------------------------------------------------------
-
     def _send(self, item):
         """From a worker thread: queue one item, coalesced under the bounded inbox, and wake the UI at most once.
 
@@ -1209,15 +1178,6 @@ class ArchitectChat:
             rows = item[1]
             self._state = replace(self._state, entries=entries_of(rows, self.history),
                                   transcript=transcript_size(rows))
-        elif kind == "stamp":
-            # i9/A5 repair: the running turn's own line, stamped from the row the turn wrote. A targeted merge of
-            # that one `ts` — `occurrence` names the entry — never a whole reload, so a re-read that finished
-            # before the reply landed cannot replace a newer window and drop the reply from the UI.
-            index, at = item[1], item[2]
-            entries = tuple(replace(entry, at=at)
-                            if isinstance(at, str) and at and entry.occurrence == index and entry.role == "owner" and not entry.at
-                            else entry for entry in self._state.entries)
-            self._state = replace(self._state, entries=entries)
         elif kind == "usage":
             self._state = replace(self._state, usage=item[1])
         elif kind == "ready":

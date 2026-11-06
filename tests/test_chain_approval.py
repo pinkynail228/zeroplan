@@ -57,6 +57,35 @@ class ChainApproval(ToolBase):
         reply = self.approve(2)
         self.assertEqual(reply.get("ok", {}).get("status"), "awaiting_owner", reply)
 
+    def test_supervised_a_revision_the_owner_declined_is_never_the_architects_to_approve(self):
+        """0.14 K: in an approved chain at supervised, where the architect approves a later revision alone, the
+        owner's decline of that revision is stored, so the architect's approve is refused, also in a new session, the
+        status names the decline and no yes in words binds it; the owner's own plan card still approves it."""
+        import threading
+        from terminal_planner import application
+        from terminal_planner.tui.controller import plan_state
+
+        def job(start, *args):
+            ended, errors = threading.Event(), []
+            start(*args, lambda outcome, error: (errors.append(error), ended.set()))
+            self.assertTrue(ended.wait(10))
+            return errors[0]
+
+        self.profile("supervised")
+        self.chain(approved_start=True)
+        self.assertIsNone(job(self.controller(profile=True, engine_factory=lambda *_: FixtureEngine()).decline_plan, 2))
+        self.controller_stop()
+        with tp.Authority(self.state, self.project) as authority:
+            state = plan_state(authority.current)
+        self.assertIsNone(application.shown_plan({"revision": 2, "plan_state": state}))
+        reply = self.approve(2)  # a new session reads the decline from the store
+        self.assertEqual(reply.get("error"), "action.refused", reply)
+        self.assertTrue(self.plan_until(lambda plan: plan["version"] == 2)["declined"])
+        self.assertIsNone(job(self._controllers[-1].approve_plan, 2))  # the owner's card
+        self.controller_stop()
+        with tp.Authority(self.state, self.project) as authority:
+            self.assertEqual(authority.current["status"], "approved")
+
 
 if __name__ == "__main__":
     unittest.main()

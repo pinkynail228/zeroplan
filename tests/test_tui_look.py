@@ -25,8 +25,7 @@ Interpretations (recorded here because the worker's summary never reaches the re
   the prompt, as the renderer resolves them (`widget.styles.border`, its `Color.ansi` slot).
 * A5 `from the transcript ts`: a stored row's time stands in a time line above the first entry and after a gap
   (0.6.3 V2). The optimistic owner line the pane posts before the store row exists (`chat.owner_entry`) has no stored
-  `ts` yet and no time line, and while the turn runs the line is stamped from the row the turn wrote
-  (`chat._stamp_owner_line`): the check here sends a message through a gated turn and reads the new `HH:MM` time
+  `ts` yet and no time line, and while the turn runs the line takes the time of the row the turn wrote: the check here sends a message through a gated turn and reads the new `HH:MM` time
   line off the running screen, with the clock the store's own row carries.
 * `README.md`'s own description of the shell used to open with «a logo, the header `project · branch ·
   readiness`»; the same paragraph is updated with this change (no logo, no header row, the input inside the chat

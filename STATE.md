@@ -1,89 +1,64 @@
 # STATE
 
-Updated: 2026-11-05 (evening). Snapshot only: replace lines in place; history is `git log -p STATE.md` and
-`docs/history/` (private archive). After a context compaction, resume from this file and the files it names.
+Updated: 2026-11-06. Current state only; history is `git log -p STATE.md` and `docs/history/` (private archive).
+After a context compaction, resume from this file and the files it names.
 
 ## Production
 
-v0.12.0 published 2026-11-06 on the owner's go: export 8f09913 of 849848d to pinkynail228/zeroplan (main, tag v0.12.0, GitHub release), qualified on the installed product (private evidence under `.local/diag/`). v0.11.0 (8e5ca98) is the previous release. The owner's Mac runs 0.10.0 until he runs `zplan update`. The private repository's main is not pushed.
+- v0.13.0 is the latest release (published 2026-11-06): export 8b39c87 of a9c8142 to pinkynail228/zeroplan (main,
+  tag v0.13.0, GitHub release), qualified on the installed product with the real provider.
+- Earlier releases: v0.12.0 (8f09913) and v0.11.0 (8e5ca98).
+- The owner's Mac runs 0.10.0 until he runs `zplan update`.
+- The private repository's main is not pushed; pushing it is the owner's action.
 
-## Direction
+## Direction (the owner's decisions)
 
-Decided 2026-11-03 (`docs/designs/2026-11-03-egm-pivot.md`):
-- Zeroshot stays the execution engine.
-- Planning moves to the Elephant-Goldfish Model: the architect writes the plan, stateless Goldfish review it, and
-  there is no separate planner.
-- Delegation (`docs/PRODUCT_CONTRACT.md` section 2): the owner approves the plan and reads the final report; the
-  architect decides in between.
-
-Decided by the owner on 2026-11-04:
-- The architect is the owner's one interface: advisor, helper, planner and manager, with every function. It answers
-  first; it decides itself when a plan helps and drafts it without a slash command or a "let's plan" from the owner.
-  A plan is a proposal until the owner says yes once (one key or a word); nothing starts without that yes. Code
-  guards the harms, not the initiative: a plan never replaces the answer, format refusals never reach the owner, the
-  state is visible. The conversation is a plain read-only Codex session that reads the working tree; zplan adds the
-  delegation tools and states. The first revision of every plan chain waits for the owner's yes at every level;
-  he accepted that a secret in a file without a credential name reaches the model provider, as with any Codex use.
-- The plan format is redesigned from the owner's jobs to be done and measured on the evaluation rig.
-- Tests (T2): the deep tests (merge, durability, concurrency, scrubbing, process safety) stay; the shallow ones
-  (screens, wording, structure, duplicates) are rebuilt as journeys and contract tests, batch by batch, each proved
-  by a behaviour ledger, held-out defects and a cold review. No size ratio is ever a goal.
-- zplan moves to Zeroshot 11 (owner, 2026-11-04 evening: "we are behind"); W0 is designed on 11's capabilities, not
-  on the pinned 10.16.0.
-- The boundary (`docs/designs/2026-11-04-zplan-on-zeroshot-11.md`): zplan owns the conversation and history, the
-  moment of delegation (a Goldfish-checked plan and the owner's one yes), deterministic verification and the merge
-  policy, and the TUI; Zeroshot owns execution, and no loop moves out of it. Instructions change before structure;
-  a graph role is cut only on evidence from a harder goal. The work stays in this repository: no rewrite, removal
-  in place.
-- No Linux testing (owner, 2026-11-05): macOS only, as the README says.
-- The line UI (`zplan --plain`) is removed; zplan is the full-screen TUI only. Non-interactive subcommands (status,
-  doctor, setup, login, exec) stay.
-
-Roadmap: `docs/plans/2026-11-03-roadmap.md` (revision 12, the plan review with the owner on 2026-11-05): R1-R4 and release 0.12.
-Development (`docs/DEVELOPMENT.md`): an Opus architect, Sonnet workers under `devtools/slice_run.py`, Opus
-reviewers, Goldfish ("Astra" in the owner's words) via `devtools/goldfish.sh`.
-
-## Now
-
-- `main` (checked out) = a0-next: the 0.10.0 candidate c0aaee3, F17, A0 S1a-S1c and S2a, the Z11/W0/T2 records; full
-  lane on ecf3334 (later commits docs only): 2704 tests OK. The Mac still runs `zplan 0.10.0` from c0aaee3 (0.8.1 is
-  the rollback target). The tag is the owner's decision.
-- F17, fixed: the architect's read tools see the last commit only, and now say so (rules, tool text, a `note` naming
-  uncommitted paths, `read.uncommitted` for an untracked file); the first message of a session shows
-  "Files not committed: N. zplan and its workers see only committed files."
-- A0 steps 1-5 (study before any behaviour change), evidence in `.local/a0/` (private):
-  - `REPORT.md`: the coded owner messages, every zplan_plan decision traced, the capability decision, prior art;
-  - `labels.json`, `cc_messages.jsonl`, `cc_sample150.jsonl`: the data and its hand coding;
-  - `eval/base-main/`: the rig's baseline on main 7feb4a4 (summary.md; `arch_eval.py score` re-judges it);
-  - `T2-R1.md`: the first research for the test rebuild.
-- Findings so far: 74% of the owner's session openers ask to explore, 5% of later messages are his own goals and 21%
-  accept the agent's proposal; 22 of the 24 messages in zplan's own history were scripted by the development agent;
-  every first zplan_plan call failed its format (10 of 10; the model sees `plan: {[key: string]: unknown}`); the
-  PenPot message gets a plan on a fully committed project too (F18 does not depend on F17).
-- Baseline (24 cases): premature plan 6 of 22 answer turns (all in "explore + a wish"), missed plan 0 of 8, first
-  useful answer in 1 turn for 12 of 18 explore cases, 101 format refusals over 14 plan-writing turns.
-- Evaluation rig: `devtools/arch_eval/` (scenarios, the `shelf` fixture, the driver). It gates every change to the
-  architect's behaviour on both failure modes at once: premature plan and missed plan, plus turns to the first
-  useful answer and format refusals.
+- **Zeroshot is the execution engine.** zplan owns the conversation, the plan, verification, merge policy and the TUI
+  (`docs/designs/2026-11-04-zplan-on-zeroshot-11.md`).
+- **The architect is the owner's one interface** (2026-11-04).
+  - It answers first and writes the plan itself.
+  - The Goldfish plan check (a reader, and a critic with the readiness rules) judges every plan before the owner's
+    one yes.
+  - Nothing starts without that yes.
+- **macOS only** (2026-11-05). The line UI (`zplan --plain`) is to be removed; the subcommands stay (2026-11-04).
+- **The target flow:** a goal, one checked plan card, one yes, merged and verified branches, one report
+  (`docs/designs/2026-11-04-w0-worker-contract.md` section 0, as roadmap revision 12 amends it).
+- **How we work** (`docs/DEVELOPMENT.md` section 2, Proportion):
+  - small direct changes, checked by fast tests;
+  - slices and Goldfish ("Astra") for risky work;
+  - the expensive checks once per release: the full lane, live runs on real projects, `PRODUCT_CONTRACT.md`
+    section 9 on the installed product;
+  - a new mechanism only after an observed failure;
+  - test weight: deferred, default keep.
 
 ## Plan (resume here)
 
-The target flow: `docs/designs/2026-11-04-w0-worker-contract.md` section 0, as roadmap revision 12 amends it. The
-plan: `docs/plans/2026-11-03-roadmap.md` revision 12 (the plan review with the owner, 2026-11-05: rig-gated work cancelled,
-P2/P6-P9/T2 deferred or cancelled with their triggers). How we work: `docs/DEVELOPMENT.md` section 2, Proportion.
+**0.14, a lean zplan** (the owner, 2026-11-06: a deep refactor and cleanup, then Astra's evaluation). Design
+`docs/designs/2026-11-06-0-14-lean-zplan.md`, revision 3: 0.14 does the work that changes no fixture and no consent
+rule; 0.15 does the single planning path after a test-fixture migration.
 
-| Step | State |
+| Slice | State |
 |---|---|
-| 0.11.0 | Published 2026-11-05 (Production above). Live runs on a FigmaPot copy: private evidence under `.local/diag/` |
-| Roadmap rev 12 | Written 2026-11-05; Goldfish pass resolved in the roadmap (R2 keeps the contract: the milestone introducing a project's first check waits for the owner's merge yes; R1 measured by unrequested test lines with a follow-up goal and a revert rule; R4 a code-made facts entry at plan end) |
-| R1 Tests in proportion | Built 97bdd77; measured on the two FigmaPot goals (private `.local/diag/r1/`): correctness held (every held-out check, the follow-up included; every goal at attempt 1), test lines not lower (358 vs 324): the architect names a risk and asks for tests in every brief. Waiting for the owner's call on volume (default: keep) |
-| R2 A red base, a first check (F14) | Built: R2a 2a2144d + 2876d12 (after a review of the change as built), R2b cb665ee; default lane green |
-| R3 Small fixes, R4 The report | Done: R3 11b497f, b8a36d9 (pnpm store cleanup, profile wording, dim 'awaiting merge', ARCHITECTURE); R4 dc5cdaf (facts of each merged milestone in the plan view and the status) |
-| Release 0.12 | Published 2026-11-06 (Production above) |
-| 0.13 | Built (718d65b, aeb3864 after the review as built); candidate 8938619 qualified (private evidence under `.local/diag/`): full lane 2725/2726 (a load-race flake, green alone); four live runs on the installed product, including the planted brief defect the plan check caught (`readiness:` W1, F1) and a red base the plan fixed first; all eight items of contract section 9. Waiting for the owner's go to publish |
+| K The decline defect: the decline is stored on the revision, so the architect can never approve it; the note goes to the architect | Done |
+| D Dead code: foreman, plan_tree, connections, disk; four functions (test observers wait for 0.15) | Done |
+| X Linux leftovers; setup refuses all but macOS arm64 | Done |
+| S Docs and state: ARCHITECTURE rewritten, two cancelled designs archived, this file | Done |
+| E Astra's evaluation of the tree (`.local/goldfish/2026-11-06-0-14-tree/`) | Done: 1 Blocker and the Majors fixed, design section 9 |
+| Release 0.14 | Qualified (record in the private evidence): the full lane, three live runs and a smoke on the candidate, contract section 9, the role outcomes; publishing waits for the owner's yes |
 
-Evidence folders (private): `.local/diag/`, `.local/z11/`, `.local/w0/`, `.local/a0/`, `.local/goldfish/`.
+**0.15:**
+- **One planning path for every entry point.** The owner's `/plan`, retry, renew and "back to plan", and steward
+  proposals all go to the architect.
+- **The removals.** The line UI's menu, goal drafts, the old planner's and the task gate's writers, the planner-era
+  settings, and the legacy `devtools/zeroshot/`.
+- **The fixture migration comes first.** Revision 2's second Goldfish pass is its list of requirements (design
+  section 8).
 
-## Open
+The plan to the target flow: `docs/plans/2026-11-03-roadmap.md` (revision 12). Ideas and deferred work, each with
+its trigger: `docs/plans/backlog.md`.
 
-Known defects, gaps, ideas and housekeeping: `docs/plans/backlog.md` (one list; nothing kept only here).
+## Evidence (private, gitignored)
+
+- `.local/diag/`: the live runs and the release qualifications (rel012, rel013).
+- `.local/goldfish/`: every Goldfish pass.
+- `.local/a0/`, `.local/w0/`, `.local/z11/`: the earlier studies.

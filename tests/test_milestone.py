@@ -995,7 +995,7 @@ class QualificationHarnessTests(unittest.TestCase):
             self.assertEqual(driver_qual.main(["--binary", "/nonexistent/zeroshot", "m_adapter_resume"]), 2)
         self.assertIn("SKIP", out.getvalue())
 
-    # Adapter scenario wiring (the native runs themselves are Linux-only: devtools/linux-test.sh --py) -----------
+    # Adapter scenario wiring (the native runs themselves: devtools/driver_qual.py on this Mac) -----------------
 
     def test_adapter_scenarios_are_named_and_wired_to_adapter_steps(self):
         self.assertEqual(sorted(driver_qual.ADAPTER), ["k_adapter_done_merge", "l_adapter_lost_stop", "m_adapter_resume"])

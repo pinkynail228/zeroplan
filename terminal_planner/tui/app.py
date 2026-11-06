@@ -134,6 +134,9 @@ LOG_PLACEHOLDER = "The install log is empty so far: use the \"install\" or \"log
 EMPTY_CHANGE = "Empty text: the plan is unchanged."
 # P1a: the note a revision of a stale proposal carries when the owner sends none — the cause is all the planner needs.
 RENEW_NOTE = "The project changed after planning: rebuild the plan"
+DECLINE_KEPT = "The architect cannot take your note now: it is in the chat input; send it when the architect is free."
+DECLINE_LOST = "The architect cannot take your note now; send it in the chat later: %s"
+DECLINE_IN_INPUT = "Your note is in the chat input."
 # The line a start refused as stale shows: the unsent revision no longer matches the project (or the Zeroshot
 # binding) it was prepared on. One wording for both places it is said — the plan screen's own watch (`watched`) and
 # a draft's `/plan` whose submission came back `stale` (i3a/A2 repair; nothing was sent, so the draft stays sendable).
@@ -3366,11 +3369,62 @@ class ZplanApp(App):
             self.say_note(EMPTY_CHANGE)
             return
         view = self.snapshot
+        if ZplanApp.decline_to_architect(self, view, text):  # the class's own rule, also on a stand-in host
+            return
         if getattr(view, "status", None) == "proposed":
             self.revising = view.version  # the old card offers nothing while the revision is asked for
             self.changed()
         self.controller.revise_plan(text, self.deliver(
             lambda outcome, error: self.plan_action_done("Not done: ", outcome, error)))
+
+    def decline_to_architect(self, view, text):
+        """0.14 K: revising the architect's own plan with a note, in any status, goes to the architect, never to the old
+        planner. A proposed revision is first stored as declined (`Planning.decline`), so the architect can never
+        approve it, and the note is sent only once that is stored; when the decline is refused (the plan was approved
+        or revised meanwhile) nothing is sent and the owner reads why. The note is the owner's message "Revise plan
+        r<N>: <note>"; a revision in another status (approved, a failed check) is shown to no yes in words anyway.
+        When the chat cannot take the turn now, the message waits in the main screen's chat input, or the status line
+        shows it. False (the old path) without a chat, which happens only with no project, or for a revision the old
+        planner made (it leaves in 0.15)."""
+        chat = getattr(self, "chat", None)
+        if chat is None or not getattr(view, "goldfish", False):
+            return False
+        message = "Revise plan r%s: %s" % (view.version, text)
+        if getattr(view, "status", None) == "proposed":
+            self.controller.decline_plan(view.version, self.deliver(
+                lambda outcome, error: ZplanApp.send_revision_note(self, chat, message, error, declined=True)))
+        else:
+            ZplanApp.send_revision_note(self, chat, message, None, declined=False)
+        return True
+
+    def send_revision_note(self, chat, message, error, declined):
+        """The second half of `decline_to_architect`, on the UI thread: `error` is the refused decline's reason."""
+        if error:
+            self.chat_note = "Not done: %s %s" % (error, DECLINE_IN_INPUT if self.keep_chat_text(message) else message)
+            self.changed()
+            return
+        snapshot = dict(self.chat_snapshot())
+        if declined:  # the UI snapshot may not show the stored decline yet: this turn binds no yes either way
+            snapshot["plan_state"] = dict(snapshot.get("plan_state") or {}, declined=True)
+        accepted, line = chat.send(message, snapshot=snapshot)
+        if accepted:
+            self.chat_note = ""
+        elif self.keep_chat_text(message):
+            self.chat_note = DECLINE_KEPT + (" " + line if line else "")
+        else:
+            self.chat_note = DECLINE_LOST % message
+        self.changed()
+
+    def keep_chat_text(self, text):
+        """Add `text` to the main screen's chat input (also under a full screen on top), after what the owner already
+        typed, so a note the architect could not take now is not lost. False when there is no main screen."""
+        main = next((item for item in reversed(self.screen_stack) if isinstance(item, MainScreen)), None)
+        try:
+            field = main.query_one("#input", ChatInput)
+        except Exception:  # no main screen, or one not composed yet or already going away
+            return False
+        field.value = (field.value.rstrip() + " " + text).strip() if field.value.strip() else text
+        return True
 
     def revision_seen(self, snapshot):
         """A snapshot that names another revision, or one no longer proposed, shows the revision asked for: the old

@@ -159,7 +159,9 @@ def check_installation(chain=None):
 def platform_key(chain=None):
     releases = (chain or toolchain.current()).releases
     key = (platform.system(), platform.machine())
-    require(key in releases, "Setup supports Linux x86_64/aarch64 and macOS arm64; platform: " + str(key), family="setup.unsupported_platform")
+    # macOS only (the owner, 2026-11-05); the toolchain keeps its other archive hashes for the candidate script
+    require(key == ("Darwin", "arm64") and key in releases, "zplan supports macOS on Apple silicon (arm64) only; "
+            "platform: " + str(key), family="setup.unsupported_platform")
     return key
 
 

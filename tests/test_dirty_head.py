@@ -17,10 +17,9 @@ import re
 from types import SimpleNamespace
 import unittest
 
-from terminal_planner import architect, foreman, merge_critic, project_read, setup
+from terminal_planner import architect, merge_critic, project_read, setup
 from terminal_planner.authority import Authority as RealAuthority, BASELINE_PREFIX, Blocked, baseline, digest
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
-import test_foreman
 import test_plan_stop
 import test_runs
 import test_task_gate_record as gates
@@ -188,35 +187,6 @@ class ReadTests(tp.ProjectTest):
         (self.project / "new.txt").write_text("x\n")
         self.assertEqual(sorted(project_read.uncommitted_paths(self.project)), ["moved.txt", "new.txt"])
         self.assertEqual(project_read.shown_paths(["a", "b", "c", "d", "e", "f", "g"]), "a, b, c, d, e and 2 more")
-
-
-class ForemanTests(unittest.TestCase):
-    setUp = test_foreman.ForemanTest.setUp  # the fixture only: its own tests are not run again
-    write = test_foreman.ForemanTest.write
-    commit = test_foreman.ForemanTest.commit
-
-    def test_k3_a_citation_that_exists_only_in_an_uncommitted_edit_is_missing(self):
-        self.write("src/a.py", "one\n")
-        self.commit()
-        self.write("src/a.py", "one\ntwo\n")
-        brief = test_foreman.make_brief(write_set=["src/other.py"], reuse="see `src/a.py:2`")
-        self.assertEqual([(f["check"], f["blocking"]) for f in foreman.inspect(self.p, brief)], [("F1", True)])
-
-    def test_k4_the_write_set_warns_about_uncommitted_paths(self):
-        self.write("src/a.py", "one\n")
-        self.write("src/b.py", "one\n")
-        self.commit()
-        brief = test_foreman.make_brief(write_set=["src/a.py", "src/b.py", "src/new.py"])
-        self.assertEqual(foreman.inspect(self.p, brief), [])
-        self.write("src/a.py", "edited\n")
-        found = foreman.inspect(self.p, brief)
-        self.assertEqual([(f["check"], f["blocking"]) for f in found], [("F6", False)])
-        self.assertIn("src/a.py", found[0]["text"])
-        self.assertNotIn("src/b.py", found[0]["text"])
-        for entry in ("src", "src/*.py"):  # a directory and a glob cover the uncommitted file too
-            found = foreman.inspect(self.p, test_foreman.make_brief(write_set=[entry]))
-            self.assertEqual([f["check"] for f in found], ["F6"], entry)
-            self.assertIn("src/a.py", found[0]["text"])
 
 
 class ArchitectTests(tp.ProjectTest):

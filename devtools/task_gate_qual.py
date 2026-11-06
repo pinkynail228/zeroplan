@@ -1,4 +1,4 @@
-"""Native qualification of the task gate (orchestrator, Linux test host).
+"""Native qualification of the task gate (orchestrator, on this Mac).
 
 Drives the production `Delivery.run_task_gate` (a NativeEngine over a gate record) against the pinned native binary
 and a scripted synthetic Responses provider on loopback. The approved plan revision the gate needs is made first by
@@ -14,7 +14,6 @@ Scenarios: a_accept_r1, b_reject_accept_r2, c_dispute_accepted, d_exhausted (tas
 f_proposer_error, g_malformed_discussion (output_invalid, no evidence), h_continuity.
 
     PYTHONPATH=. python3 devtools/task_gate_qual.py --binary "$ZEROSHOT_TEST_BINARY" [SCENARIO ...]
-    devtools/linux-test.sh --py devtools/task_gate_qual.py
 """
 
 import argparse

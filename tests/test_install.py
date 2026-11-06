@@ -40,7 +40,7 @@ class VersionTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertIn('\nversion = "%s"\n' % __version__, project)
         self.assertEqual(install.VERSION, __version__)
-        self.assertEqual(install.VERSION, "0.13.0")
+        self.assertEqual(install.VERSION, "0.14.0")
         self.assertIn("0.9.0", install.OWNED)  # an update from the previous release replaces its launcher
         self.assertIn("0.4.0", install.OWNED)  # the 0.9.0 installer keeps recognising the 0.4.0 launcher as ours
         self.assertIn("0.6.0", install.OWNED)  # and the 0.6.0 launcher too
@@ -325,7 +325,7 @@ class InstalledGateTests(unittest.TestCase):
             self.assertFalse(str(Path(path).resolve()).startswith(str(checkout)), path)
 
     def test_launcher_prints_version_and_older_install_is_untouched(self):
-        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.13.0")
+        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.14.0")
         self.assertEqual(self.launcher.resolve(), (self.app / "bin/zplan").resolve())
         after = {path: value for path, value in tree(self.root / "data").items()
                  if not path.startswith("planning-kit/app/%s/" % install.VERSION)}

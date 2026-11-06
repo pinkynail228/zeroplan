@@ -10,6 +10,15 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
 
 ## For users: update zplan
 
+### What changes in 0.14
+
+- Declining or revising the architect's plan with a note sends the note to the architect, who revises the plan; the
+  declined plan can then be approved only on your own plan card, never by the architect.
+- zplan supports macOS on Apple silicon only: setup refuses other platforms.
+- Unused modules and code are removed.
+- A store holding a declined plan revision (`declined`) cannot be opened by zplan 0.13 or older; roll back to the
+  store copy the installer printed.
+
 ### What changes in 0.13
 
 - The plan check judges, before your yes, whether every task can be carried out as written: a brief line a worker
@@ -99,7 +108,7 @@ changed, the action stops with `toolchain.mismatch` and nothing in the record is
 app, which keeps its own tool directory:
 
 ```sh
-# macOS: ~/Library/Application Support/PlanningKit/production; Linux: ~/.local/state/PlanningKit/production
+# ~/Library/Application Support/PlanningKit/production
 rm -rf "<production>/v3" && mv "<production>/v3.backup-<old version>-<UTC timestamp>" "<production>/v3"
 ln -sfn ~/.local/share/planning-kit/app/<older>/bin/zplan ~/.local/bin/zplan
 ```
@@ -138,16 +147,13 @@ Nothing activates a candidate automatically; the default changes only by an edit
    current default's tag: CLI (`run`, `watch`, `status`, `resume`, `force-stop`, `logs`, `list`), the graph schema,
    built-in worker templates (`builtin.agent.*@N`), the policy (`policy.native-v2@1`), the graph profile and runtime
    config. The script below diffs the same things mechanically; reading the release notes is still yours.
-2. **Run the candidate script on macOS** (Linux is not tested: the owner, 2026-11-05; the Linux command below is kept
-   only for reference). It installs the candidate into a scratch data root
+2. **Run the candidate script on macOS** (zplan supports macOS only: the owner, 2026-11-05). It installs the candidate
+   into a scratch data root
    and a short isolated native state root, never into the production directories:
 
    ```sh
    # macOS (archive SHA256 of this platform's release asset; --upstream is the candidate's tag checkout)
    python3 devtools/toolchain-candidate.py --zeroshot <V> --sha256 <HEX> --upstream <checkout>
-   # Linux host (`--py` runs a script from a fresh copy of the checkout; paths are host paths;
-   # ZPLAN_TEST_TIMEOUT lifts linux-test.sh's default 30-minute cap; a full qualification takes longer)
-   ZPLAN_TEST_TIMEOUT=10800 devtools/linux-test.sh --py devtools/toolchain-candidate.py --zeroshot <V> --sha256 <HEX> --upstream <host checkout>
    ```
 
    When the candidate also moves Codex (or restic), add `--codex <V> --codex-package <DIR>` (a directory with the
@@ -164,7 +170,7 @@ Nothing activates a candidate automatically; the default changes only by an edit
    scratch directory is removed (`--keep` keeps it for inspection).
 3. **Mac real-provider smoke.** After bumping `DEFAULT` on a branch and installing it (`zplan setup`): one real plan and one real milestone
    on a disposable project (a clone with isolated stores), run by the orchestrator. Tests use deterministic fixtures; this is the first real-provider check.
-4. **Bump** `DEFAULT` in `toolchain.py`: versions, all three platform archive SHA256 (`Linux x86_64`,
+4. **Bump** `DEFAULT` in `toolchain.py`: versions, all three platform archive SHA256 (setup uses only Darwin's; `Linux x86_64`,
    `Linux aarch64`, `Darwin arm64`), and `terminal_planner/resources/package.json` + `package-lock.json` for a new
    Codex (a test fails when the lockfile and `codex` disagree). Any change to the bundle's content that keeps the
    versions (restic, lockfile, layout) needs a new `runtime` tag: a bundle is never replaced in place.

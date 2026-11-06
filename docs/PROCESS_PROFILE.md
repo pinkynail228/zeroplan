@@ -18,7 +18,7 @@ native run, its verdict is evidence bound to an exact artifact, and moving on is
 - A new scheduler, a second lifecycle store next to `planning.json` (Authority), or a second registry of
   graph/runtime profiles next to native `RunProfile`.
 - Mixed harnesses in one run (native fixes harness/provider per run, upstream runtime-plan.md:24).
-- This repository's own setup (the Linux test host, devtools/linux-test.sh) as product defaults; it is one profile instance.
+- This repository's own setup as product defaults; it is one profile instance.
 
 ## Owner requirements -> stages
 
@@ -63,7 +63,7 @@ runs.py:1053). Credentials, sessions, transcripts, gate records and receipts sta
   (engine.py:394).
 - `rules`: repository files given to agents as owner rules, in the listed order; their digest is part of the
   resolved config. Agents keep refusing rules that contradict the frozen task or graph mechanics.
-- `checks`: argv run by zplan; a remote host is just a command (e.g. `["devtools/linux-test.sh"]`). No `checks` =
+- `checks`: argv run by zplan; a remote host is just a command (e.g. `["ssh", "host", "make test"]`). No `checks` =
   "без квалификации" shown on the merge screen.
 
 ## Bootstrap and profile states
@@ -129,7 +129,7 @@ uncertainty recorded before dispatch, terminal identity and output digest (autho
 
 - Cost and non-convergence: bounded rounds, spend/elapsed shown, exhaustion visible, no silent retry.
 - Native verifier complexity ceiling (milestone.py:350): gates are separate small runs, never nested into the
-  milestone graph; each new graph is qualified natively on the Linux host before merge.
+  milestone graph; each new graph is qualified natively on macOS before merge.
 - Unsupported model/effort pair (native does not check): doctor shows each binding; a gate failure names the role
   and its binding. No paid probe in doctor.
 
@@ -147,7 +147,7 @@ deleted/malformed accepted profile blocks new actions but not watching old runs.
 2. G1a: profile schema + resolver + roles.json fallback + effective snapshot + minimal bootstrap (TUI and plain) +
    doctor. No editor, no planner graph change.
 3. G1b: argued plan graph, versioned discussion/evidence, gate lifecycle, invalidation/override, `[i]`; native
-   qualification on the Linux host. Then a critic accumulated-diff review (replaces owner review #2).
+   qualification on macOS. Then a critic accumulated-diff review (replaces owner review #2).
 4. U3b chat on top of the service (drafts goal/task/decision; shows gate discussions; transcript is not authority).
 5. Orchestrator runs dogfood-polish (revised per critic polish, item 5 dropped) through zplan on a clone.
 6. U4 release 0.4.0 with G1 only; P0 before any public show.

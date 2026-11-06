@@ -147,7 +147,7 @@ class RunCommandShell(MilestoneShell):
             from textual.widgets import Button
             decline = next(b for card in main.card_widgets.values() for b in card.query(Button) if b.command == "/decline")
             await pilot.click(decline)
-            await self.until(pilot, lambda: type(self.app.screen).__name__ == "NoteScreen")
+            await self.until(pilot, lambda: type(self.app.screen).__name__ == "CardNoteScreen")
             await pilot.press("escape")
             await self.until(pilot, lambda: self.app.screen is main)
             await self.until(pilot, lambda: self.app.focused is decline)  # under load focus returns a frame later

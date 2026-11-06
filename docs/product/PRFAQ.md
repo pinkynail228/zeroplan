@@ -43,7 +43,7 @@ Runs are background jobs of the engine. The screen shows the time since the last
 `/stop`. Reopening zplan reconnects to whatever is still running.
 
 **Which agents, which systems?**
-Codex today. macOS arm64 and Linux x86_64. Any terminal, 80x24 and up.
+Codex today. macOS arm64. Any terminal, 80x24 and up.
 
 **Does it work on my project?**
 It is not tied to any project: it takes the repository it is started in and the rules in its `AGENTS.md` /

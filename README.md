@@ -19,7 +19,7 @@
   <a href="#install">Install</a> · <a href="#try-it-free">Try it free</a> · <a href="#use-it-on-your-project">Use it</a> · <a href="docs/USER_FLOW.md">Guide</a>
 </p>
 
-Early release (0.13), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
+Early release (0.14), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
 
 ## Why zeroplan
 

@@ -887,12 +887,6 @@ class Delivery:
                "the run goes on in the background and survives leaving zplan." % (
                    preview.milestone, preview.title, preview.plan_revision, preview.attempt)
 
-    @staticmethod
-    def stop_text(token):
-        """The TUI confirmation of a stop: it ends this attempt only, never the plan or anything merged."""
-        return "Stop the run %s (attempt %s)?\nThe attempt's unfinished work will not be accepted; the plan and what is " \
-               "already merged do not change. You can start a new attempt later." % (token.milestone, token.attempt)
-
     # Task gate (G2-start) ----------------------------------------------------
 
     def task_gates(self, milestone_id):

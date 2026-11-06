@@ -68,4 +68,4 @@ zplan takes the part before and after each engine run and puts it in one termina
 | Next (planned) | Build zplan with zplan: several live runs, review rounds and their verdicts visible in one screen |
 
 Limits today: the agent provider is Codex only; a running planner is stopped from the line UI (`zplan --plain`)
-until 0.6.0; macOS arm64 and Linux x86_64; the repository is not public yet.
+until 0.6.0; macOS arm64; the repository is not public yet.

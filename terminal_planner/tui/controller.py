@@ -221,7 +221,10 @@ def plan_state(plan):
     `approved` status while being a state of its own. None without a plan."""
     if not isinstance(plan, dict):
         return None
-    return {"status": str(plan.get("status") or ""), "override": bool(plan.get("override"))}
+    state = {"status": str(plan.get("status") or ""), "override": bool(plan.get("override"))}
+    if plan.get("declined"):  # 0.14 K: a state of its own, also for a chat draft; absent otherwise, as before
+        state["declined"] = True
+    return state
 
 
 def goal_identity(planning):
@@ -291,6 +294,8 @@ def plan_fields(plan, revisions=None):
               "verdict": evidence.get("verdict") if isinstance(evidence, dict) else None,
               "findings": findings if len(findings) <= PLAN_FINDINGS else findings[:PLAN_FINDINGS - 1] + "…",
               "proposal": plan.get("proposal")}
+    if plan.get("declined"):  # 0.14 K: the owner declined it; only his own card can still approve it
+        fields["declined"] = True
     if plan.get("base_checks") is not None:  # R2a: the base result the plan card showed
         found = plan["base_checks"]
         fields["base_checks"] = {"outcome": found["outcome"], "failed": list(found["failed"]), "commit": found["commit"],
@@ -357,7 +362,8 @@ def changed_paths(app, r):
 def architect_may_approve(revisions):
     """Whether the chain lets the architect approve its last revision itself (`autonomy.approves_alone`): a later
     revision of an owner-approved chain whose card showed no red base (R2a: a red base is the owner's decision)."""
-    return chain_approved(revisions) and not red_base(revisions[-1] if revisions else None)
+    last = revisions[-1] if revisions else None
+    return chain_approved(revisions) and not red_base(last) and not (last or {}).get("declined")
 
 
 def merge_tier(status, paths):
@@ -1418,6 +1424,9 @@ class Controller:
         plan = delivery.plan()  # a session without a plan names no current revision: today's `Changed`, no crash
         if plan is None or plan.get("version") != revision:
             raise Changed("the plan was revised")
+        if plan.get("declined") is not None:  # 0.14 K: the owner declined it; only his own card approves it now
+            raise Blocked("The owner declined plan r%s: revise it with zplan_edit_plan; only the owner's plan card "
+                          "can still approve it." % revision, family="action.refused")
         status = autonomy.status_of(app.profile)  # the policy's own read, once
         gate = (plan.get("evidence") or {}).get("resolved_config_digest")
         if status is not None and gate and status.digest != gate:
@@ -2335,6 +2344,10 @@ class Controller:
             planning.stop()
             return Outcome("stopping")
         return self._plan_job("stop_planner", work, done, "stop_planner")
+
+    def decline_plan(self, version, done):
+        """0.14 K: the owner's decline of revision `version`, recorded before his note reaches the architect."""
+        return self._plan_job("decline", lambda app, planning: planning.decline(version), done)
 
     def revise_plan(self, feedback, done):
         return self._plan_job("revise", lambda app, planning: verdict(planning.revise(feedback)), done, "revise")

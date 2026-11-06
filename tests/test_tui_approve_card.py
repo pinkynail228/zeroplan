@@ -133,10 +133,14 @@ class _Plan:
     """The controller side `ZplanApp.revision_note` reaches: a revision request is recorded, nothing runs."""
 
     def __init__(self):
-        self.revisions = []
+        self.revisions, self.decline_error = [], None
 
     def revise_plan(self, text, done):
         self.revisions.append(text)
+
+    def decline_plan(self, version, done):
+        self.revisions.append(("declined", version))
+        done(None, self.decline_error)
 
 
 class _Approved:
@@ -304,7 +308,7 @@ class PlanCardCommandTests(unittest.TestCase):
         ui.COMMAND_ACTIONS["/decline"](screen, "", "plan:1")
         self.assertEqual(len(screen.app.pushed), 1, screen.app.pushed)
         note, callback = screen.app.pushed[0]
-        self.assertEqual(type(note).__name__, "NoteScreen")
+        self.assertEqual(type(note).__name__, "CardNoteScreen")
         self.assertTrue(note.enter)  # a card-origin note: enter submits
         self.assertEqual(callback, screen.app.revision_note)
         self.assertIs(callback.__self__, screen.app)
@@ -314,6 +318,38 @@ class PlanCardCommandTests(unittest.TestCase):
         self.assertIsNone(screen.card_specs["plan:1"].done)  # still an open decision
         callback("короче")  # enter: the revision request goes to the controller
         self.assertEqual(screen.app.controller.revisions, ["короче"])
+
+    def test_declining_the_architects_plan_goes_to_the_architect_and_cannot_approve_it(self):
+        """0.14 K: with a chat, declining the architect's (Goldfish) plan sends the owner's note to the architect as
+        "Revise plan r<N>: <note>", never to the old planner, after the decline is recorded, and the turn's snapshot
+        can approve nothing; a chat that cannot take the turn now gets the whole message in its input."""
+        from terminal_planner import application
+        sent = []
+
+        class Chat:
+            accepting = True
+
+            def send(self, value, snapshot=None):
+                sent.append((value, snapshot))
+                return (True, "") if self.accepting else (False, "busy")
+
+        screen = _Screen(replace(proposal(), goldfish=True))
+        screen.app.chat, kept = Chat(), []
+        screen.app.chat_snapshot = lambda: {"revision": 1, "plan_state": {"revision": 1, "status": "proposed"}}
+        screen.app.keep_chat_text = lambda text: kept.append(text) or True
+        screen.render_card_sources()
+        ui.COMMAND_ACTIONS["/decline"](screen, "", "plan:1")
+        callback = screen.app.pushed[0][1]
+        callback("короче")
+        self.assertEqual(screen.app.controller.revisions, [("declined", 1)])  # recorded; the old planner is not asked
+        self.assertEqual(sent[0][0], "Revise plan r1: короче")
+        self.assertIsNone(application.shown_plan(sent[0][1]))
+        screen.app.chat.accepting = False
+        callback("ещё короче")
+        self.assertEqual(kept, ["Revise plan r1: ещё короче"])
+        screen.app.controller.decline_error = "Plan r1 is approved now; it cannot be declined."
+        callback("потом")  # the decline is refused: nothing is sent, the note waits in the input
+        self.assertEqual((len(sent), kept[-1]), (2, "Revise plan r1: потом"))
 
     def test_a5_a_refused_approve_keeps_the_card_and_says_why(self):
         """A5 through the real decision contract: the refusal arrives later, as the `error` of the callback
@@ -417,6 +453,36 @@ class ApproveCardTests(ApproveCardShell):
                 self.assertEqual(type(self.app.screen).__name__, "MainScreen")  # no confirmation modal
                 self.assertRegex(self.card().spec.done, "^%s$" % receipt_pattern())
         self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
+
+
+    async def test_enter_sends_the_revision_note_the_plan_card_opened(self):
+        """0.14 live run: «no, revise» opens the note, and enter sends it (it used to add a new line in the text)."""
+        self.propose_joint()
+        notes = []
+        with patch.object(ui.ZplanApp, "revision_note", lambda app, text: notes.append(text)):
+            async with self.shell(size=(120, 40)) as pilot:
+                await self.loaded(pilot)
+                await self.card_shown(pilot)
+                await self.choose(pilot, "/decline")
+                await self.until(pilot, lambda: "NoteScreen" in type(self.app.screen).__name__)
+                await pilot.press("s", "h", "o", "r", "t", "e", "r", "enter")
+                await self.until(pilot, lambda: notes)
+        self.assertEqual(notes, ["shorter"])
+
+    async def test_a_note_the_architect_cannot_take_waits_in_the_chat_input_under_a_full_screen(self):
+        """0.14 K: a decline note the busy architect cannot take is added after what the owner already typed in the
+        main screen's input, also while a full screen (the plan screen) is on top."""
+        from textual.screen import Screen
+        self.propose_joint()
+        async with self.shell(size=(120, 40)) as pilot:
+            await self.loaded(pilot)
+            field = self.main().query_one("#input")
+            field.value = "typed"
+            await self.app.push_screen(Screen())
+            await pilot.pause(0.2)
+            message = "Revise plan r1: shorter"
+            self.assertTrue(self.app.keep_chat_text(message))
+            self.assertEqual(field.value, "typed " + message)
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)

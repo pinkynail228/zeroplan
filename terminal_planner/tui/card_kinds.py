@@ -610,14 +610,19 @@ CARD_ROUTES[("/decline", "question")] = lambda screen, argument, key: screen.dec
 AUTO_END_CARDS.add("needs_owner")
 
 
-class QuestionNoteScreen(NoteScreen):
-    """The owner-question card's answer note: a `NoteScreen(..., answer=True, enter=True)` that submits on enter.
+class CardNoteScreen(NoteScreen):
+    """A card-origin note (`enter=True`) that submits on enter: the plan card's revision note, and the question card's
+    answer below.
 
     The frozen hook's own `on_key` never sees the key while the form's `TextArea` holds the focus: Textual delivers
     a key to the focused widget first, and the `TextArea` consumes `enter` (it inserts a newline), so the screen's
     handler is not reached. The priority binding below is checked ahead of the focused widget on the card's own note
     (the plain answer forms keep their ctrl+g), so enter submits exactly the text the card-origin note intends."""
     BINDINGS = [Binding("enter", "send", "Send", priority=True)]
+
+
+class QuestionNoteScreen(CardNoteScreen):
+    """The owner-question card's answer note: `QuestionNoteScreen(..., answer=True, enter=True)`."""
 
 # i3b: the plan-approval card on the main screen (kind `plan`, key `plan:<version>`). While a plan is proposed the
 # slot holds one card, «Plan · N stages · M tasks», whose two buttons decide the plan in one click: `/approve` goes
@@ -794,7 +799,7 @@ def revise_plan_card(screen, argument, key):
     """`/decline` from the plan card (or a typed `/decline`): the plan screen's own revision note, with enter
     submitting (a card-origin note). The card stays while the note is open or cancelled; the revision the note
     starts ends the proposed state, so the source drops the card."""
-    screen.app.push_screen(NoteScreen(enter=True), screen.app.revision_note)
+    screen.app.push_screen(CardNoteScreen(enter=True), screen.app.revision_note)
 
 
 CARD_SOURCES["plan"] = plan_card_source

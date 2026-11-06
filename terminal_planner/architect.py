@@ -758,9 +758,6 @@ class TurnResult:
         self.malformed_lines = 0
         self.events = 0
 
-    def as_dict(self):
-        return dict(vars(self))
-
 
 def _cap(text, limit):
     text = text if isinstance(text, str) else ""

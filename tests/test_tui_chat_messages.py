@@ -3,7 +3,7 @@ real shell covers C1-C5; the pure rules (time lines, L-2 before Markdown, draft 
 
 Interpretations (the task leaves these open; the worker's summary never reaches the reviewers):
 - The previous entry of a time line is the previous entry that carries a stored time; the owner's optimistic line has
-  none yet, so it gets no time line until the turn stamps it from the store row (`chat._stamp_owner_line`).
+  none yet, so it gets no time line until it takes the time of the store row the turn wrote.
 - A `ts` the zone rule cannot read (`chat.moment` is None) names no time: its entry gets no time line.
 - "Reset and event entries unchanged (V3)": they keep their plain text, with no gutter, no bar and no author line (C1
   holds for every entry); only the owner, the architect and the error entries are restyled.

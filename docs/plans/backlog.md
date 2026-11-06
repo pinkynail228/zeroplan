@@ -4,16 +4,6 @@ The one place where an idea or a postponed piece of work is kept, so none is los
 (`docs/plans/2026-11-03-roadmap.md`) holds only what is planned for the next releases. An entry moves there when its
 trigger fires or the owner asks for it. Plain bullets; each names its source and what brings it in.
 
-## Planned for 0.13
-
-- **The plan check as the full Goldfish protocol:** built as the critic's readiness rules (F1, F2, F4, W1, W2) with
-  the base result in its input (`docs/designs/2026-11-06-0-13-plan-right-before-the-yes.md`).
-- **The role outcomes of the 0.12 qualification** (14 Zeroshot runs) were the input:
-  - the plan critic accepted 6 of 6;
-  - `preflight` passed 8 of 8;
-  - the reviews each rejected 1 of 8 (a red base the worker then fixed);
-  - the final check accepted 7 of 7.
-
 ## Decided at 0.13, deferred with triggers
 
 - **A separate readiness node** in the plan check.
@@ -29,6 +19,13 @@ trigger fires or the owner asks for it. Plain bullets; each names its source and
 - **The base result reaching the architect before it writes a plan.** The critic's W2 rejection and one revision
   reach the same plan.
   - Trigger: red-base chains that spend their budget.
+
+## Seen in the 0.14 qualification, not fixed
+
+- **A revision cannot change the chain's goal.** In m1 the owner's decline turned a CLI command into a chat command;
+  the architect's `zplan_edit_plan` r2 kept r1's goal text ("CLI command"), which the plan tab then showed. The plan
+  and the reader's retelling were right. `zplan_edit_plan` takes no goal; a new goal needs `zplan_plan`.
+  - Goes into 0.15's single planning path (design section 8): a decline that changes the goal.
 
 ## Seen in the 0.12 qualification, not fixed
 
@@ -57,11 +54,6 @@ trigger fires or the owner asks for it. Plain bullets; each names its source and
     calls in a new session, under a cap of 25).
 - **Rules beyond the root `AGENTS.md` reach the workers**, delivered frozen in the run input (W0 5).
   - Trigger: a project whose rules live elsewhere.
-- **The owner's own `p`, `r`, `/plan` and steward proposals still use the old planner.** Retire it (M6), together with
-  the line UI (`zplan --plain`) and the dormant goal-draft protocol (A0 design 3.7).
-  - Trigger: a change touches those modules.
-- **Replay `foreman.py`** over the stored briefs, then wire it into the plan check or remove it (W0 3.4).
-  - Trigger: the 0.13 readiness work.
 - **Continuous observation after the first dispatch** while no screen is open.
   - Trigger: a run that needed the owner while zplan was closed.
 - **One acceptance boundary for task and milestone verification.**

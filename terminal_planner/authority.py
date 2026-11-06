@@ -736,9 +736,12 @@ class Authority:
         # `override` is the owner's record of approving a rejected plan gate anyway; absent on every other revision.
         # `draft` is the full proposal of an owner edit that the plan run must present unchanged; absent otherwise.
         require(isinstance(r, dict) and set(r) - {"live", "execution", "frozen", "override", "stop", "draft", "origin", "by", "response",
-                                                  "base_checks"} == fields
+                                                  "base_checks", "declined"} == fields
                 and ("live" not in r or live.valid(r["live"])) and (("execution" in r) == ("frozen" in r)))
         require("base_checks" not in r or valid_base_checks(r["base_checks"]), "Invalid base checks of the plan.")
+        # 0.14 K: the owner declined this revision with a note; only his own card can still approve it
+        require("declined" not in r or (r["declined"] is True and r["status"] in ("proposed", "approved")),
+                "Invalid decline of the plan.")
         if "draft" in r:
             require("execution" in r, "Editing a plan requires a second-version plan check.")
             validate_proposal(r["draft"])

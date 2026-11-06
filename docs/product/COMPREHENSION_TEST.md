@@ -14,7 +14,7 @@ answers matching the key in substance. A miss means the folder is unclear on tha
 | 7 | What happens to running work when the terminal is closed? | It continues; reopening zplan reconnects |
 | 8 | When is plain Zeroshot the better choice? | A single self-contained change |
 | 9 | Which claim does zplan explicitly not make yet? | That multi-agent results beat a single agent (not measured) |
-| 10 | What are today's limits? | Codex only; macOS arm64 and Linux x86_64; not public yet; planner stop from the screen, planner timers and the plan tree come in 0.6.0 |
+| 10 | What are today's limits? | Codex only; macOS arm64; not public yet; planner stop from the screen, planner timers and the plan tree come in 0.6.0 |
 
 ## Record
 | Date | Agent | Score | Misses |

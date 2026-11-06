@@ -8,7 +8,7 @@ Usage: python3 devtools/fasttest.py [-j N] [--lane default|full] [--durations K]
   --lane: default skips the tests listed in tests/full_lane.txt, full runs everything (env ZPLAN_TEST_LANE, else default).
   Units start longest-known first, from seconds kept in $ZPLAN_FASTTEST_TIMES or ~/.cache/zplan-fasttest/times.json.
 Same environment as devtools/mac-test.sh (PYTHONPATH=.:tests, wheelhouse, python3.13), but no clean-tree check:
-the merge-gate evidence stays mac-test.sh / linux-test.sh; this is the fast loop for workers and the orchestrator.
+the merge-gate evidence stays mac-test.sh; this is the fast loop for workers and the orchestrator.
 """
 import argparse
 import json

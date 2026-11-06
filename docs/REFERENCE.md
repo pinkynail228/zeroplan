@@ -185,7 +185,7 @@ fast-forwards the destination to it (`merge.checks_failed` otherwise). The evide
 | `~/.local/share/planning-kit/tools/` | Pinned Zeroshot and Codex. | Yes; `zplan setup` restores it. |
 | `~/.local/share/planning-kit/codex-home/` | zplan's own Codex home: its login and `config.toml` profile. | Only if you accept logging in again. |
 | `~/.config/planning-kit/roles.json` | Role defaults (model, effort). | Yes; defaults return. |
-| `.../PlanningKit/production/v3/<project>/planning.json` | Plans, approvals, run records (macOS `~/Library/Application Support`, Linux `~/.local/state`). | No: this is your plan history. |
+| `.../PlanningKit/production/v3/<project>/planning.json` | Plans, approvals, run records (`~/Library/Application Support`). | No: this is your plan history. |
 | `.../PlanningKit/production/v3/<project>/process-state.json` | Whether the project's process profile was accepted or postponed ("later"), with the snapshot a postponed profile uses. Written under the same project lock as `planning.json`. | Yes; the profile is offered again. Plans and runs are untouched. |
 | `~/.local/share/planning-kit/worktrees/` | Attempt worktrees. | Only when no milestone is running; unmerged results then vanish. |
 | `~/.zp/` | Native Zeroshot state (`runs/`, `config/`), kept short for socket paths. | Not while a run is active; history is lost. |
@@ -655,7 +655,7 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `setup.busy` | Another setup is running. | A concurrent `zplan setup`. | Wait for it. |
 | `setup.agent_home` | zplan could not write its agent profile (config.toml) into its own Codex home. | A concurrent zplan holding the profile lock, an unwritable home, or an entry that is not a regular file. | Retry; if it persists, fix the path named in the message. |
 | `setup.prerequisite` | Node.js >= 16 and npm are required. | Not installed. | Install Node.js/npm, rerun setup. |
-| `setup.unsupported_platform` | No pinned release for this platform. | Not macOS arm64 or Linux x86_64/aarch64. | Use a supported platform. |
+| `setup.unsupported_platform` | No pinned release for this platform. | Not macOS on Apple silicon (arm64). | Use a supported platform. |
 | `setup.tools_invalid` | The installed tools failed verification. | Version or checksum mismatch. | Remove the tools directory and rerun `zplan setup`. |
 | `setup.download_invalid` | The downloaded release failed verification. | Corrupt or tampered download. | Retry; nothing was installed. |
 | `setup.login_failed` | The Codex login did not finish. | Cancelled or rejected device login, or device-code login is off for the account. | If device-code login is off for the account, turn it on in the ChatGPT account security settings; then [l] or `zplan login` again. |
@@ -717,8 +717,7 @@ shown only as a bounded detail next to the code; a failure without a family show
    «Not committed: N files — the plan sees the last commit» (an uncommitted `zplan.process.json` is named there: runs
    see the committed one).
 2. The plan, the checks and the attempts read the last commit; your files stay as they are and a plan stays current
-   while only the tree changes. The architect lists the uncommitted paths, and the foreman warns when a task's
-   write_set holds one of them.
+   while only the tree changes. The architect lists the uncommitted paths.
 3. A new commit or a branch switch makes a plan made earlier `plan.stale`: `[g]` on an unsent stale plan rebuilds it
    on the current project and sends it in the same step (`[n]` prepares it without sending).
 

@@ -593,6 +593,24 @@ class Planning:
         result = self.submission(ready)
         return Submission(result.kind, result.items, renewed=True)
 
+    def decline(self, version):
+        """0.14 K: record that the owner declined the current revision (his note goes to the architect as a message),
+        so the architect can never approve it (`Controller._approve_decided`) and no wake asks it to; the owner's own
+        card still can. Durable across a restart; the note is sent only after this is stored, so every later job sees
+        it (an approve already queued before it runs first, and then this refuses)."""
+        current = self.plan()
+        if current is None or current["version"] != version:
+            raise Blocked("The plan was revised: decline the current one.", family="action.refused")
+        if current["status"] != "proposed":
+            raise Blocked("Plan r%s is %s now; it cannot be declined." % (version, current["status"]),
+                          family="action.refused")
+        current["declined"] = True
+        try:
+            self.authority.save()
+        except BaseException:
+            current.pop("declined", None)  # never refused in memory and lost on disk
+            raise
+
     def approve(self, version):
         """The approval of the current plan; a gate argued under another configuration than the live one is stale.
         The live digest is Authority's own (the session-bound profile): no caller supplies or can disable it."""

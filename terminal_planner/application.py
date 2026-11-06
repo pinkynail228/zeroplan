@@ -67,10 +67,10 @@ def request_snapshot(snapshot, project):
 
 
 def shown_plan(snapshot):
-    """The revision the owner's screen showed as waiting (plan_state status "proposed") in `snapshot`, else None: a yes
-    in words approves only that plan."""
+    """The revision the owner's screen showed as waiting (plan_state status "proposed", not declined) in `snapshot`,
+    else None: a yes in words approves only that plan."""
     state = snapshot.get("plan_state") if isinstance(snapshot, dict) else None
-    if isinstance(state, dict) and state.get("status") == "proposed":
+    if isinstance(state, dict) and state.get("status") == "proposed" and not state.get("declined"):
         return snapshot.get("revision")
     return None
 

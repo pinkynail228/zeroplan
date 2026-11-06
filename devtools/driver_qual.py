@@ -1,4 +1,4 @@
-"""Native control-flow qualification of the milestone driver graph (orchestrator, Linux test host).
+"""Native control-flow qualification of the milestone driver graph (orchestrator, on this Mac).
 
 Runs the pinned native binary against a scripted synthetic Responses provider on loopback.
 Answers are scripted per node (dispatch by the last `ZPLAN_NODE=<name>` marker in the request; production graphs
@@ -11,7 +11,6 @@ done, export and merge; a lost force-stop resent on reopen; a recoverable failur
 checkpoint. The plan approval before them is scripted (no planner run).
 
     PYTHONPATH=. python3 devtools/driver_qual.py --binary "$ZEROSHOT_TEST_BINARY" [SCENARIO ...]
-    devtools/linux-test.sh --py devtools/driver_qual.py
 
 Event shapes follow tests/provider_transport_fixture.py (the pinned Codex release in toolchain.DEFAULT).
 """

@@ -194,7 +194,7 @@ resource binding (`setup resources`) and diagnostic export are gone. Docker is n
 
 ```sh
 PYTHONPATH=.:tests python3 -m unittest discover -s tests
-devtools/linux-test.sh                      # full suite on the Linux test host
+devtools/mac-test.sh                        # the full suite on this Mac
 ```
 
 `ZPLAN_TEST_WHEELHOUSE=DIR` enables the installed-app gate (`tests/test_install.py`): an offline install into a

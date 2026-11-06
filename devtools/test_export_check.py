@@ -8,8 +8,7 @@ Interpretations recorded for the reviewers (the worker summary never reaches
 them): the fixture credentials of this repository are silenced by line-level
 entries in devtools/export-exemptions.txt instead of fixture rewrites, so the
 exemption file is the S-5 guard through the checker's own stale-exemption
-finding; devtools/linux-test.sh is the only devtools script that named the test
-host; the manifest's ``+ .github/workflows/`` include matches nothing until the
+finding (the Linux test host script left with Linux support, 0.14); the manifest's ``+ .github/workflows/`` include matches nothing until the
 workflow ships and a non-matching include is not a finding; the private-terms
 list lives outside the repository, so the exit-0 run with the real terms is the
 orchestrator's merge gate, while the exit-3 run is reproducible here.
@@ -27,7 +26,6 @@ import urllib.parse
 from pathlib import Path
 
 CHECK = Path(__file__).resolve().with_name("export_check.py")
-LINUX_TEST = Path(__file__).resolve().parents[1] / "devtools" / "linux-test.sh"
 
 
 def join(*parts):
@@ -826,165 +824,6 @@ class MarkdownLinkCheckTest(unittest.TestCase):
                 and rule in ("dead-link", "plain-path") for rule, path, _ in found),
             "the historical TERMINAL_UX_BRIEF.md finding is missing")
 
-
-class LinuxTestHostTest(unittest.TestCase):
-    """S-3: devtools/linux-test.sh resolves the test host only at runtime.
-
-    Interpretation notes (recorded here because the worker summary never
-    reaches the reviewers): "blank after stripping" means empty after trimming
-    leading and trailing whitespace, and the destination is the trimmed value
-    from either source; a config file that is missing, unreadable or holds only
-    blank lines exits 2 with a single diagnostic naming both sources and never
-    calls ssh.  Fixtures use synthetic host names and a stub ``ssh`` on PATH
-    that records its argv; the script is expected to fail after that first
-    remote call, which is irrelevant to the assertions.  Repair class checked
-    here: trimming covers the *ends* of the whole value of ``ZPLAN_TEST_HOST``,
-    so a value wrapped in newlines or CRLF reaches ssh as the host alone while
-    an inner character (``synth\\rhost``) is preserved from both sources; and a
-    source that is not a regular readable file (a directory, an unreadable or
-    missing path) produces the single-line diagnostic rather than a shell read
-    error next to it.
-    """
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="zs-host-")
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.home = os.path.join(self.tmp, "home")
-        self.config_dir = os.path.join(self.home, ".config", "zplan-dev")
-        os.makedirs(self.config_dir, exist_ok=True)
-        self.config_path = os.path.join(self.config_dir, "test-host")
-        self.log = os.path.join(self.tmp, "ssh.log")
-        self.bin = os.path.join(self.tmp, "bin")
-        os.makedirs(self.bin)
-        stub = os.path.join(self.bin, "ssh")
-        with open(stub, "w", encoding="utf-8") as handle:
-            handle.write("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_LOG\"\nexit 1\n")
-        os.chmod(stub, 0o755)
-        self.repo = os.path.join(self.tmp, "repo")
-        os.makedirs(self.repo)
-        self.write(self.repo, "file.txt", "x\n")
-        self.git(self.repo, "init", "-q")
-        self.git(self.repo, "add", "-A")
-        self.git(self.repo, "-c", "user.name=t", "-c", "user.email=t@t.invalid",
-                 "-c", "commit.gpgsign=false", "commit", "-q", "-m", "x")
-
-    def git(self, root, *args):
-        return subprocess.run(["git", "-C", root, *args], stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True)
-
-    def write(self, root, rel, content):
-        full = os.path.join(root, rel)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        return full
-
-    def config(self, content=None, mode=None):
-        if content is not None:
-            with open(self.config_path, "w", encoding="utf-8") as handle:
-                handle.write(content)
-        if mode is not None:
-            os.chmod(self.config_path, mode)
-
-    def run_script(self, host=None):
-        env = dict(os.environ)
-        env["HOME"] = self.home
-        env["SSH_LOG"] = self.log
-        env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
-        env.pop("ZPLAN_TEST_HOST", None)
-        if host is not None:
-            env["ZPLAN_TEST_HOST"] = host
-        return subprocess.run([str(LINUX_TEST)], cwd=self.repo, env=env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    def recorded(self):
-        if not os.path.exists(self.log):
-            return []
-        # newline="": universal-newline translation would turn a carriage
-        # return inside one recorded argument into a line break.
-        with open(self.log, encoding="utf-8", newline="") as handle:
-            text = handle.read()
-        # Split on newlines only: the stub writes one argument per line, and
-        # str.splitlines would also break on a carriage return inside one.
-        lines = text.split("\n")
-        if lines and lines[-1] == "":
-            lines.pop()
-        return lines
-
-    def assert_destination(self, host):
-        argv = self.recorded()
-        self.assertTrue(argv, "the stub ssh recorded no call")
-        self.assertEqual(argv[0], host)
-
-    def test_environment_wins_over_file(self):
-        self.config("filehost\n")
-        self.run_script(host="envhost")
-        self.assert_destination("envhost")
-
-    def test_blank_environment_falls_to_file(self):
-        self.config("filehost\n")
-        self.run_script(host="   ")
-        self.assert_destination("filehost")
-
-    def test_file_without_trailing_newline(self):
-        self.config("filehost")
-        self.run_script()
-        self.assert_destination("filehost")
-
-    def test_file_leading_blank_lines(self):
-        self.config("\n\n   \nfilehost\n")
-        self.run_script()
-        self.assert_destination("filehost")
-
-    def test_multiline_environment_is_trimmed(self):
-        self.config("filehost\n")
-        self.run_script(host="\n \tenvhost\n\t")
-        self.assertEqual(self.recorded(),
-                         ["envhost", "mktemp -d ~/zplan-test-XXXXXX"])
-
-    def test_carriage_return_environment_is_trimmed(self):
-        self.config("filehost\n")
-        self.run_script(host="\r\nenvhost\r\n")
-        self.assert_destination("envhost")
-
-    def test_carriage_return_file_line_is_trimmed(self):
-        self.config("filehost\r\n")
-        self.run_script()
-        self.assert_destination("filehost")
-
-    def test_environment_keeps_inner_characters(self):
-        self.config("filehost\n")
-        self.run_script(host="synth\rhost")
-        self.assert_destination("synth\rhost")
-
-    def test_file_keeps_inner_characters(self):
-        self.config("synth\rhost\n")
-        self.run_script()
-        self.assert_destination("synth\rhost")
-
-    def test_directory_instead_of_file_exits_two(self):
-        os.makedirs(self.config_path)
-        self.assert_no_host(self.run_script())
-
-    def assert_no_host(self, proc):
-        self.assertEqual(proc.returncode, 2)
-        self.assertEqual(self.recorded(), [], "ssh must not run without a host")
-        self.assertIn("ZPLAN_TEST_HOST", proc.stderr)
-        self.assertIn("zplan-dev/test-host", proc.stderr)
-        self.assertEqual(len(proc.stderr.strip().splitlines()), 1, "one-line diagnostic")
-
-    def test_missing_file_exits_two(self):
-        self.assert_no_host(self.run_script())
-
-    def test_blank_only_file_exits_two(self):
-        self.config("\n  \n\n")
-        self.assert_no_host(self.run_script())
-
-    def test_unreadable_file_exits_two(self):
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            self.skipTest("running as root: file permissions are not enforced")
-        self.config("filehost\n", mode=0)
-        self.assert_no_host(self.run_script())
 
 if __name__ == "__main__":
     unittest.main()

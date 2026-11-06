@@ -421,14 +421,6 @@ def _shut(owner):
         pass
 
 
-def _shut_fd(number):
-    """Close one descriptor this call owns, never raising from cleanup (R-D/R-X)."""
-    try:
-        os.close(number)
-    except OSError:
-        pass
-
-
 def _orphan(process):
     """Own an unreaped guard in `ORPHANS`, under `ORPHANS_LOCK` (R-C), so a later entry can poll it."""
     with ORPHANS_LOCK:

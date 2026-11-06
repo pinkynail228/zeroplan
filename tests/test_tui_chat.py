@@ -412,8 +412,8 @@ print(json.dumps(accepted), flush=True)
     def test_i9_a5_a_running_turn_stamps_its_owner_line_from_the_store(self):
         """i9/A5 repair: the line a send posts is optimistic — the row it reconciles with does not exist yet, so it
         carries no time — and the reply then waits (a gated fixture turn). The store row the turn writes
-        before Codex starts must reach the line while the turn still runs: the re-read the turn starts (`chat.py`'s
-        `_stamp_owner_line`) stamps the optimistic entry with the stored `ts` at the same place, so the entry can
+        before Codex starts must reach the line while the turn still runs: the optimistic entry takes the stored
+        `ts` at the same place, so the entry can
         stand behind its time line before the turn ends, not only after it."""
         release = self.root / "release"
         self.fixture.script([{"lines": OPENING, "release": str(release), "release_timeout": 30}])
