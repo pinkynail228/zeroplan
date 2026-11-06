@@ -5,7 +5,7 @@ Updated: 2026-11-05 (evening). Snapshot only: replace lines in place; history is
 
 ## Production
 
-v0.11.0 published 2026-11-05 on the owner's go: export 8e5ca98 of a3af5a6 to pinkynail228/zeroplan (main and tag v0.11.0, GitHub release). Qualified: full lane 2710 OK on 3d1fa22 (a3af5a6 changes wording only: docs and devtools tests green); a fresh install from the export (install.sh, setup with Zeroshot 11.0.0, doctor); two real-provider runs of the target flow on a FigmaPot copy. The owner's Mac still runs 0.10.0 until he runs `zplan update`. The private repository's main is not pushed.
+v0.12.0 published 2026-11-06 on the owner's go: export 8f09913 of 849848d to pinkynail228/zeroplan (main, tag v0.12.0, GitHub release), qualified on the installed product (private evidence under `.local/diag/`). v0.11.0 (8e5ca98) is the previous release. The owner's Mac runs 0.10.0 until he runs `zplan update`. The private repository's main is not pushed.
 
 ## Direction
 
@@ -79,8 +79,8 @@ P2/P6-P9/T2 deferred or cancelled with their triggers). How we work: `docs/DEVEL
 | R1 Tests in proportion | Built 97bdd77; measured on the two FigmaPot goals (private `.local/diag/r1/`): correctness held (every held-out check, the follow-up included; every goal at attempt 1), test lines not lower (358 vs 324): the architect names a risk and asks for tests in every brief. Waiting for the owner's call on volume (default: keep) |
 | R2 A red base, a first check (F14) | Built: R2a 2a2144d + 2876d12 (after a review of the change as built), R2b cb665ee; default lane green |
 | R3 Small fixes, R4 The report | Done: R3 11b497f, b8a36d9 (pnpm store cleanup, profile wording, dim 'awaiting merge', ARCHITECTURE); R4 dc5cdaf (facts of each merged milestone in the plan view and the status) |
-| Release 0.12 | Candidate 574bfb8 qualified (private evidence under `.local/diag/`): full lane 2717/2718 on 9f05934, the red test fixed in 574bfb8; installed from the export in a clean HOME; live runs L1 (two milestones, reopen, /new, stop and try again), L2 (red base fixed, merge card, then automatic), L3 (no checks, settings card, then automatic); all eight items of contract section 9. Waiting for the owner's go to publish |
-| 0.13 | The plan check as the full Goldfish protocol (readiness before the yes), from the role outcomes of 0.12 (roadmap; backlog) |
+| Release 0.12 | Published 2026-11-06 (Production above) |
+| 0.13 | Built (718d65b, aeb3864 after the review as built); candidate 8938619 qualified (private evidence under `.local/diag/`): full lane 2725/2726 (a load-race flake, green alone); four live runs on the installed product, including the planted brief defect the plan check caught (`readiness:` W1, F1) and a red base the plan fixed first; all eight items of contract section 9. Waiting for the owner's go to publish |
 
 Evidence folders (private): `.local/diag/`, `.local/z11/`, `.local/w0/`, `.local/a0/`, `.local/goldfish/`.
 

@@ -55,14 +55,19 @@ def _universe(real):
 
 
 def uncommitted_paths(project):
-    """The paths the working tree has that HEAD does not (modified, staged, untracked), in `git status` order."""
+    """The paths the working tree has that HEAD does not (modified, staged, untracked), in `git status` order. An
+    untracked path under a disposable cache (`delivery.CLEANUP_CACHES`, e.g. `__pycache__`) is no owner's work and is
+    left out (0.13 G6: "Files not committed" counted them)."""
+    from .delivery import CLEANUP_CACHES  # delivery imports runs, which imports this module
     out = git(project, "status", "--porcelain=v1", "-z", "--untracked-files=all").split(b"\0")
     paths, index = [], 0
     while index < len(out):
         entry = out[index]
         index += 1
         if len(entry) > 3:
-            paths.append(os.fsdecode(entry[3:]))
+            path = os.fsdecode(entry[3:])
+            if not (entry[:2] == b"??" and not CLEANUP_CACHES.isdisjoint(path.split("/"))):
+                paths.append(path)
             if entry[:1] in b"RC":
                 index += 1  # a rename or copy carries its origin as the next field
     return paths

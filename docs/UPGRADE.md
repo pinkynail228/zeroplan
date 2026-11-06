@@ -10,6 +10,15 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
 
 ## For users: update zplan
 
+### What changes in 0.13
+
+- The plan check judges, before your yes, whether every task can be carried out as written: a brief line a worker
+  cannot meet (a commit, a deployment), a criterion that needs an edit outside its files, contradicting criteria, and
+  a red base the plan does not fix. Its findings go back to the architect, who revises the plan before the card.
+- The project's checks run on the base before the plan check, so the plan check sees a red base.
+- At the end of a plan, the plan view shows the decisions the architect recorded in the project STATE file.
+- Untracked caches (`__pycache__` and the like) no longer count as files not committed.
+
 ### What changes in 0.12
 
 - Workers prove each criterion by running it and keep a durable test only when the brief, the project's root

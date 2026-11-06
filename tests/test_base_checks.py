@@ -168,6 +168,43 @@ class RedBaseSettledWhilePlanning(tpr.ProfileTest):
             self.start()
         self.assertEqual(refused.exception.family, "milestone.preflight")
 
+    def test_the_plan_job_settles_the_base_before_the_plan_check_is_submitted(self):
+        """0.13 G2: the first slice of a revision runs the base checks before anything is prepared or submitted."""
+        self.accept_file(flagged(("unit", self.root / "unit.flag")))
+        lines = []
+        from test_terminal_planner import ROLES, fixture_proposal
+        with self.app() as app:
+            app.authority.begin("Requested feature", ROLES, "fixture", draft=fixture_proposal(), review="goldfish")
+            self.assertEqual(app.planning.watch(lines.append).step(), "done")
+            self.assertEqual(app.authority.current["base_checks"]["failed"], ["unit"])
+        self.assertEqual(lines[0], "Running the project checks on the base…")
+
+    def test_a_later_revision_reuses_only_a_passed_base_and_names_the_current_commit(self):
+        """0.13: a chain does not rerun a passed base on the same tree and checks; a failed one is run again."""
+        marker = self.root / "ran.txt"
+        self.accept_file(profile(sys.executable, "-c", "open(%r, 'a').write('x')" % str(marker)))
+        from test_terminal_planner import ROLES, fixture_proposal
+        with self.app() as app:
+            app.authority.begin("Requested feature", ROLES, "fixture", draft=fixture_proposal(), review="goldfish")
+            app.planning.watch(lambda line: None).step()
+            self.git("commit", "-q", "--allow-empty", "-m", "the same tree, a new commit")
+            app.authority.begin("Requested feature", ROLES, "fixture", draft=fixture_proposal(), review="goldfish")
+            app.planning.settle_base()
+            self.assertEqual(app.authority.current["base_checks"]["outcome"], "passed")
+            self.assertEqual(app.authority.current["base_checks"]["commit"], self.head())
+        self.assertEqual(marker.read_text(), "x")  # run once for both revisions
+
+    def test_the_recorded_decisions_show_next_to_the_report_with_a_cut(self):
+        """0.13 G4: STATE's Decisions section, labelled as STATE's, at most eight lines, then "… N more"."""
+        from terminal_planner import project_state
+        decisions = "\n".join("- decision %d" % n for n in range(1, 11))
+        project_state.write(self.project, "## Now\nx\n## Next\ny\n## Open\n\n## Decisions\n" + decisions + "\n")
+        with self.app() as app:
+            lines = app.delivery.decision_lines()
+        self.assertEqual(lines[0], "Decisions in STATE:")
+        self.assertEqual(lines[1:9], ["  - decision %d" % n for n in range(1, 9)])
+        self.assertEqual(lines[9], "  … 2 more")
+
     def test_the_architect_never_approves_a_red_base_revision_alone(self):
         from terminal_planner.tui.controller import architect_may_approve
         owner = {"version": 1, "approval": "x", "frozen": {"review": "goldfish"}, "by": "owner"}

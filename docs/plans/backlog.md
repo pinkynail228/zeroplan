@@ -6,27 +6,35 @@ trigger fires or the owner asks for it. Plain bullets; each names its source and
 
 ## Planned for 0.13
 
-- **The plan check as the full Goldfish protocol.** Add an implementation readiness step before the owner's yes, so
-  that every brief is checked as the worker will carry it out. `preflight` stays at the start of each run.
-  - Source: the Elephant-Goldfish Model (roadmap Terms); live run 1 lost an attempt to a brief line that no worker
-    could satisfy.
-  - Decided from the role outcomes counted at 0.12.
-- **More than one antagonistic critic in the plan check.** The model uses several skeptics; zplan uses one critic,
-  once. Decided together with the readiness step, from the same role outcomes.
-- **A Goldfish at the end that compares the merged result with the owner's own words.** Did we deliver what he
-  asked? Source: the owner's question about where Goldfish pay off (2026-11-05). Same decision.
+- **The plan check as the full Goldfish protocol:** built as the critic's readiness rules (F1, F2, F4, W1, W2) with
+  the base result in its input (`docs/designs/2026-11-06-0-13-plan-right-before-the-yes.md`).
+- **The role outcomes of the 0.12 qualification** (14 Zeroshot runs) were the input:
+  - the plan critic accepted 6 of 6;
+  - `preflight` passed 8 of 8;
+  - the reviews each rejected 1 of 8 (a red base the worker then fixed);
+  - the final check accepted 7 of 7.
 
-- **The role outcomes of the 0.12 qualification** (14 Zeroshot runs): the plan critic accepted 6 of 6, `preflight`
-  passed 8 of 8, the reviews each rejected 1 of 8 (a red base the worker then fixed), and the final check accepted 7 of
-  7. This is the input to the 0.13 decision.
-- **The architect plans before the base checks run.** On a red base its plan did not plan the fix; the repair loop
-  fixed it. Candidate: the base result reaches the architect before it writes the plan, or an automatic revision.
+## Decided at 0.13, deferred with triggers
+
+- **A separate readiness node** in the plan check.
+  - Trigger: a live run where `preflight` or the final check rejects an F or W class defect on a plan the critic
+    accepted.
+- **More critics** in the plan check.
+  - Trigger: a merged change the owner rejects for its design or scope. In 0.12 the critic accepted 6 of 6.
+- **A Goldfish at the end that compares the merged result with the owner's words.**
+  - Trigger: a result that differs from what the owner asked. It overlaps the final check and the reader at the
+    start.
+- **A cuttable settle job.** Quit now waits for the base checks in a revision's first slice.
+  - Trigger: a project whose checks make that wait felt.
+- **The base result reaching the architect before it writes a plan.** The critic's W2 rejection and one revision
+  reach the same plan.
+  - Trigger: red-base chains that spend their budget.
 
 ## Seen in the 0.12 qualification, not fixed
 
 - "Files not committed: N" counts untracked caches (`__pycache__`).
 - Closing reports still lack the decisions and the assumptions, although the method asks for them.
-- `/new` prints its notice twice.
+- `/new` prints its notice twice (two tests pin the chat's note; a cosmetic change).
 
 ## The product: deferred, with what brings each back
 
@@ -80,6 +88,8 @@ trigger fires or the owner asks for it. Plain bullets; each names its source and
 - **A change to the runner cannot be gated by its own red-on-base check** when that check needs the outer context.
 - **Unattended nights need three things:** `notify_cmd`, the launchd watchdog, and a way to resume the architect.
 - **Known flake:** driver_qual `f_outer_exhausted` fails under heavy load. Run the driver qualification alone.
+- **Known flake:** `test_checks.HardKillTests` failed once on a temp-dir cleanup race while four live runs and the full
+  lane ran together (0.13 qualification); it passes alone.
 - **The T2 classification and tools.** These are `devtools/defect_replay.py` and `devtools/affected.py`.
   - Trigger: the default lane passes 10 minutes, or the owner asks for a test cut.
 

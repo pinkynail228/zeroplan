@@ -17,7 +17,7 @@ import time
 from typing import Optional, Tuple
 import uuid
 
-from .. import autonomy, bridge, catalog, engine, feed, live, planning as planning_module, process, setup, user_commit
+from .. import autonomy, bridge, catalog, engine, feed, live, planning as planning_module, process, project_state, setup, user_commit
 from ..architect import NO_PLAN, ArchitectStore
 from ..application import ApplicationService, request_snapshot
 from ..authority import Authority, Blocked, FormatRefused, atomic_state, chain_approved, chain_budget, red_base
@@ -997,7 +997,10 @@ class Controller:
                          for row in home.rows)
         else:
             revision, rows = None, ()
-        self._rows = (revision, rows, plan_fields(app.delivery.plan(), app.authority.state["revisions"] if app.authority.state else None), readiness_fields(app), profile_fields(status))
+        plan = plan_fields(app.delivery.plan(), app.authority.state["revisions"] if app.authority.state else None)
+        if rows and isinstance(plan, dict) and all(row["state"] == "integrated" for row in rows):  # 0.13 G4: plan end
+            plan["decisions"] = [line.strip() for line in app.delivery.decision_lines()[1:]]
+        self._rows = (revision, rows, plan, readiness_fields(app), profile_fields(status))
         return None
 
     def _bridge_action(self, rid, tool, args, turn=None, complete=None, application=None, admitted_binding=None):

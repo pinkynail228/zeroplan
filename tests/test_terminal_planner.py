@@ -1723,7 +1723,7 @@ class TerminalTests(ProjectTest):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--version"], cwd=ROOT,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "zplan 0.12.0")
+        self.assertEqual(result.stdout.strip(), "zplan 0.13.0")
 
     def test_fixture_cli_journey(self):
         result = subprocess.run([sys.executable, "-m", "terminal_planner", "--project", str(self.project),

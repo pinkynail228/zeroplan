@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 from typing import Optional, Tuple
 
-from . import catalog, live, merge_critic, process, task_gate
+from . import catalog, live, merge_critic, process, project_state, task_gate
 from .engine import (NativeEngine, ObservationDetached, SliceEnded, gate_owner_rules, gate_prepared,
                      merge_critic_documents, reset_value, task_gate_documents)
 from .authority import Blocked, baseline, canonical, decode, digest, git, red_base, require
@@ -464,6 +464,19 @@ class Delivery:
         integrated result, or the carried attempt whose result is still to deliver (`runs.current_record`)."""
         return self.runs.current_record(milestone_id)
 
+    DECISIONS_SHOWN = 8
+
+    def decision_lines(self):
+        """0.13 G4: at plan end, the decisions the architect recorded in the project STATE file, next to the merge
+        facts: STATE's current section, labelled as such, at most `DECISIONS_SHOWN` lines, then "… N more"."""
+        found = project_state.section(self.authority.project, "Decisions")
+        if not found:
+            return []
+        shown = ["  " + line for line in found[:self.DECISIONS_SHOWN]]
+        if len(found) > self.DECISIONS_SHOWN:
+            shown.append("  … %d more" % (len(found) - self.DECISIONS_SHOWN))
+        return ["Decisions in STATE:"] + shown
+
     def merged_facts(self, r):
         """R4: what one integrated attempt merged, derived by code from its record: the integration commit, the names
         of the project checks that passed on its exact candidate (none for an unverified merge), and the code and test
@@ -650,6 +663,8 @@ class Delivery:
         if self.tail_item(items) is not None:
             ids.append("home.tail")
         if found is None:
+            if items and all(i["state"] == "integrated" for i in items):  # plan end, as the status reads it
+                lines += self.decision_lines()
             lines.append("Next: all stages are merged; [r] revise — a new goal or a revision")
         else:
             lines.append("Next: " + self.next_step(found))

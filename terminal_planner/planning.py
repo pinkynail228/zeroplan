@@ -183,6 +183,14 @@ class PlanView:
     findings: str = ""  # the plan check's findings of a rejected (`review_exhausted`) proposal, one line
 
 
+def canonical_tree(project):
+    """The tree of the project's HEAD (the base the checks would run on), or None when Git cannot tell."""
+    try:
+        return runs.git(project, "rev-parse", "HEAD^{tree}").decode().strip()
+    except Blocked:
+        return None
+
+
 class Watch:
     """One observation of the planner in bounded slices: new phases and a rare heartbeat go to `emit`; what the
     owner needs to see that the run is alive (heartbeat, last new record, journal) is stored with the revision."""
@@ -237,6 +245,15 @@ class Watch:
         cursor = current["observation_cursor"]
         # The attempt starts when this slice submits it; a run that already exists has no known start.
         begun = runs.now() if current["run_id"] is None and "live" not in current else None
+        # 0.13 G2: the base result reaches the plan check: settled before the revision's documents are prepared
+        # (`Engine.prepare` freezes them once), so the critic judges the plan with the base in `input.task.base`.
+        if (current["run_id"] is None and not current.get("native_prepared")
+                and current.get("frozen", {}).get("review") == "goldfish" and self.planning.settle_due()):
+            self.progress("Running the project checks on the base…")
+            try:
+                self.planning.settle_base()
+            except (Blocked, OSError, ValueError):
+                pass  # unsettled: settled again after the verdict or at approval (`Planning.settled`)
         # The owner's [g] on an unconfirmed submission (`Planning.resubmission`) is consumed by this one slice.
         again = {"resubmit": True} if self.planning.resubmit == current["version"] else {}
         self.planning.resubmit = None
@@ -307,7 +324,7 @@ class Planning:
     def settle_due(self):
         """R2a: whether the current revision has a verdict, lists checks to run and has no base result yet."""
         current = self.authority.current if self.authority.state and self.authority.state["revisions"] else None
-        return (current is not None and current["status"] in ("proposed", "review_exhausted")
+        return (current is not None and current["status"] in ("planning", "proposed", "review_exhausted")
                 and "base_checks" not in current and bool(self.base_profile_checks()))
 
     def settle_base(self):
@@ -318,6 +335,14 @@ class Planning:
             return
         a = self.authority
         current, listed = a.current, self.base_profile_checks()
+        tree = canonical_tree(a.project)
+        earlier = next((r["base_checks"] for r in reversed(a.state["revisions"][:-1]) if "base_checks" in r), None)
+        if (earlier is not None and earlier["outcome"] == "passed" and earlier["tree"] == tree
+                and earlier["checks_digest"] == digest(listed)):  # a passed base is not run again, as `Runs.base_checks`
+            head = runs.git(a.project, "rev-parse", "HEAD").decode().strip()
+            current["base_checks"] = dict(earlier, commit=head, failed=[])
+            a.save()
+            return
         evidence = self.runs.base_checks(listed)
         failed = self.runs.failing(evidence)  # ran and failed: a milestone can fix them
         passed = evidence.get("outcome") == "passed"

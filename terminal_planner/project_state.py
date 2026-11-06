@@ -44,6 +44,23 @@ def read(project):
         return ""
 
 
+def section(project, name):
+    """The non-empty lines of one `## ` section of the STATE file ([] without a file, an invalid file or the
+    section), as `validate` reads the headings (0.13 G4: the decisions next to the plan's report)."""
+    try:
+        text = read(project)
+        validate(text)
+    except (Blocked, OSError, UnicodeError):
+        return []
+    lines, inside = [], False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            inside = line[3:].strip() == name
+        elif inside and line.strip():
+            lines.append(live.scrub(line.rstrip()))
+    return lines
+
+
 def ensure_excluded(project, lines):
     """Ensure each of `lines` in the repository's info/exclude (created if missing, existing lines kept, added once)."""
     try:

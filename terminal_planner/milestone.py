@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 
 from .authority import MAX_MILESTONE_TASKS, TASK_ROUNDS_MAX, Blocked, brief_problem, canonical, decode, validate_proposal
-from .engine import memory_off, record, state_binding
+from .engine import BRIEF_RULES, memory_off, record, state_binding
 
 
 MAX_INITIAL_TASKS = MAX_MILESTONE_TASKS
@@ -487,12 +487,8 @@ def milestone_graph(tool=TOOL):
     preflight = verifier("preflight", read_only + (
         "Preflight before any work: judge the brief of every task with status open in the manifest (brief in the task "
         "and in input.baseline) and signal preflight=conflict only for an evidenced defect that needs a brief change; "
-        "otherwise preflight=ready. A conflict is exactly one of: (F1) a criterion needs an edit outside the task's "
-        "write_set, or evidence that is unavailable (reading a file outside the write_set is fine); (F2) two criteria, "
-        "or a criterion and a non_goal, contradict each other, or an example breaks its own criterion; (F4) a criterion "
-        "over an open domain has no case list. A task without a brief, a style remark, or a missing tool or command is "
-        "never a conflict. diagnostic.message on conflict: the task id, the criterion and the incompatible "
-        "requirements; on ready one line."),
+        "otherwise preflight=ready. A conflict is exactly one of: " + BRIEF_RULES + " diagnostic.message on conflict: "
+        "the task id, the criterion and the incompatible requirements; on ready one line."),
         context, "preflight", ["ready", "conflict"], writes=[])
     select_init = verifier("select_init", read_only + (
         "Run the validation command. Signal queue=invalid when it fails or cannot run (missing checker, unreadable or "

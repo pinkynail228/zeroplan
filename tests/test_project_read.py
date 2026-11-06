@@ -53,6 +53,15 @@ class ReadTest(unittest.TestCase):
         return caught.exception.family
 
 
+class UncommittedTests(ReadTest):
+    def test_untracked_caches_are_no_uncommitted_work(self):
+        """0.13 G6: an untracked `__pycache__` file is not the owner's uncommitted work; other files are."""
+        self.commit()
+        self.write("pkg/__pycache__/m.cpython-313.pyc", b"cache", binary=True)
+        self.write("notes.txt", "mine\n")
+        self.assertEqual(project_read.uncommitted_paths(self.p), ["notes.txt"])
+
+
 class BoundaryTests(ReadTest):
     def test_c1_roots_paths_and_symlinks_outside_the_project_are_refused(self):
         outside = self.base / "outside.txt"

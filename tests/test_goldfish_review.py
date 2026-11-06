@@ -145,6 +145,37 @@ class NativeDocumentTests(tpg.GateBase):
             self.assertEqual(authority.current["status"], "proposed")
             self.assertEqual(authority.current["evidence"]["paraphrase"], PARAPHRASE)
 
+    def prepared_task(self, settled):
+        plan = fixture_proposal()
+        terminal = self.projection({"phase": "finished", "terminalResult": {
+            "status": "succeeded", "output": goldfish_output(proposal=plan)}})
+        native, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, terminal])
+        with self.authority() as authority:
+            authority.begin("Requested feature", ROLES, "native", draft=plan, review="goldfish")
+            if settled:
+                head = subprocess.check_output(["git", "-C", str(self.project), "rev-parse", "HEAD"], text=True).strip()
+                tree = subprocess.check_output(["git", "-C", str(self.project), "rev-parse", "HEAD^{tree}"], text=True).strip()
+                authority.current["base_checks"] = {"commit": head, "tree": tree, "checks_digest": "d" * 64,
+                                                    "outcome": "failed", "failed": ["unit"], "refused": "",
+                                                    "tail": "AssertionError: 1 != 2"}
+                authority.save()
+            native.proposal(authority, lambda _: None)
+            documents = self.documents(calls[1][1])
+        critic = next(n for n in nodes(documents["graph"]["root"]) if n["name"] == "critic")
+        return auth.decode(documents["input"]["task"]), critic["instructions"]
+
+    def test_a_settled_revision_gives_the_critic_the_base_result_and_the_readiness_rules(self):
+        """0.13 G2: a revision settled before its documents are prepared gives the critic `input.task.base` for its
+        W2 rule, beside the readiness rules F1, F2, F4, W1 and W2."""
+        task, instructions = self.prepared_task(settled=True)
+        self.assertEqual(task["base"], {"outcome": "failed", "failed": ["unit"], "refused": "",
+                                        "tail": "AssertionError: 1 != 2"})
+        for rule in ("readiness:", "(W1)", "never commits, pushes, rewrites history, deploys", "(W2) the task's base field"):
+            self.assertIn(rule, instructions)
+
+    def test_a_revision_without_base_checks_prepares_no_base(self):
+        task, _ = self.prepared_task(settled=False)
+        self.assertNotIn("base", task)
 
 if __name__ == "__main__":
     unittest.main()
