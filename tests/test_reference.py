@@ -16,12 +16,10 @@ import unittest
 from unittest.mock import patch
 
 from terminal_planner import authority, catalog, cli, commands, runs
+from terminal_planner import delivery as delivery_module, planning as planning_module
 from terminal_planner.authority import Blocked
-from terminal_planner.cli import Terminal, session
-from terminal_planner.runs import FIXTURE_OUTCOMES, FixtureDriver
-from test_setup import Steps
+from terminal_planner.delivery import refusal
 import test_tui
-from test_ux import GOAL, Counting, UxTest
 from tui_support import HAVE_TEXTUAL, screen_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,9 +161,9 @@ class HelpTests(unittest.TestCase):
                 for flag in commands.flags_of(item.name):
                     self.assertIn(commands.flag_text(flag), text)
 
-    def test_default_start_help_covers_plain_project_and_fixture(self):
+    def test_default_start_help_covers_project_and_fixture(self):
         text = run_zplan(self.home, "help", "start").stdout
-        for flag in ("--plain", "--project", "--fixture"):
+        for flag in ("--project", "--fixture"):
             self.assertIn(flag, text)
             self.assertTrue(any(flag in example for example in commands.command(commands.START).examples), flag)
 
@@ -201,66 +199,6 @@ def menu_keys(line):
     return set(re.findall(r"\[([^\]]+)\]", line))
 
 
-class PlainHelpTests(UxTest):
-    def blocks(self, output):
-        """[(title, keys of the menu shown just before `?`, keys listed by the help)] for every `?` answer."""
-        lines, found = output.splitlines(), []
-        for index, line in enumerate(lines):
-            if "Keys · " not in line:  # the prompt has no newline, so the help starts on its line
-                continue
-            line = line[line.index("Keys · "):]
-            menu = next(l for l in reversed(lines[:index]) if re.match(r"\[\S+\] ", l))
-            listed = set()
-            for entry in lines[index + 1:]:
-                if not entry.startswith("  ["):
-                    break
-                listed |= set(re.match(r"  \[([^\]]+)\]", entry).group(1).split(" / "))
-            found.append((line[len("Keys · "):], menu_keys(menu), listed))
-        return found
-
-    def test_question_mark_lists_the_keys_of_the_screen_just_shown(self):
-        output, _ = self.fixture("?", "p", GOAL, "", "?", "q", "q")
-        blocks = self.blocks(output)
-        self.assertEqual([title for title, _, _ in blocks],
-                         [catalog.SCREENS["home"].title, catalog.SCREENS["goal"].title])
-        for title, shown, listed in blocks:
-            with self.subTest(title):
-                self.assertTrue(shown)
-                self.assertEqual(listed, shown)
-
-    def test_every_end_screen_lists_exactly_the_keys_it_offers_and_each_key_is_wired(self):
-        seen = {}
-        original = cli.App.choose
-
-        def choose(app, menu, keys):
-            ids = getattr(menu, "ids", ())
-            if ids:
-                letters = {catalog.action(i).key for i in ids if len(catalog.action(i).key) == 1}
-                seen.setdefault(catalog.action(ids[0]).screen, []).append((letters, set(keys)))
-            return original(app, menu, keys)
-
-        shutil_state = self.state
-        with patch.object(cli.App, "choose", choose):
-            for outcome in FIXTURE_OUTCOMES:
-                with self.subTest(outcome):
-                    output, _ = self.fixture("p", GOAL, "", "g", "a", "g", "y", "?", "o", "?", "q", "q", outcome=outcome)
-                    blocks = self.blocks(output)
-                    self.assertTrue(blocks, output[-600:])
-                    title, shown, listed = blocks[-1]
-                    self.assertEqual(listed, shown, title)
-                    shutil.rmtree(shutil_state, ignore_errors=True)
-        self.assertTrue({"home", "plan", "awaiting_merge", "needs_owner", "blocked", "failed_recoverable",
-                         "failed"} <= set(seen), sorted(seen))
-        for screen, entries in seen.items():
-            for letters, accepted in entries:
-                with self.subTest(screen):
-                    # The menu offers a key exactly when a handler answers it (q is always "back").
-                    self.assertEqual(letters - {"q"}, accepted - {"q"})
-
-
-# A1: `/help` in the full-screen shell ---------------------------------------------------------------------------
-
-@unittest.skipUnless(HAVE_TEXTUAL, "Textual unavailable: ZPLAN_TEST_WHEELHOUSE with the textual 8.2.8 wheels is required")
 class TuiHelpTests(test_tui.ShellTest):
     async def test_help_lists_the_commands_of_the_main_screen(self):
         """K1a: the main screen has no `?`/F1/Ctrl+S — `/help` opens the key help of `tui_input` and `tui_panel`, whose
@@ -299,10 +237,10 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(set(catalog.OUTCOME), set(runs.OUTCOMES))
         self.assertEqual(set(catalog.DELIVERY), set(runs.DELIVERIES))
         self.assertEqual(set(catalog.MILESTONE_STATE), set(runs.MILESTONE_STATES))
-        self.assertEqual(set(cli.RUN_STATUS), set(runs.STATUSES))
-        self.assertEqual(set(cli.OUTCOME) - {None}, set(runs.OUTCOMES))
-        self.assertEqual(set(cli.DELIVERY), set(runs.DELIVERIES))
-        self.assertEqual(set(cli.STATE_TEXT) & set(runs.MILESTONE_STATES), set(cli.STATE_TEXT))
+        self.assertEqual(set(delivery_module.RUN_STATUS), set(runs.STATUSES))
+        self.assertEqual(set(delivery_module.OUTCOME) - {None}, set(runs.OUTCOMES))
+        self.assertEqual(set(delivery_module.DELIVERY), set(runs.DELIVERIES))
+        self.assertEqual(set(delivery_module.STATE_TEXT) & set(runs.MILESTONE_STATES), set(delivery_module.STATE_TEXT))
 
     def test_run_state_reaches_exactly_the_milestone_states_after_an_attempt(self):
         reached = set()
@@ -320,15 +258,15 @@ class VocabularyTests(unittest.TestCase):
     def test_planner_causes_are_catalog_families(self):
         from terminal_planner import engine
         causes = {name for name, _ in engine.CAUSES}
-        self.assertEqual(set(cli.PLANNER_FAMILY) - {None}, causes)
-        for family in cli.PLANNER_FAMILY.values():
+        self.assertEqual(set(planning_module.PLANNER_FAMILY) - {None}, causes)
+        for family in planning_module.PLANNER_FAMILY.values():
             self.assertIn(family, catalog.ERRORS)
-        for state, family in cli.RUN_FAMILY.items():
+        for state, family in delivery_module.RUN_FAMILY.items():
             self.assertIn(state, runs.MILESTONE_STATES)
             self.assertIn(family, catalog.ERRORS)
 
     def test_run_states_that_ask_the_owner_have_a_screen_and_every_end_screen_has_actions(self):
-        for state in cli.ATTENTION:
+        for state in delivery_module.ATTENTION:
             self.assertIn(state, catalog.SCREENS)
             self.assertIn(state, runs.MILESTONE_STATES)
             self.assertTrue([a for a in catalog.ACTIONS.values() if a.screen == state], state)
@@ -622,39 +560,22 @@ class ReferenceDocumentTests(unittest.TestCase):
 
 # A4: the fallback ------------------------------------------------------------------------------------------------
 
-class UnknownErrorJourneyTests(UxTest):
-    def journey(self, install, *steps):
-        # A fixture session needs no tools (readiness per action): the failing item is one it still asks for.
-        item = test_tui.check("git", ok=False, line="zplan tools are not installed", key="u")
-        output = io.StringIO()
-        sent = []
-        session(Terminal(Steps(*steps), output), self.project, self.state, lambda *_: Counting(sent), fixture_id="test",
-                driver_factory=lambda _: FixtureDriver(self.root / "fixture-runs", delay=0),
-                worktrees=self.root / "worktrees", readiness=lambda: [dict(item)], install=install)
-        return output.getvalue()
+class UnknownErrorTests(unittest.TestCase):
+    """A failure's line names its catalog code; one without a family, or with a family outside the catalog, is
+    unknown_error."""
 
     def test_a_failure_without_a_family_shows_unknown_error(self):
-        def install():
-            raise Blocked("Something went wrong in a place nobody classified.")
-        output = self.journey(install, "u", "q")
-        self.assertIn("Something went wrong", output)
-        self.assertIn("[code: unknown_error]", output)
+        line = refusal(Blocked("Something went wrong in a place nobody classified."))
+        self.assertIn("Something went wrong", line)
+        self.assertIn("[code: unknown_error]", line)
 
     def test_a_family_outside_the_catalog_is_also_unknown(self):
-        def install():
-            raise Blocked("Made-up code.", family="made.up")
-        self.assertIn("[code: unknown_error]", self.journey(install, "u", "q"))
+        self.assertIn("[code: unknown_error]", refusal(Blocked("Made-up code.", family="made.up")))
 
-    def test_a_mapped_failure_shows_its_own_code_and_a_bug_shows_unknown(self):
-        def busy():
-            raise Blocked("Installation is already running.", family="setup.busy")
-        output = self.journey(busy, "u", "q")
-        self.assertIn("[code: setup.busy]", output)
-        self.assertNotIn("unknown_error", output)
-
-        def broken():
-            raise OSError("boom")
-        self.assertIn("[code: unknown_error]", self.journey(broken, "u", "q"))
+    def test_a_mapped_failure_shows_its_own_code(self):
+        line = refusal(Blocked("Installation is already running.", family="setup.busy"))
+        self.assertIn("[code: setup.busy]", line)
+        self.assertNotIn("unknown_error", line)
 
 
 if __name__ == "__main__":

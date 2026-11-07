@@ -147,6 +147,9 @@ def renewed_line(old, new):
 
 # Results -------------------------------------------------------------------------------------------------------
 
+OLD_PLANNER_REFUSED = "This plan was made by the old planner: plan again in the chat."
+
+
 @dataclass(frozen=True)
 class Gate:
     """The readiness check right before a model run: `items` are the setup.readiness() items as returned."""
@@ -454,20 +457,23 @@ class Planning:
             roles = status.resolved.roles()
         return a.begin(goal, roles, "fixture" if a.fixture_id else "native")
 
-    def renew(self, draft=None):
-        """A new unsent revision with the same goal and request; the old one stays as it was. With a profile the
-        roles are the accepted profile's as they are now, else the old revision's. An edit revision keeps its draft;
-        `draft` (from `edit`) starts a new edit, which has no request text."""
+    def architects_only(self):
+        """0.15, one planning path: the owner's send, renew and restart act only on the architect's (Goldfish) plans;
+        a revision the old planner made is planned again in the chat."""
+        current = self.plan()
+        if current is not None and current.get("frozen", {}).get("review") != "goldfish":
+            raise Blocked(OLD_PLANNER_REFUSED, family="action.refused")
+
+    def renew(self):
+        """A new unsent revision of the architect's current plan with the same goal and request; the old one stays as
+        it was. With a profile the roles are the accepted profile's as they are now, else the old revision's."""
+        self.architects_only()
         status = self.guard()
         current = self.authority.current
         roles = status.resolved.roles() if status is not None else current["roles"]
-        edit = draft if draft is not None else current.get("draft")
-        if draft is None and current.get("frozen", {}).get("review") == "goldfish":
-            return self.authority.begin(current["goal"], roles, current["engine"], feedback=current["feedback"],
-                                        draft=edit, review="goldfish", origin="renew", by="owner",
-                                        response=current.get("response", ""))  # an S1-era goldfish revision has none
-        return self.authority.begin(current["goal"], roles, current["engine"],
-                                    feedback="" if draft is not None else current["feedback"], draft=edit)
+        return self.authority.begin(current["goal"], roles, current["engine"], feedback=current["feedback"],
+                                    draft=current.get("draft"), review="goldfish", origin="renew", by="owner",
+                                    response=current.get("response", ""))  # an S1-era goldfish revision has none
 
     def submission(self, ready=None):
         """The only way to the planner: readiness right before it, never for a stale or already sent revision."""
@@ -490,7 +496,8 @@ class Planning:
         resent."""
         current = self.plan()
         if current is not None and current["status"] == "submission_unknown" and current["run_id"] is None:
-            return self.resubmission(ready)
+            return self.resubmission(ready)  # the same frozen documents again, whichever planner made them
+        self.architects_only()
         if not self.stale():
             return self.submission(ready)
         self.guard()
@@ -521,6 +528,7 @@ class Planning:
     def restart(self, ready=None, announce=None):
         """After a failed or owner-stopped planning: readiness first, then a new revision of the same goal goes to
         the planner. The stopped run keeps its receipt and is never resubmitted."""
+        self.architects_only()
         self.guard()
         gate = self.gate(ready, "plan")
         if not gate.ok:
@@ -528,31 +536,6 @@ class Planning:
         revision = self.renew()
         if announce is not None:
             announce(revision)
-        result = self.submission(ready)
-        return Submission(result.kind, result.items, renewed=True)
-
-    def revise(self, feedback, ready=None):
-        """A written revision request (refused while a milestone writer is active), then the planner."""
-        status = self.guard()
-        self.runs.revise_plan(feedback, status.resolved.roles() if status is not None else None)
-        result = self.submission(ready)
-        return Submission(result.kind, result.items, renewed=True)
-
-    def edit(self, version, plan, ready=None):
-        """An owner edit of the current proposal as a new revision (`plan` is the full edited proposal): the plan run
-        presents it unchanged and the critic judges it, so the plan gate checks what the owner changed. Refused,
-        with nothing written, unless `version` is the current revision with a proposal and `plan` is a valid,
-        in-bounds proposal that differs from it."""
-        current = self.authority.current
-        if current["version"] != version or current["proposal"] is None:
-            raise Blocked("Only the current revision with a proposed plan can be edited.", family="action.refused")
-        try:
-            check_bounds(validate_proposal(plan))
-        except Blocked as error:
-            raise Blocked(str(error), family="action.refused") from error
-        if canonical(plan) == canonical(current["proposal"]):
-            raise Blocked("The edit does not change the plan.", family="action.refused")
-        self.renew(draft=plan)
         result = self.submission(ready)
         return Submission(result.kind, result.items, renewed=True)
 

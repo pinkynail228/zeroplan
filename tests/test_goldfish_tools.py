@@ -149,7 +149,7 @@ class RevisionsLeftTests(ToolBase):
 
     def test_an_older_planner_revision_has_no_count(self):
         with tp.Authority(self.state, self.project) as authority:
-            self.begin(authority)
+            self.begin_old_planner(authority)
             FixtureEngine("exhausted").proposal(authority, lambda _: None)
         self.controller()
         plan = self.plan_until(lambda plan: plan["version"] == 1)

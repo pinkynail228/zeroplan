@@ -28,7 +28,7 @@ from test_live import Clock, START
 from test_parallel_runs import parallel_plan
 from test_terminal_planner import Authority, ProjectTest, ROLES
 from test_tui import Readiness, check
-from test_tui_milestones import START_KEYS, Gated, MilestoneShell
+from test_tui_milestones import Gated, MilestoneShell
 from test_tui_planning import DIRTY, GOAL, PlanningShell
 from tui_support import HAVE_TEXTUAL, screen_lines, screen_text
 
@@ -377,7 +377,7 @@ class PanelTests(LiveShell):
         entries = self.stored()["runs"][0]["live"]["journal"]
         self.assertLessEqual(len(entries), live.JOURNAL_LIMIT)
 
-    async def test_la3_the_tail_is_read_on_the_worker_only_when_asked_in_the_tui_and_the_plain_ui(self):
+    async def test_the_tail_is_read_on_the_worker_only_when_asked(self):
         self.approve(running=False)
         async with self.shell(size=(120, 40), follow=True) as pilot:
             await self.start_held(pilot)
@@ -394,11 +394,6 @@ class PanelTests(LiveShell):
             self.assertIsNot(self.driver.log_threads[0], threading.main_thread())  # the controller's worker
             self.assertEqual(self.driver.log_threads[0].name, self.app.controller._thread.name)
             await pilot.press("escape")
-        run_id = self.driver.sent[0]
-        self.driver.log_threads.clear()
-        output = self.plain("e\nq\n")  # the line UI: the same tail, on request
-        self.assertEqual(len(self.driver.log_threads), 1)
-        self.assertIn("fixture log %s:" % run_id, output)
 
 
 class PendingTests(LiveShell):
@@ -465,13 +460,11 @@ class PendingTests(LiveShell):
 
 
 class NextStepTests(LiveShell):
-    async def check_outcome(self, outcome, key, command):
+    async def check_outcome(self, outcome, command):
         self.driver.outcomes = (outcome,)
         self.driver.release()  # the run goes straight through
         self.approve(running=False)
-        output = self.plain(START_KEYS + "q\nq\n")
-        plain = [l for l in output.splitlines() if l.startswith("Next:")]
-        self.assertTrue(plain, output)
+        self.finished("M1")
         async with self.shell(size=(120, 40)) as pilot:
             await self.loaded(pilot)
             lines = [l for l in self.main().plan_lines if l.startswith("Next:")]
@@ -479,7 +472,6 @@ class NextStepTests(LiveShell):
             self.assertEqual(len(lines), 1, lines)
             self.assertTrue(lines[0].startswith("Next: " + command), lines)
             self.assertNotRegex(lines[0], r"\[[a-z]\]")
-            self.assertIn("[%s]" % key, plain[-1])  # the line UI still names it, from the same table
             self.assertIn(command, [c.name for c in slash.COMMANDS])
             if outcome == "failed_recoverable":  # p4a: the resume acts at once, no screen opens for it
                 resumed = []
@@ -499,19 +491,19 @@ class NextStepTests(LiveShell):
             self.assertNotEqual(type(self.app.screen).__name__, "MainScreen", self.flat())
 
     async def test_la4_done_names_the_end_screen(self):
-        await self.check_outcome("done", "o", "/attempt")
+        await self.check_outcome("done", "/attempt")
 
     async def test_la4_needs_owner_names_the_end_screen(self):
-        await self.check_outcome("needs_owner", "o", "/attempt")
+        await self.check_outcome("needs_owner", "/attempt")
 
     async def test_la4_blocked_names_the_end_screen(self):
-        await self.check_outcome("blocked", "o", "/attempt")
+        await self.check_outcome("blocked", "/attempt")
 
     async def test_la4_failed_names_a_new_attempt(self):
-        await self.check_outcome("failed", "g", "/run")
+        await self.check_outcome("failed", "/run")
 
     async def test_la4_failed_recoverable_names_resume(self):
-        await self.check_outcome("failed_recoverable", "g", "/run")
+        await self.check_outcome("failed_recoverable", "/run")
 
     def test_the_table_has_a_catalog_action_behind_every_end_screen_entry(self):
         for state, actions in END_ACTIONS.items():
@@ -838,8 +830,8 @@ class ParallelWatchTests(LiveShell):
         with Authority(self.state, self.project) as authority:
             authority.profile = process.Profile.of(authority)
             authority.profile.accept()
-            self.begin(authority)
-            with patch("terminal_planner.engine.fixture_proposal", return_value=plan):
+            with patch("terminal_planner.engine.fixture_proposal", return_value=plan):  # the draft is built from it
+                self.begin(authority)
                 self.propose(authority)
             authority.approve(1)
             runs = MilestoneRuns(authority, self.driver, worktrees=authority.directory / "worktrees")

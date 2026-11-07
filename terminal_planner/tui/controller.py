@@ -2287,44 +2287,6 @@ class Controller:
             return Outcome("profile", data=process.view(app.profile))
         return self._plan_job("profile", work, done)
 
-    def start_planning(self, goal, done, draft=None, card=False):
-        """A goal and the current role bindings: readiness first, then a new unsent revision (saved even when the
-        check blocks) and the submission verdict -> Outcome (unsent / ready / stale / sent).
-
-        `draft` is the plan identity of the goal draft the form was opened from (None: the owner typed the goal).
-        On the worker and immediately before `planning.begin`, that identity is re-checked against the plan
-        identity read now: a draft whose plan moved on is refused (`draft.stale`) and writes nothing — no revision,
-        no run, no export.
-
-        `card` marks the submission of the goal-draft card's own `/plan`: a readiness refusal there answers `unsent`
-        with the gate's checks and writes nothing — the draft stays usable and the plan identity does not move, so a
-        retry after the owner fixed readiness still matches the card. The goal form (`card` False) keeps saving the
-        unsent revision."""
-        return self._plan_job("start", self._start_work(goal, draft, card), done, "plan")
-
-    @staticmethod
-    def _start_work(goal, draft=None, card=False):
-        """The worker function of `start_planning`, also the architect's `zplan_plan` (`_plan_tool`)."""
-        def work(app, planning):
-            if not planning.valid_goal(goal):
-                raise Blocked(planning_module.GOAL_PROBLEM, family="usage.invalid_option")
-            planning.guard()  # an undecided or broken profile refuses before anything is saved or checked
-            gate = planning.gate(action="plan")
-            if draft is not None:
-                reason = chat_module.stale_reason(draft, goal_identity(planning))
-                if reason:
-                    raise Blocked("%s: %s" % (chat_module.OUTDATED, reason), family="draft.stale")
-            if card and not gate.ok:
-                return Outcome("unsent", checks_of(gate.missing))
-            # The goal is saved whatever the check says, as the plain flow does: quitting never loses it.
-            planning.begin(goal, app.roles)
-            if not gate.ok:
-                return Outcome("unsent", checks_of(gate.missing))
-            result = verdict(planning.submission())
-            # Readiness failed between the check and the submission: the goal is saved as an unsent revision.
-            return Outcome("unsent", result.checks) if result.kind == "blocked" else result
-        return work
-
     def submit_plan(self, done):
         """[g] on the unsent revision; a stale one is renewed and sent by the service (a sent one never is)."""
         def work(app, planning):
@@ -2348,9 +2310,6 @@ class Controller:
     def decline_plan(self, version, done):
         """0.14 K: the owner's decline of revision `version`, recorded before his note reaches the architect."""
         return self._plan_job("decline", lambda app, planning: planning.decline(version), done)
-
-    def revise_plan(self, feedback, done):
-        return self._plan_job("revise", lambda app, planning: verdict(planning.revise(feedback)), done, "revise")
 
     def renew_plan(self, done):
         def work(app, planning):
@@ -2782,30 +2741,18 @@ class Controller:
             kind, value = delivery.accept(r)
             if kind == "attempt":
                 return Outcome("attempt", data=Token.of(value))
-            sent = verdict(app.planning.submission())
-            return Outcome("plan", sent.checks, ("The proposal changes the plan: revision r%s was created; it needs approval."
-                                                 % value["version"],), data=sent)
+            return Outcome("to_architect", lines=(value,))  # 0.15: the architect changes the plan with the owner
         return self._creating(token, make, done, "accept")
 
     def to_plan(self, token, feedback, done):
-        """A scope change: the request becomes a plan revision and goes to the planner (blocked -> unsent, as plain).
-        The job leaves one result, whichever way it ends (V2g)."""
+        """"Back to plan" (0.15): the owner's reason goes to the architect as his message, after the token and
+        `check_followup` (only the latest unsuccessful attempt of the current revision) are checked; no plan
+        operation runs here."""
         def work(app, delivery, r):
-            value = delivery.to_plan(r, feedback)
-            sent = verdict(app.planning.submission())
-            return Outcome("plan", sent.checks, ("Plan change: revision r%s was created; it needs approval."
-                                                 % value["version"],), data=sent)
-        acting = self._acting(token, work)
-
-        def run(app, delivery):
-            try:
-                outcome = acting(app, delivery)
-            except Exception as error:
-                self._plan_ended("feedback", app, None, error=error)
-                raise
-            self._plan_ended("feedback", app, None, value=outcome)
-            return outcome
-        return self._job("to_plan", run, done)
+            delivery.runs.check_followup(r)
+            return Outcome("to_architect", lines=("Back to plan after %s attempt %s: %s"
+                                                  % (r["milestone"], r["attempt"], feedback),))
+        return self._job("to_plan", self._acting(token, work), done)
 
     def leave(self, token, done):
         def work(app, delivery, r):

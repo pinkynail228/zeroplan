@@ -250,12 +250,6 @@ class LoginHomeTests(unittest.TestCase):
         view = self.failed_view(mine)
         self.assertEqual(view.home, str(mine))
         self.assertIn("login", view.actions)
-        calls = []
-        stub = type("App", (), {"planning": type("P", (), {"view": staticmethod(lambda: view)})(),
-                                "attempt": lambda self, action, key: action(),
-                                "login": lambda self, **options: calls.append(options)})()
-        cli.App.relogin(stub)
-        self.assertEqual(calls, [{"home": str(mine), "refresh": True}])
         # in an override home the login answers with the L1 message and starts no Codex, whatever the process home is
         self.assertEqual(self.login(home=view.home, refresh=True), 0)
         self.assertIn("This is your Codex (%s): log in via codex login" % mine, self.shown)

@@ -394,7 +394,7 @@ class NativeRunTests(CriticBase):
         plan_engine, _ = tp.NativeTests.engine(self, [{"valid": True}, {"runId": "fixture-native-run"},
                                                       tp.NativeTests.terminal(self)])
         with tp.NativeTests.authority(self) as authority:
-            authority.begin("Requested feature", ROLES, "native")
+            tp.ProjectTest.begin(self, authority, "native")
             plan_engine.proposal(authority, lambda _: None)
             authority.approve(1)
 

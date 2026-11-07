@@ -41,11 +41,9 @@ from unittest import mock
 
 from terminal_planner import catalog
 from terminal_planner.authority import Authority as RealAuthority, Blocked, decode
-from terminal_planner.cli import Terminal, session
 from terminal_planner.planning import Planning
 from terminal_planner.runs import MilestoneRuns
 import test_terminal_planner as tp
-from test_setup import Steps
 
 RUN = "R1"
 NEXT = "R2"
@@ -110,11 +108,6 @@ class PlanStopTest(tp.ProjectTest):
         review = self.terminal()  # a valid execution-2 plan review output
         envelope["status"]["terminalResult"] = review["status"]["terminalResult"]
         return envelope
-
-    def journey(self, engine, *steps):
-        output = io.StringIO()
-        session(Terminal(Steps(*steps), output), self.project, None, lambda *_: engine)
-        return output.getvalue()
 
     def stored(self, path):
         return decode(path.read_text())
@@ -329,44 +322,8 @@ class StopServiceTests(PlanStopTest):
                         pass
 
 
-class StopScreenTests(PlanStopTest):
-    """The plain plan screen: the only whole-app journeys of this task, one per screen behaviour."""
-
-    def test_a1_to_a3_stop_watch_and_reopen_show_the_same_cause_line(self):
-        engine, calls = self.engine([subprocess.CompletedProcess([], 0, "", ""), (self.finished(RUN, 1),)])
-        path = self.revision(engine)
-        seen = []
-        self.capture(engine, path, seen)
-        with mock.patch("terminal_planner.runs.now", return_value=STOP_AT):
-            output = self.journey(engine, "p", "s", "w", "q", "q")
-        self.assertIn("[s] stop planning", output)
-        self.assertIn("Stop requested.", output)
-        self.assertEqual(self.force_stops(calls), [["force-stop", RUN]])
-        self.assertEqual(seen, [{"at": STOP_AT}])
-        self.assertIn(STOPPED_LINE, output)
-        self.assertIn("[g] start the planner again", output)
-        self.assertNotIn("planning did not finish", output)
-        # A3: reopening the same store shows the same line.
-        again = self.journey(self.engine([])[0], "p", "q", "q")
-        self.assertIn(STOPPED_LINE, again)
-
-    def test_a5_a_refused_force_stop_is_shown_and_the_plan_screen_offers_s_again(self):
-        engine, calls = self.engine([subprocess.CompletedProcess([], 1, "", "")])
-        path = self.revision(engine)
-        output = self.journey(engine, "p", "s", "q", "q")
-        self.assertEqual(self.force_stops(calls), [["force-stop", RUN]])
-        self.assertIn("Not done: ", output)
-        self.assertIn("plan.stop_unconfirmed", output)
-        self.assertGreaterEqual(output.count("[s] stop planning"), 2)  # offered before and after
-        stored = self.stored(path)["revisions"][-1]
-        self.assertIsNone(stored.get("stop"))
-        self.assertEqual(stored["status"], "observing")
-
-
 class StopCatalogTests(unittest.TestCase):
-    def test_the_stop_action_and_status_are_catalogued(self):
-        action = catalog.action("plan.stop")
-        self.assertEqual((action.key, action.label), ("s", "stop planning"))
+    def test_the_stop_status_and_its_refusal_are_catalogued(self):
         self.assertIn("stopped", catalog.PLAN_STATUS)
         self.assertIn("plan.stop_unconfirmed", catalog.ERRORS)
 

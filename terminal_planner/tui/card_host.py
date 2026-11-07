@@ -236,19 +236,18 @@ class CardHost:
         return [snapshot.version, snapshot.plan_state]
 
     def action_plan(self, argument, key):
-        """`/plan` — the command typed in the chat.
+        """`/plan` — the command typed in the chat (0.15: one planning path, the architect's).
 
-        A goal typed after the command (`/plan <text>`) is the goal: it starts planning through `start_goal`, a
-        sendable draft or not. Otherwise the draft is the newest sendable one (`draft_card_ref`): a draft whose plan
-        moved on since the reply (`chat.stale_reason` against the identity this screen's snapshot names) is refused on
-        the status line; nothing is started then. Otherwise the draft's own identity travels with the goal and the
-        planner starts through `start_goal`. With no draft and no text the unsent revision is sent
-        (`send_unsent_plan`); a `key` that names no sendable draft says `note.not_now`. Like a typed command, `/plan`
-        ends the status note first (a refusal below sets its own)."""
+        A goal typed after the command (`/plan <text>`) goes to the architect as the owner's message, binding no yes
+        (`send_owner_note`). Otherwise the newest sendable goal draft (`draft_card_ref`) goes the same way: a draft
+        whose plan moved on since the reply (`chat.stale_reason` against the identity this screen's snapshot names)
+        is refused on the status line, and a draft the chat took is sent. With no draft and no text an unsent
+        revision of the architect's goes to the plan check (`send_unsent_plan`); a `key` that names no sendable draft
+        says `note.not_now`. Like a typed command, `/plan` ends the status note first (a refusal below sets its
+        own)."""
         self.app.chat_note = ""
         if argument and key is None:
-            self.app.goal_identity = None
-            self.app.start_goal(argument)
+            self.app.send_owner_note(argument)
             return
         ref = self.draft_card_ref(key)
         if ref is None:
@@ -262,8 +261,8 @@ class CardHost:
         if reason:
             self.status_note("%s: %s" % (chat_module.OUTDATED, reason))
             return
-        self.app.goal_identity = draft.identity
-        self.app.start_goal(draft.text, card_key=draft_id)
+        if self.app.send_owner_note(draft.text):
+            self.app.draft_sent(draft_id)
 
     def refresh_drafts(self):
         """v3e: note the newest actionable goal draft of the retained history as saved, once.

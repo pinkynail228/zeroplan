@@ -1032,19 +1032,6 @@ class Authority:
         self.save()
         return revision
 
-    def amended_feedback(self, request):
-        """The feedback of a revision that amends the current one: every request made for the current goal, in
-        order, each once, then `request`. Each revision's feedback already holds the requests before it, so the
-        latest non-empty one is the list; an edit revision (a draft, no feedback) is passed over, and the list ends
-        at the revision that began the goal (no feedback, no draft)."""
-        self.current  # refuses without a saved plan
-        for r in reversed(self.state["revisions"]):
-            if r["feedback"]:
-                return r["feedback"] + "\n\n" + request
-            if "draft" not in r or r.get("origin") == "plan":
-                break
-        return request
-
     @property
     def current(self):
         if not self.state or not self.state["revisions"]:

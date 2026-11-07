@@ -29,7 +29,8 @@ from textual.widgets import Button, Input, RichLog, Static, Tab, TabbedContent, 
 
 from .. import application, catalog, milestone, planning
 from ..authority import Blocked, override_reason
-from ..cli import plural, refusal, summary
+from ..cli import refusal, summary
+from ..planning import plural
 from ..delivery import CHECK, Delivery, NEW_ATTEMPT, PLAN_STATUS, REVISE_NEXT, STATE_TEXT, full_line
 from ..setup import INTERRUPTED
 from . import cards, chat as chat_module, flow as flow_draw, palette, scheme, slash, strings, theme, viewer
@@ -137,6 +138,7 @@ RENEW_NOTE = "The project changed after planning: rebuild the plan"
 DECLINE_KEPT = "The architect cannot take your note now: it is in the chat input; send it when the architect is free."
 DECLINE_LOST = "The architect cannot take your note now; send it in the chat later: %s"
 DECLINE_IN_INPUT = "Your note is in the chat input."
+NO_ARCHITECT = "The architect is not available in this session; nothing was sent."
 # The line a start refused as stale shows: the unsent revision no longer matches the project (or the Zeroshot
 # binding) it was prepared on. One wording for both places it is said — the plan screen's own watch (`watched`) and
 # a draft's `/plan` whose submission came back `stale` (i3a/A2 repair; nothing was sent, so the draft stays sendable).
@@ -1981,10 +1983,11 @@ class MainScreen(CardHost, Screen):
         # i2/A2: an unwired command behaves exactly like a refusal — the note shows and the input keeps the text.
         # i3a: the availability check is `run_command`'s own False return, the one dispatcher both paths share.
         self.app.chat_note = ""  # a command that is allowed in this state ends the note, whatever set it
+        typed, field.value = field.value, ""  # cleared first: a command may put text back (`keep_chat_text`)
         if not self.run_command(verdict.command_name, verdict.argument):
+            field.value = typed
             return
         self.remember(line)
-        field.value = ""
         self.query_one("#palette").display = False
         if getattr(self, "scheme_cmd", False):  # T4e (a stub screen of the older tests has no such flag)
             self.close_scheme_cmd()
@@ -2491,11 +2494,6 @@ class ZplanApp(App):
         self.setting_up = False
         self.log_lines = deque(maxlen=LOG_LINES)
         self.exit_code = 0
-        self.goal_identity = None  # the plan identity of the goal draft being sent (None: a typed goal)
-        self.goal_block = ()      # readiness items behind the last refused submission
-        self.refused_goal = None  # that submission (goal, card key, draft identity): sent once readiness passes
-        self.goal_message = ""
-        self.starting = False     # a goal submission is in flight
         self.progress = deque(maxlen=PROGRESS_LINES)  # planner phase lines, as the observation delivers them
         self.watching = False     # a planner observation is running
         self.resumed = set()      # revisions whose observation already restarted on its own
@@ -2514,9 +2512,9 @@ class ZplanApp(App):
         self.started_runs = set()    # F9: run ids whose start already showed the Plan tab
         self.merge_waiting = None  # the milestone whose confirmed merge waits for the merge critic, call after call
         self.pending = None       # (kind, milestone, token before, asked, confirmed at): an action in flight
-        self.revising = None      # the version of the proposed plan a revision was asked for, until a snapshot moves on
         self.finish_note = ""     # how the planner observation ended (the chat pane; the plan screen says it itself)
         self.plan_block = ()      # readiness items behind the last refused submission (re-checked on show)
+        self.unbound_input = False  # the chat input holds a message code built for the owner (`keep_chat_text`)
         self.details_lines = ()   # the lines [i] put under the plan view (a second [i] removes them)
         self._chat_transcript = None  # R-4: the transcript's entry count at the last render (append provenance)
         project = getattr(controller, "project", None)
@@ -2632,7 +2630,12 @@ class ZplanApp(App):
             count = len(getattr(getattr(self, "snapshot", None), "uncommitted", ()) or ())
             if count:
                 self.commit_note = strings.text("note.uncommitted", n=count)
-        accepted, line = self.chat.send(value, snapshot=self.chat_snapshot())
+        snapshot = self.chat_snapshot()
+        if getattr(self, "unbound_input", False):  # the input holds a message code built for the owner: it approves nothing (0.15)
+            snapshot = dict(snapshot, binds=False)
+        accepted, line = self.chat.send(value, snapshot=snapshot)
+        if accepted and getattr(self, "unbound_input", False):
+            self.unbound_input = False
         if accepted:
             self.chat_note = ""  # the owner's accepted turn ends the note, whatever set it
             if first:
@@ -2832,7 +2835,6 @@ class ZplanApp(App):
             self.plan_error = error
         else:
             self.snapshot, self.plan_error = snapshot, ""
-            self.revision_seen(snapshot)
             # i6: the one-time language chooser is triggered by the missing language store alone, never by the
             # profile's state — an existing project that upgraded from a version which stored no language still
             # gets it, whatever its profile says (`state` is `never`, `later` or `accepted`). A profile that still
@@ -2918,30 +2920,19 @@ class ZplanApp(App):
             self.checks = checks
             self.origin_settled()
             failing = tuple(c for c in checks if not c.ok)
-            if self.goal_block:
-                # i3e1 repair: a refused goal/plan-card start stays blocked (and keeps its readiness card) until
-                # every check passes — a recheck that still fails must not clear the marker just because it
-                # answered (the form's own block and the ready card's source both read it).
-                self.goal_block = failing
             if self.plan_block and not failing:
                 self.plan_block = ()  # whatever blocked the start is fixed
             if tools_pass(checks):
                 self.retry_chat()  # E2: the chat needs only the tool checks; a missing Git identity never holds it
             if checks and all(c.ok for c in checks):
-                refused, self.refused_goal = self.refused_goal, None
                 # i3e1 repair: readiness passing ends the readiness block itself, not just the check slice. A
-                # refused goal/plan start's marker is already cleared above; the run pane's blocked-start note
+                # refused plan start's marker is already cleared above; the run pane's blocked-start note
                 # (`Not started: …`, a refused milestone start) is the other thing `ready_blocked` reads, so it
                 # goes too — otherwise the screen stays in `error` and a later failing background check grows the
                 # readiness card again without any blocked start. A failed operation's own note (`Not done:`,
                 # `Watching interrupted:`) is not a readiness block and stays.
                 if blocked_note(note_text(self.run_note)).startswith(READY_BLOCKED_NOTE):
                     self.run_note = ""
-                if refused is not None:
-                    # The prerequisite is fixed: the goal the owner already sent goes to planning, once.
-                    self.chat_note = ""  # the refusal's status note ends, as a `/plan` does
-                    self.goal_identity = refused[2]
-                    self.start_goal(refused[0], card_key=refused[1])
         self.changed()
         self.start_pending()  # the one coalesced follow-up batch starts now
 
@@ -3222,74 +3213,22 @@ class ZplanApp(App):
             self.changed()
         self.controller.renew_plan(self.deliver(renewed))
 
-    def start_goal(self, goal, card_key=None):
-        """The explicit submit of a goal: readiness, then a saved unsent revision and the planner.
-
-        `card_key` is the key of the goal draft the submission came from (a bare `/plan`, through the screen's one
-        dispatcher; the parameter keeps the name of the card it used to be); a goal typed as `/plan <text>` passes
-        nothing. The submission never leaves the main screen: on success the draft is sent and no draft is sendable
-        any more (`draft_sent`). Every failure — a readiness refusal (`unsent`, which the controller answers without
-        saving a revision), a submission refused as `stale` and a controller error alike — is said on the main line
-        (`note_card_refusal`) and the draft stays sendable."""
-        if self.starting:
-            return
-        self.starting, self.goal_message = True, ""
-        self.goal_block, self.refused_goal = (), None
-        self.changed()
-
-        def started(outcome, error):
-            self.starting = False
-            if error:
-                self.goal_message = "Not done: " + error
-            elif outcome.kind == "unsent":
-                self.goal_block, self.goal_message = outcome.checks, NOT_STARTED
-                self.refused_goal = (goal, card_key, self.goal_identity)
-                self.request_check()
-            elif outcome.kind == "stale":
-                # `start_planning` answers `stale` when the prepared revision is no longer the project's (the target
-                # moved between preparation and submission) and starts no planner. Nothing was sent, so the draft
-                # stays sendable.
-                self.goal_message = PLAN_OUTDATED
-                self.request_refresh()
-            else:
-                self.goal_identity = None
-                self.draft_sent(card_key)
-                self.after_submission(outcome)
-            if error or outcome.kind in ("unsent", "stale"):
-                self.note_card_refusal(error, outcome)
-            self.changed()
-        self.controller.start_planning(goal, self.deliver(started), draft=self.goal_identity, card=True)
-
     def send_unsent_plan(self):
-        """`/plan` with no card and no text: the unsent revision goes to the planner (`run_plan`; the service renews a
-        stale one first, in the same step). With none, the note naming `/plan <goal>`."""
+        """`/plan` with no card and no text: an unsent revision of the architect's (one the readiness checks held back)
+        goes to the plan check (`run_plan`; the service renews a stale one first, in the same step). With none, or one
+        the old planner made, the note naming `/plan <goal>`."""
         view = self.snapshot.plan if self.snapshot is not None else None
+        if view is not None and view.kind in ("unsent", "stale") and not getattr(self.snapshot, "goldfish", False):
+            screen = self.main_screen()
+            if screen is not None:
+                screen.status_note(planning.OLD_PLANNER_REFUSED)
+            return
         if view is None or view.kind not in ("unsent", "stale", "unknown"):
             screen = self.main_screen()
             if screen is not None:
                 screen.status_note(strings.text("note.plan_needs_goal"))
             return
         self.run_plan(view)
-
-    def note_card_refusal(self, error, outcome):
-        """A `/plan` that did not start the planner says so on the main screen's own status line, and the draft
-        stays sendable.
-
-        The submission never opens a form or leaves the main screen, so without a line of its own the refusal would
-        be visible nowhere. A readiness refusal lists the failing checks exactly as a blocked start does in the run
-        pane; a submission refused as stale names the staleness (`PLAN_OUTDATED`, the same line the plan screen's
-        own watch shows); a controller error is its own text. Nothing is said on the success kinds: there the plan
-        starts and the plan pane says so."""
-        if error:
-            note = "Not done: " + error
-        elif outcome.kind == "stale":
-            note = PLAN_OUTDATED
-        else:
-            note = "\n".join([NOT_STARTED_BELOW] + ["! " + FIX_KEY.sub("", summary(c.line))
-                                                    for c in outcome.checks])
-        screen = self.main_screen()
-        if screen is not None:
-            screen.status_note(note)
 
     def draft_sent(self, card_key):
         """v3e: the goal draft a `/plan` came from is sent: it is not sendable any more. No key (a goal typed as
@@ -3322,7 +3261,7 @@ class ZplanApp(App):
             self.request_check()
         elif outcome.kind == "dispatched":
             self.plan_lines = notes
-            self.plan_block, self.refused_goal = (), None
+            self.plan_block = ()
             self.progress.clear()
             for line in notes:
                 self.note(line)
@@ -3331,7 +3270,7 @@ class ZplanApp(App):
             self.request_check()
         elif outcome.kind == "ready":
             self.plan_lines = notes
-            self.plan_block, self.refused_goal = (), None
+            self.plan_block = ()
             self.progress.clear()
             self.finish_note = ""
             self.watch_planner(dispatch=True)  # this watch submits the revision to the planner
@@ -3348,11 +3287,6 @@ class ZplanApp(App):
 
     def plan_action_done(self, prefix, outcome, error):
         self.plan_lines = ()
-        if self.revising is not None and (error or outcome.kind == "blocked"):
-            # no revision was made: the proposal's card offers its choices again (its key was seen, so it is let back)
-            for screen in self.screen_stack:
-                getattr(screen, "cards_seen", set()).discard("plan:%s" % self.revising)
-            self.revising = None
         if error:
             self.say_note(prefix + error)
             self.request_refresh()
@@ -3368,44 +3302,33 @@ class ZplanApp(App):
         if not text:
             self.say_note(EMPTY_CHANGE)
             return
-        view = self.snapshot
-        if ZplanApp.decline_to_architect(self, view, text):  # the class's own rule, also on a stand-in host
-            return
-        if getattr(view, "status", None) == "proposed":
-            self.revising = view.version  # the old card offers nothing while the revision is asked for
-            self.changed()
-        self.controller.revise_plan(text, self.deliver(
-            lambda outcome, error: self.plan_action_done("Not done: ", outcome, error)))
+        ZplanApp.decline_to_architect(self, self.snapshot, text)  # the class's own rule, also on a stand-in host
 
     def decline_to_architect(self, view, text):
-        """0.14 K: revising the architect's own plan with a note, in any status, goes to the architect, never to the old
-        planner. A proposed revision is first stored as declined (`Planning.decline`), so the architect can never
-        approve it, and the note is sent only once that is stored; when the decline is refused (the plan was approved
-        or revised meanwhile) nothing is sent and the owner reads why. The note is the owner's message "Revise plan
-        r<N>: <note>"; a revision in another status (approved, a failed check) is shown to no yes in words anyway.
-        When the chat cannot take the turn now, the message waits in the main screen's chat input, or the status line
-        shows it. False (the old path) without a chat, which happens only with no project, or for a revision the old
-        planner made (it leaves in 0.15)."""
-        chat = getattr(self, "chat", None)
-        if chat is None or not getattr(view, "goldfish", False):
-            return False
+        """Revising any plan with a note goes to the architect (0.14 K; 0.15 for a plan the old planner made too). A
+        proposed revision is first stored as declined (`Planning.decline`), so the architect can never approve it,
+        and the note is sent only once that is stored; when the decline is refused (the plan was approved or revised
+        meanwhile) nothing is sent and the owner reads why. The note is the owner's message "Revise plan r<N>:
+        <note>", binding no yes (`send_owner_note`)."""
         message = "Revise plan r%s: %s" % (view.version, text)
-        if getattr(view, "status", None) == "proposed":
+        if getattr(self, "chat", None) is not None and getattr(view, "status", None) == "proposed":
             self.controller.decline_plan(view.version, self.deliver(
-                lambda outcome, error: ZplanApp.send_revision_note(self, chat, message, error, declined=True)))
+                lambda outcome, error: ZplanApp.send_owner_note(self, message, error)))
         else:
-            ZplanApp.send_revision_note(self, chat, message, None, declined=False)
-        return True
+            ZplanApp.send_owner_note(self, message)
 
-    def send_revision_note(self, chat, message, error, declined):
-        """The second half of `decline_to_architect`, on the UI thread: `error` is the refused decline's reason."""
-        if error:
-            self.chat_note = "Not done: %s %s" % (error, DECLINE_IN_INPUT if self.keep_chat_text(message) else message)
+    def send_owner_note(self, message, error=None):
+        """The one way the TUI sends a message for the owner that code built (a decline note, "back to plan", a
+        steward proposal he accepts, `/plan <goal>`): its turn binds no yes (`binds` False, `application.shown_plan`).
+        A non-empty `error` (a refused decline) sends nothing and says why. When the chat cannot take the turn now,
+        or there is none, the message waits in the main screen's chat input, or the status line shows it."""
+        chat = getattr(self, "chat", None)
+        if error or chat is None:
+            reason = "Not done: %s" % error if error else NO_ARCHITECT
+            self.chat_note = "%s %s" % (reason, DECLINE_IN_INPUT if self.keep_chat_text(message) else message)
             self.changed()
-            return
-        snapshot = dict(self.chat_snapshot())
-        if declined:  # the UI snapshot may not show the stored decline yet: this turn binds no yes either way
-            snapshot["plan_state"] = dict(snapshot.get("plan_state") or {}, declined=True)
+            return False
+        snapshot = dict(self.chat_snapshot(), binds=False)
         accepted, line = chat.send(message, snapshot=snapshot)
         if accepted:
             self.chat_note = ""
@@ -3414,23 +3337,20 @@ class ZplanApp(App):
         else:
             self.chat_note = DECLINE_LOST % message
         self.changed()
+        return accepted
 
-    def keep_chat_text(self, text):
+    def keep_chat_text(self, text, bound=False):
         """Add `text` to the main screen's chat input (also under a full screen on top), after what the owner already
-        typed, so a note the architect could not take now is not lost. False when there is no main screen."""
+        typed, so a note the architect could not take now is not lost; the input then sends binding no yes (unless
+        `bound`), whoever presses Enter. False when there is no main screen."""
         main = next((item for item in reversed(self.screen_stack) if isinstance(item, MainScreen)), None)
         try:
             field = main.query_one("#input", ChatInput)
         except Exception:  # no main screen, or one not composed yet or already going away
             return False
         field.value = (field.value.rstrip() + " " + text).strip() if field.value.strip() else text
+        self.unbound_input = getattr(self, "unbound_input", False) or not bound
         return True
-
-    def revision_seen(self, snapshot):
-        """A snapshot that names another revision, or one no longer proposed, shows the revision asked for: the old
-        proposal's card is no question any more, and a new proposal's card is offered as usual."""
-        if self.revising is not None and (snapshot.version != self.revising or snapshot.status != "proposed"):
-            self.revising = None
 
     def plan_is_stale(self):
         """The current proposal is one the project moved away from (`plan.stale`): approving it is refused and a
@@ -4047,7 +3967,12 @@ class ZplanApp(App):
                 if not text:
                     modal.set_end(modal.end, EMPTY_CHANGE)
                     return
-                self.controller.to_plan(token, text, self.deliver(settled))
+
+                def planned(outcome, error):
+                    if error or outcome.kind == "stale":  # refused: the owner's reason is not lost
+                        self.keep_chat_text(text, bound=False)
+                    settled(outcome, error)
+                self.controller.to_plan(token, text, self.deliver(planned))
         if name == "diff":
             self.controller.diff(token, self.deliver(lambda outcome, error: self.diff_shown(modal, outcome, error)))
         elif name == "merge":
@@ -4125,6 +4050,13 @@ class ZplanApp(App):
             self.clear_pending()
         else:
             self.confirm_pending()
+        if not error and outcome.kind == "to_architect":  # 0.15: "back to plan", a steward proposal
+            if modal.is_attached:
+                modal.dismiss(None)
+            ZplanApp.send_owner_note(self, outcome.lines[0])
+            self.request_refresh()
+            self.changed()
+            return
         if not modal.is_attached:
             # The end modal is gone (a merge may have waited for the critic meanwhile): the verdict still reaches the owner.
             if error:
@@ -4164,13 +4096,6 @@ class ZplanApp(App):
         elif outcome.kind == "left":
             modal.dismiss(None)
             self.run_note = outcome.lines[0]
-        elif outcome.kind == "plan":
-            modal.dismiss(None)
-            self.after_submission(outcome.data)
-            self.plan_lines = tuple(outcome.lines)
-            screen = PlanScreen()
-            screen.from_main = True  # R-A C1: Esc returns the focus as from the [p] plan screen
-            self.push_screen(screen)
         elif outcome.kind == "end":
             modal.set_end(with_chat_line(outcome.data), "")
         else:  # integrated / conflict / refused / open: the merge verdict, with the attempt as it is now

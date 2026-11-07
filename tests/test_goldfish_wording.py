@@ -53,7 +53,7 @@ class ViewWording(tpr.ProfileTest):
 
     def test_an_older_planner_revision_keeps_its_words(self):
         app = self.session()
-        self.begin(app.authority)
+        self.begin_old_planner(app.authority)
         self.propose(app.authority)
         self.assertIn("planner", "\n".join(app.delivery.details()).lower())
         self.assertIn("planner", app.delivery.activity()[0].lower())

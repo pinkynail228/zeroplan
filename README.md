@@ -19,7 +19,7 @@
   <a href="#install">Install</a> · <a href="#try-it-free">Try it free</a> · <a href="#use-it-on-your-project">Use it</a> · <a href="docs/USER_FLOW.md">Guide</a>
 </p>
 
-Early release (0.14), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
+Early release (0.15), macOS on Apple silicon only. Real runs use your Codex login and its tokens.
 
 ## Why zeroplan
 
@@ -95,9 +95,9 @@ zplan --fixture demo
 ```
 
 No login needed, whatever the installer suggests. Open the project, choose **Skip** on the origin screen and press
-Enter to accept the profile. Then type `/plan Add a changelog`, `/approve`, `/run` (Enter starts it) and, when M1
-asks "Merge into main?", `/merge`. The demo plan's M2 can wait. The architect chat is off in the demo, so its
-`action.refused` line is expected.
+Enter to accept the profile. Then type `Add a changelog` (or `/plan Add a changelog`): the demo's scripted
+architect writes its fixed plan. Then `/approve`, `/run` (Enter starts it) and, when M1 asks "Merge into main?",
+`/merge`. The demo plan's M2 can wait.
 
 ## Use it on your project
 

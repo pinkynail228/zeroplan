@@ -610,7 +610,7 @@ class NativeGateBase(tpr.ProfileTest):
     def approved_native_plan(self):
         """A production store, a required-task profile and an approved native M1 revision."""
         self.accepted_profile()
-        plan_engine, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal()])
+        plan_engine, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal(goldfish=False)])
         with self.authority() as authority:
             authority.profile = Profile.of(authority)
             authority.begin("Requested feature", ROLES, "native")
@@ -1401,7 +1401,7 @@ class NativeRecoveryTests(NativeGateBase):
         never-prepared record is still refused with `engine.intent_changed`."""
         self.rules()
         self.accepted_profile({"gates": {"task": "required"}, "rules": ["AGENTS.md"]})
-        plan_engine, _ = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal()])
+        plan_engine, _ = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal(goldfish=False)])
         with self.authority() as authority:
             authority.profile = Profile.of(authority)
             authority.begin("Requested feature", ROLES, "native")
@@ -1714,7 +1714,7 @@ class QualificationTests(NativeGateBase):
 
     def qualify(self, side_effect):
         from devtools import task_gate_qual as qual
-        engine, _ = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal()])
+        engine, _ = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal(goldfish=False)])
         with patch.object(qual.dq, "setup_work", return_value=(self.project, {**os.environ}, Mock())), \
                 patch.object(qual.dq, "terminate"), \
                 patch.object(qual, "NativeEngine", return_value=engine), \

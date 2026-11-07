@@ -2789,78 +2789,6 @@ class GoalDraftTests(ChatShell):
 
     # D-4b ---------------------------------------------------------------------
 
-    async def test_d4b_a_plan_that_appeared_under_the_draft_is_refused_on_the_worker(self):
-        """The draft was written with no plan; the plan appears after `/plan` was typed and while the worker job
-        is parked before the re-check, so the re-check reads it then and refuses. Nothing is written."""
-        self.seed_goal_draft(text=self.DRAFT, identity=self.NO_PLAN)
-        gated, held, release = self.parked_identity()
-        authority_path = RealAuthority(self.state, self.project, fixture_id="test").path
-        captured = {}
-        with patch.object(controller_module, "goal_identity", gated):
-            async with self.shell(size=(120, 40)) as pilot:
-                await self.open_draft(pilot)
-                await self.post_and_wait(pilot, lambda app: captured.update(app=app))
-                await self.command(pilot, "/plan")
-                await self.until(pilot, held.is_set)                        # parked before the re-check
-                self.begin(captured["app"].authority)                       # the plan identity moves: none -> plan
-                after_change = authority_path.read_bytes()
-                release.set()
-                await self.until(pilot, lambda: chat_module.OUTDATED in self.app.goal_message)
-                self.assertIn("a plan appeared", self.app.goal_message)
-        self.assertEqual(authority_path.read_bytes(), after_change)         # the refusal wrote nothing
-        self.assertEqual([r["goal"] for r in json.loads(authority_path.read_text())["revisions"]],
-                         ["Requested feature"])                             # only the test's own change
-
-    async def test_d4b_the_same_revision_state_moved_on_is_refused_on_the_worker(self):
-        """Same revision, different state (planning -> approved while the worker job is parked): the identity pair
-        does not match and the re-check refuses."""
-        identity = [1, {"status": "planning", "override": False}]
-        self.seed_plan()                                                    # revision 1, planning: the draft is current
-        self.seed_goal_draft(text=self.DRAFT, identity=identity)
-        gated, held, release = self.parked_identity()
-        authority_path = RealAuthority(self.state, self.project, fixture_id="test").path
-        captured = {}
-        with patch.object(controller_module, "goal_identity", gated):
-            async with self.shell(size=(120, 40)) as pilot:
-                await self.open_draft(pilot)
-                await self.post_and_wait(pilot, lambda app: captured.update(app=app))
-                await self.command(pilot, "/plan")
-                await self.until(pilot, held.is_set)
-                authority = captured["app"].authority
-                self.propose(authority)
-                authority.approve(1)                                        # revision 1, approved
-                after_change = authority_path.read_bytes()
-                release.set()
-                await self.until(pilot, lambda: chat_module.OUTDATED in self.app.goal_message)
-                self.assertIn(chat_module.STATE_CHANGED, self.app.goal_message)
-                self.assertNotIn(chat_module.NEW_REVISION, self.app.goal_message)
-        self.assertEqual(authority_path.read_bytes(), after_change)
-
-    async def test_d4b_a_new_revision_is_refused_on_the_worker(self):
-        """The plan moved to another revision while the worker job was parked: the re-check refuses with the new
-        revision named, and the store keeps only the test's own revisions."""
-        identity = [1, {"status": "planning", "override": False}]
-        self.seed_plan()                                                    # revision 1, planning: the draft is current
-        self.seed_goal_draft(text=self.DRAFT, identity=identity)
-        gated, held, release = self.parked_identity()
-        authority_path = RealAuthority(self.state, self.project, fixture_id="test").path
-        captured = {}
-        with patch.object(controller_module, "goal_identity", gated):
-            async with self.shell(size=(120, 40)) as pilot:
-                await self.open_draft(pilot)
-                await self.post_and_wait(pilot, lambda app: captured.update(app=app))
-                await self.command(pilot, "/plan")
-                await self.until(pilot, held.is_set)
-                authority = captured["app"].authority
-                self.begin(authority)                                       # revision 2
-                after_change = authority_path.read_bytes()
-                release.set()
-                await self.until(pilot, lambda: chat_module.OUTDATED in self.app.goal_message)
-                self.assertIn(chat_module.NEW_REVISION, self.app.goal_message)
-        self.assertEqual(authority_path.read_bytes(), after_change)
-        self.assertEqual(len(json.loads(authority_path.read_text())["revisions"]), 2)
-
-
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
 class AnswerDraftTests(ChatShell):
     """U3b/D-3/D-3b/D-4/D-6a/D-9 through the real app: the [t] answer-draft key, the read-only open of the attempt
@@ -3915,45 +3843,6 @@ class LifecycleGuardChatTests(ChatShell):
     def identities(state):
         return [(r["run_id"], r["milestone"], r["attempt"], r["plan_revision"], r["approval"])
                 for r in state["runs"]]
-
-    async def test_a3_a_chat_goal_handed_over_while_m1_is_active_is_refused_and_the_run_still_delivers(self):
-        self.seed_goal_draft(text="Новая цель", identity=[1, {"status": "approved", "override": False}])
-        path = self.authority_path()
-        async with self.shell(self.controller(), size=(120, 40), follow=True) as pilot:
-            await self.settled(pilot)
-            self.assertIsNotNone(self.app.snapshot.profile)           # the accepted profile is bound and enforced
-            self.assertNotIn("fixtures", path.parts)                   # the production store, not the fixture one
-            self.assertEqual(json.loads(path.read_text())["revisions"][0]["engine"], "native")
-            items = self.readiness()                                  # the session's readiness is production's ...
-            self.assertEqual({i["id"] for i in items} & set(planning_module.NEEDS["plan"]),
-                             set(planning_module.NEEDS["plan"]), [i["id"] for i in items])
-            self.assertTrue(all(i["ok"] for i in items), [i for i in items if not i["ok"]])  # ... and it passes in full
-            before = json.loads(path.read_text())                     # the identity to preserve, read *before* the hand-over
-            identities = self.identities(before)
-            self.assertIn(before["runs"][0]["status"], runs_module.ACTIVE)  # M1 is provably a live writer here
-            await self.open_draft(pilot)                              # the draft is sendable
-            self.app.screen.run_command("/plan")                      # ... and its goal is handed over (the card's
-            await pilot.pause()                                       # button path: a running M1 keeps state `running`)
-            await self.until(pilot, self.entered.is_set)              # a live slice parked on the held native run
-            self.assertFalse(self.finish.is_set())                    # ... and cannot have finished
-            self.hold.set()                                           # the held slice returns a running projection
-            await self.post_and_wait(pilot, lambda app: None)         # the hand-over action is provably finished
-            await self.until(pilot, lambda: "M1" in self.app.goal_message)
-            after = json.loads(path.read_text())
-            self.assertEqual(after["revisions"], before["revisions"])       # revision/approval identity unchanged
-            self.assertEqual(self.identities(after), identities)           # run identity unchanged
-            self.assertEqual(len(after["runs"]), 1)                   # no second revision, no dropped run
-            self.assertIn("M1", self.app.goal_message)         # R-1's message names the running milestone ...
-            self.assertNotIn(chat_module.OUTDATED, self.app.goal_message)   # ... not a stale draft
-            await self.focus_panel(pilot)
-            await self.shows(pilot, "M1")
-            self.assertIn("M1", self.flat())                          # M1 still on home
-            self.finish.set()                                         # release the run: its watch returns the result
-            await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
-            await self.press_button(pilot, "merge")
-            await self.shows(pilot, "Merged: M1 → main.")
-        self.assertEqual(json.loads(path.read_text())["runs"][0]["delivery"], "integrated")
-
 
 if __name__ == "__main__":
     unittest.main()

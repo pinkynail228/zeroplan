@@ -41,8 +41,8 @@ brew install python node
   merge critic) run first: the proposed profile sets it to `required` whenever zplan found a test command, and
   without it the merge runs no check and says so.
 - **Stop a run.** In the full-screen shell type `/stop` and answer «yes»: it stops the milestone selected in the list,
-  else the first running one (or the planner while it plans); repeat for each running milestone. In the line UI (`zplan --plain`) press `k` + Enter while watching the milestone, then
-  `y`. Quitting zplan or closing the terminal only detaches.
+  else the first running one (or the planner while it plans); repeat for each running milestone. Quitting zplan or
+  closing the terminal only detaches.
 - **Uninstall** removes the launcher, `~/.local/share/planning-kit` (with zplan's Codex home `codex-home/`),
   `~/.config/planning-kit`, `~/.zp` and the plan store: see [Uninstall](#uninstall).
 - **Bugs.** Report them in the [GitHub issues](https://github.com/pinkynail228/zeroplan/issues).

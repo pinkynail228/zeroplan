@@ -732,8 +732,6 @@ def plan_card_source(screen):
     snapshot = getattr(screen.app, "snapshot", None)
     if snapshot is None or snapshot.version is None or snapshot.status != "proposed":
         return
-    if getattr(screen.app, "revising", None) == snapshot.version:
-        return  # a revision of this proposal was asked for: its card offers nothing until the new snapshot
     stages, tasks_total = plan_card_counts(snapshot.plan)
     asked = (getattr(getattr(screen.app, "controller", None), "asked", None) or {}).get("approve")
     # The milestones (id, title, task count) come from the plan view's body: `Planning.proposal` writes
@@ -830,7 +828,7 @@ def ready_blocked(app):
     blocked start: it does not grow a readiness card. Reads the app's own state only — no controller or engine
     call on a render."""
     note = blocked_note(note_text(app.run_note))
-    return bool(app.goal_block or app.plan_block or note.startswith(READY_BLOCKED_NOTE))
+    return bool(app.plan_block or note.startswith(READY_BLOCKED_NOTE))
 
 
 def ready_failing(app):

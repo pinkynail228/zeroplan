@@ -113,34 +113,13 @@ def blocked_start(checks):
     return preview
 
 
-def unsent_start(checks):
-    """A `Controller.start_planning` whose readiness gate fails: the `unsent` Outcome carrying `checks` — the verdict
-    the real gate answers for a goal submission, the one `ZplanApp.start_goal`'s own callback reads (the goal
-    start the repair must keep blocked)."""
-    def start(controller, goal, done, draft=None, card=False):
-        done(Outcome("unsent", checks=checks), None)
-        return True
-    return start
-
-
-def refusing_while_failing(slices, calls):
-    """A `Controller.start_planning` that records each goal it is given and answers the readiness gate by `slices`:
-    `unsent` while a check fails, `sent` once every check passes."""
-    def start(controller, goal, done, draft=None, card=False):
-        calls.append(goal)
-        failing = [c for c in slices.checks if not c.ok]
-        done(Outcome("unsent", checks=tuple(failing)) if failing else Outcome("sent"), None)
-        return True
-    return start
-
-
-def _app(checks=(), run_note="", goal_block=(), plan_block=()):
-    """The app side `ready_source` reads: only `checks`, the blocked note and the two refused-submission blocks."""
+def _app(checks=(), run_note="", plan_block=()):
+    """The app side `ready_source` reads: only `checks`, the blocked note and the refused-submission block."""
     class App:
         snapshot = type("Snap", (), {"project": PROJECT})()
         controller = type("Ctl", (), {"name": PROJECT})()
     app = App()
-    app.checks, app.run_note, app.goal_block, app.plan_block = checks, run_note, goal_block, plan_block
+    app.checks, app.run_note, app.plan_block = checks, run_note, plan_block
     return app
 
 
@@ -184,7 +163,7 @@ class ReadySourceTests(unittest.TestCase):
         set is another key; the `fix` is the command read out of the origin item's own `detail`, on its own line,
         exactly as the acceptance criterion names it."""
         both = checks_of([self.origin(), check("clean", False, line="There are uncommitted changes — [d] view")])
-        spec, = ui.ready_source(_Screen(_app(checks=both, goal_block=both)))
+        spec, = ui.ready_source(_Screen(_app(checks=both, plan_block=both)))
         self.assertEqual(spec.key, "ready:origin+clean")
         self.assertEqual(spec.text.splitlines()[-1], FIX)
         self.assertIn("No GitHub origin", spec.text)
@@ -209,12 +188,12 @@ class ReadySourceTests(unittest.TestCase):
     def test_the_card_needs_both_a_blocked_start_and_a_failing_check(self):
         """The source's own invariant: failing checks alone grow no card (nothing is blocked), a blocked note alone
         grows none either (no failing check — what a passed recheck leaves), and a failed operation's note is not a
-        blocked start. All three start kinds show it: the run pane's blocked note, `goal_block`, `plan_block`."""
+        blocked start. Both start kinds show it: the run pane's blocked note and `plan_block`."""
         failing = checks_of([self.origin()])
         self.assertEqual(ui.ready_source(_Screen(_app(checks=failing))), ())
         self.assertEqual(ui.ready_source(_Screen(_app(checks=(), run_note="Not started: x"))), ())
         self.assertEqual(ui.ready_source(_Screen(_app(checks=failing, run_note="Not done: interrupted"))), ())
-        for kind in ("run_note", "goal_block", "plan_block"):
+        for kind in ("run_note", "plan_block"):
             with self.subTest(kind):
                 app = _app(checks=failing)
                 setattr(app, kind, "Not started: fix what is marked below first." if kind == "run_note"
@@ -374,103 +353,6 @@ class ReadyCardSmallTests(ReadyShell):
                 checks = self.app.screen.query_one("#checks", Static).content.plain
                 self.assertIn(self.origin_line(), checks)
                 self.assertIn(FIX, checks)
-
-
-@unittest.skipUnless(HAVE, MISSING_REASON)
-class ReadyGoalStartRepairTests(ReadyShell):
-    async def test_the_blocked_goal_start_keeps_its_card_until_readiness_passes(self):
-        """Repair regression (acceptance + code finding 1, A3 for goal starts): `ZplanApp.start_goal` — the *actual
-        goal callback*, with the card's own key — answering the readiness gate's `unsent` sets the blocked marker
-        (`goal_block`) and asks for the automatic recheck. `got_checks` used to clear that marker on *any* successful
-        slice, so the card vanished while the origin check still failed; the marker must survive a recheck that
-        still fails (one card, the same key) and clear only once readiness passes.
-
-        u1a (A1, A2): the refused submission is remembered; the passing recheck sends that same goal once (the
-        card and the "Not started" note are gone), a further passing check sends nothing, and of two refused goals
-        only the newer one is sent. Interpretations: the draft identity travels with the remembered goal; a draft
-        card that was declined or closed in the meantime forgets the submission (`draft_card_closed`)."""
-        slices = Slices(self.slices())
-        self.approve(running=False)
-        calls = []
-        async with self.shell(size=(120, 40)) as pilot:
-            await self.loaded(pilot)
-            with patch.object(Controller, "check", injected_check(slices)), \
-                    patch.object(Controller, "start_planning", refusing_while_failing(slices, calls)):
-                self.app.start_goal("цель", card_key="draft:k")  # the real callback, the goal-card refusal path
-                # The automatic recheck (started on the refusal) still fails with the very same set: wait for its
-                # fresh failing slice, then the marker must still be there (the defect cleared it here).
-                await self.until(pilot, lambda: self.app.checks is not None
-                                 and any(not c.ok for c in self.app.checks))
-                await self.until(pilot, lambda: self.app.checking is False)
-                await pilot.pause(0.3)
-                self.assertTrue(self.app.goal_block)  # the marker survived the failing recheck
-                self.assertEqual(calls, ["цель"])     # a check that still fails sends nothing more
-                self.assertIn("Not started", self.app.chat_note)  # and keeps today's note
-                card = await self.card_shown(pilot)
-                self.assertEqual(card.spec.key, "ready:origin")
-                self.assertEqual([shown.spec.key for shown in self.cards_shown()], ["ready:origin"])
-                # A recheck that passes clears the block and the card leaves; the refused goal goes to planning.
-                slices.checks = self.slices(fixed=True)
-                await self.press(pilot, "/retry")
-                await self.until(pilot, lambda: self.card() is None and len(calls) == 2)
-                self.assertFalse(self.app.goal_block)
-                self.assertEqual(self.app.goal_message, "")
-                self.assertNotIn("Not started", self.app.chat_note)  # the drawn status note is gone too
-                self.assertEqual(calls, ["цель", "цель"])
-                # A2, once: another passing recheck starts nothing more.
-                self.app.request_check()
-                await self.until(pilot, lambda: self.app.checking is False)
-                await pilot.pause(0.3)
-                self.assertEqual(calls, ["цель", "цель"])
-                # A2, only that goal: a goal refused, then another one refused: the fix sends the new one only.
-                del calls[:]
-                slices.checks = self.slices()
-                self.app.start_goal("первая")
-                await self.until(pilot, lambda: self.app.refused_goal is not None)
-                await self.until(pilot, lambda: self.app.checking is False)
-                self.app.start_goal("вторая")
-                await self.until(pilot, lambda: self.app.refused_goal is not None and self.app.refused_goal[0] == "вторая")
-                await self.until(pilot, lambda: self.app.checking is False)
-                slices.checks = self.slices(fixed=True)
-                self.app.request_check()
-                await self.until(pilot, lambda: len(calls) == 3)
-                await pilot.pause(0.3)
-                self.assertEqual(calls, ["первая", "вторая", "вторая"])
-
-    async def test_a_removed_ready_card_never_comes_back(self):
-        """A4 regression (the acceptance review's repair): a readiness card its source stopped returning is gone
-        from the history and never comes back. Through the real `render_card_sources`: the blocked start shows
-        `ready:origin`; the failing set changes to `origin+clean`, so the origin card leaves and the new key's card
-        shows; the set returns to `origin`, and `ready:origin` is *not* shown again — the removed key stays in
-        `cards_seen` like any other card's, so the state returning does not resurrect it. A passed recheck then
-        drops the block and the remaining card."""
-        slices = Slices(self.slices())
-        self.approve(running=False)
-        async with self.shell(size=(120, 40)) as pilot:
-            await self.loaded(pilot)
-            with patch.object(Controller, "check", injected_check(slices)), \
-                    patch.object(Controller, "preview_start", blocked_start(self.slices())):
-                await self.blocked(pilot)  # the run pane's blocked start, the run note retained
-                self.assertEqual([shown.spec.key for shown in self.cards_shown()], ["ready:origin"])
-                self.assertIn("ready:origin", self.main().cards_seen)
-                # The failing set changes: the source's key changes and the card follows it.
-                slices.checks = self.slices(clean=True)
-                await self.press(pilot, "/retry")
-                await self.until(pilot, lambda: [shown.spec.key for shown in self.cards_shown()]
-                                 == ["ready:origin+clean"])
-                # The earlier set returns: the removed key is not resurrected (A4), so no card shows.
-                slices.checks = self.slices()
-                await self.press(pilot, "/retry")
-                await pilot.pause(0.3)
-                self.assertEqual(self.cards_shown(), [])
-                self.assertIn("ready:origin", self.main().cards_seen)   # the key stays seen for good
-                # A recheck that passes ends the block; no card is left either way.
-                slices.checks = self.slices(fixed=True)
-                self.app.request_check()
-                await self.until(pilot, lambda: self.app.checking is False)
-                await pilot.pause(0.3)
-                self.assertIsNone(self.card())
-
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)

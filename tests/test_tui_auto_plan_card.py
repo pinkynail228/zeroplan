@@ -33,9 +33,11 @@ from tui_support import HAVE_TEXTUAL, screen_text
 
 from terminal_planner import process
 from terminal_planner.authority import Authority, canonical
+from terminal_planner.engine import FixtureEngine
 from terminal_planner.planning import PlanView
 from terminal_planner.tui import strings
-from test_tui_approve_card import (GOAL, HAVE, ROLES, JOINT_PLAN, MISSING_REASON, ApproveCardShell, JointEngine, _Screen,
+from test_terminal_planner import ProjectTest
+from test_tui_approve_card import (GOAL, HAVE, ROLES, JOINT_PLAN, MISSING_REASON, ApproveCardShell, _Screen,
                                    proposal)
 
 try:
@@ -212,20 +214,15 @@ class AutoPlanCardTests(unittest.TestCase):
 class AutoPlanCardShell(ApproveCardShell):
     def propose_milestones(self, count):
         """The joint proposal with `count` one-task milestones in place of its single one."""
-        class ManyEngine(JointEngine):
-            def output(self, authority):
-                output = super().output(authority)
-                plan = dict(JOINT_PLAN, requirements=[{"id": "R%d" % n, "text": "Requirement %d." % n}
-                                                      for n in range(1, count + 1)], milestones=[
-                    {"id": "M%d" % n, "title": "Milestone number %d" % n, "depends_on": [], "slices": [
-                        {"id": "S%d" % n, "title": "Slice", "requirements": ["R%d" % n], "tasks": [
-                            {"id": "T%d" % n, "title": "The task", "checks": ["A deterministic test"]}]}]}
-                    for n in range(1, count + 1)])
-                output["proposal"] = canonical(plan)
-                return output
+        plan = dict(JOINT_PLAN, requirements=[{"id": "R%d" % n, "text": "Requirement %d." % n}
+                                              for n in range(1, count + 1)], milestones=[
+            {"id": "M%d" % n, "title": "Milestone number %d" % n, "depends_on": [], "slices": [
+                {"id": "S%d" % n, "title": "Slice", "requirements": ["R%d" % n], "tasks": [
+                    {"id": "T%d" % n, "title": "The task", "checks": ["A deterministic test"]}]}]}
+            for n in range(1, count + 1)])
         with Authority(self.state, self.project, fixture_id="test") as authority:
-            authority.begin(GOAL, ROLES, "fixture")
-            ManyEngine().proposal(authority, lambda _: None)
+            ProjectTest.begin(self, authority, goal=GOAL, draft=plan)  # the architect's plan, as its draft
+            FixtureEngine().proposal(authority, lambda _: None)
 
     def propose_at(self, level, milestones=None):
         """The joint proposal under an accepted profile of autonomy `level` (the file committed first, as the
@@ -251,8 +248,10 @@ class AutoPlanCardShell(ApproveCardShell):
             async with self.shell(controller, size=(80, 24)) as pilot:
                 await self.loaded(pilot)
                 card = await self.card_shown(pilot)
-                self.assertEqual(card.spec.text.split("\n"), [strings.text("card.plan_auto_text"),
-                                                              strings.text("card.plan_no_check")]
+                lines = card.spec.text.split("\n")
+                self.assertTrue(lines[1].startswith(card_kinds.READER_LINE))  # the Goldfish reader's retelling, wrapped
+                lines = lines[:1] + lines[lines.index(strings.text("card.plan_no_check")):]
+                self.assertEqual(lines, [strings.text("card.plan_auto_text"), strings.text("card.plan_no_check")]
                                  + ["M%d Milestone number %d · 1 task" % (n, n) for n in range(1, 6)] + ["…and 2 more"])
                 self.assertEqual(self.labels(), [strings.text("card.revise_only")])
                 shown = screen_text(self.app)

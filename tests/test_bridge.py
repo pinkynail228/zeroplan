@@ -48,7 +48,7 @@ from unittest.mock import patch
 
 from terminal_planner import autonomy, bridge, delivery, feed, milestone, process
 from terminal_planner.authority import Blocked, decode
-from terminal_planner.engine import FixtureEngine, fixture_draft
+from terminal_planner.engine import FIXTURE_PARAPHRASE, FixtureEngine, fixture_draft
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
 from terminal_planner.tui.controller import token_identity
 import test_terminal_planner as tp
@@ -66,6 +66,10 @@ def draft(title=None):
     if title is not None:
         plan["milestones"][0]["title"] = title
     return plan
+
+
+# The status fields of a Goldfish revision (the fixture plan, at its first revision) beside the common ones.
+GOLDFISH_FIELDS = {"paraphrase": FIXTURE_PARAPHRASE, "draft": None, "revisions_left": 3}
 
 
 class BridgeCase(tp.ProjectTest):
@@ -895,7 +899,8 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual((token["milestone"], token["attempt"]), ("M1", 1))
         self.assertEqual(token["run_id"], row["run_id"])
         self.assertEqual({k: v for k, v in payload["plan"].items() if k != "proposal"},
-                         {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review."})
+                         {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review.",
+                          **GOLDFISH_FIELDS})
         self.assertIsInstance(payload["plan"]["proposal"], dict)  # the full current proposal (A5t2b C1)
         waiting = next(item for item in payload["rows"] if item["id"] == "M2")
         self.assertIsNone(waiting["token"])  # no attempt yet
@@ -919,7 +924,8 @@ class BridgeCase(tp.ProjectTest):
             findings = authority.current["evidence"]["findings"]
         self.controller()
         self.assertEqual({k: v for k, v in self.rows()["plan"].items() if k != "proposal"},
-                         {"version": 1, "status": "review_exhausted", "verdict": "rejected", "findings": findings})
+                         {"version": 1, "status": "review_exhausted", "verdict": "rejected", "findings": findings,
+                          **GOLDFISH_FIELDS})
         self.assertIn("the plan is still too broad", findings)  # F1: the architect reads why it was rejected
 
     def test_a10_b1_the_architect_gets_its_budget_after_a_rejection_then_the_owner_decides(self):
@@ -1140,7 +1146,8 @@ class BridgeCase(tp.ProjectTest):
         self.assertEqual(results[0]["request"], "p1")
         self.assertLess(results[0]["seq"], results[1]["seq"])
         self.assertEqual({k: v for k, v in self.rows()["plan"].items() if k != "proposal"},
-                         {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review."})
+                         {"version": 1, "status": "approved", "verdict": "accepted", "findings": "Fixture only; no semantic model review.",
+                          **GOLDFISH_FIELDS})
 
     def owner(self, call, *args):
         """The owner's own Controller call, answered: `(outcome, error)` of its `done`."""

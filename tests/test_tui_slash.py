@@ -28,7 +28,7 @@ EVERYWHERE = frozenset(STATES)  # the eight states; every command named "all sta
 
 # A1's table, spelled out: (name, description id, states it acts in, argument rule).
 EXPECTED = (
-    ("/plan", "cmd.plan", frozenset(("idle", "draft", "error")), Arg("goal")),
+    ("/plan", "cmd.plan", frozenset(("idle", "draft", "error", "planning", "plan_ready")), Arg("goal")),
     ("/approve", "cmd.approve", frozenset(("plan_ready", "question", "error")), None),
     ("/decline", "cmd.decline", frozenset(("plan_ready", "question")), None),
     ("/run", "cmd.run", STATES, None),
@@ -55,7 +55,7 @@ EXPECTED = (
 
 # A3's table, spelled out again (a name -> the states it acts in), so the check does not just read A1's tuple back.
 ACTING = {
-    "/plan": {"idle", "draft", "error"},
+    "/plan": {"idle", "draft", "error", "planning", "plan_ready"},
     "/approve": {"plan_ready", "question", "error"},
     "/decline": {"plan_ready", "question"},
     "/view": set(STATES),

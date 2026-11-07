@@ -48,15 +48,14 @@ class DraftsTabTests(card_tests.DraftShell):
             self.assertLess(body.index(NEWER), body.index(OLDER))    # the newer first
             await pilot.press("escape")                               # A2: esc closes no fixed tab
             self.assertEqual(right.active, ui.TAB_DRAFTS)
-            with patch.object(card_tests.Controller, "start_planning", self.counting_start(calls)):
+            with patch.object(ui.ZplanApp, "send_owner_note", self.counting_note(calls)):
                 await self.send(pilot, "/plan")                       # a bare /plan sends the newer draft...
-                await self.until(pilot, lambda: self.app.snapshot.version is not None)
-            self.assertEqual(calls, [(NEWER, card_tests.NO_PLAN)])    # ...with its own identity
+                await self.until(pilot, lambda: calls)
+            self.assertEqual(calls, [NEWER])                          # ...to the architect (0.15)
             await pilot.pause(0.3)
             self.assertEqual([pane.id for pane in right.query(TabPane)], [ui.TAB_LIVE, ui.TAB_PLAN, ui.TAB_DRAFTS])
             self.assertEqual(main.view_tabs, [])
-            self.assertTrue(self.draft_tab()[1].endswith(body))       # both drafts remain after the plan exists...
-            self.assertIn("Plan r1 · proposed", self.draft_tab()[1])  # ...below the unapproved revision (v3i)
+            self.assertTrue(self.draft_tab()[1].endswith(body))       # both drafts remain
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)

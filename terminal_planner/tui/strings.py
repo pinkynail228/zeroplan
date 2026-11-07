@@ -562,8 +562,8 @@ CATALOG = {
     "bar.continue": {"en": "(the work continues)", "ru": "(работа продолжится)", "zh": "（任务继续）"},
 
     # ---- Command descriptions (lab COMMANDS; the names stay English) -----------------------------
-    "cmd.plan": {"en": "plan a goal: /plan <goal>", "ru": "спланировать цель: /plan <цель>",
-                 "zh": "为目标制定计划：/plan <目标>"},
+    "cmd.plan": {"en": "send a goal to the architect: /plan <goal>", "ru": "отправить цель архитектору: /plan <цель>",
+                 "zh": "把目标发给架构师：/plan <目标>"},
     "cmd.approve": {"en": "approve the plan or a decision on a card", "ru": "утвердить план или решение на карточке",
                     "zh": "批准卡片上的计划或决定"},
     "cmd.decline": {"en": "decline the card", "ru": "отказаться от карточки", "zh": "拒绝该卡片"},
@@ -640,8 +640,8 @@ CATALOG = {
     "note.uncommitted": {"en": "Files not committed: {n}. zplan and its workers see only committed files.",
                          "ru": "Файлов не закоммичено: {n}. zplan и его воркеры видят только закоммиченные файлы.",
                          "zh": "未提交的文件：{n}。zplan 及其 worker 只看到已提交的文件。"},
-    "note.plan_needs_goal": {"en": "write /plan <goal>", "ru": "напишите /plan <цель>",
-                             "zh": "请写 /plan <目标>"},
+    "note.plan_needs_goal": {"en": "write the goal after /plan, or in the chat",
+                             "ru": "напишите цель после /plan или в чате", "zh": "请在 /plan 后或在对话中写下目标"},
     "note.needs_arg": {"en": "{name}: give a path, e.g. /open AGENTS.md",
                        "ru": "{name}: укажи путь, например /open AGENTS.md",
                        "zh": "{name}：请给出路径，例如 /open AGENTS.md"},

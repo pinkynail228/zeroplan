@@ -151,7 +151,7 @@ class ViewTests(tpr.ProfileTest):
     @unittest.skipUnless(HAVE, MISSING_REASON)
     def test_a_planner_revision_shows_no_reader(self):
         app = self.session()
-        self.begin(app.authority)
+        self.begin_old_planner(app.authority)
         self.propose(app.authority)
         view = app.planning.proposal(app.authority.current)
         card = card_of(replace(joint_snapshot(), plan=view))

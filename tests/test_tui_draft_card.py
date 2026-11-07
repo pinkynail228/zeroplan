@@ -260,7 +260,7 @@ class CardContractTests(unittest.TestCase):
         self.assertIsInstance(verdict, palette.Submitted)
         self.assertEqual(verdict.command_name, "/plan")
         self.assertEqual(ui.slash_state(proposed), "plan_ready")  # unchanged without a sendable draft
-        self.assertIsInstance(palette.submit("/plan", ui.slash_state(proposed)), palette.Refused)
+        self.assertIsInstance(palette.submit("/plan", ui.slash_state(proposed)), palette.Submitted)  # 0.15: a goal can go to the architect then too
         self.assertIsInstance(palette.submit("/approve", ui.slash_state(proposed)), palette.Submitted)  # A3
 
     def test_regression_a_sendable_draft_reaches_the_typed_plan_under_a_failed_plan(self):
@@ -485,14 +485,11 @@ class DraftShell(ChatShell):
         await pilot.press("enter")
         await pilot.pause(0.3)
 
-    def counting_start(self, calls):
-        """A `start_planning` spy: records `(goal, draft)` and still starts the planner, so a run that should not
-        start is caught by the empty call list and a run that must start by the recorded one."""
-        real = Controller.start_planning
-
-        def spy(controller, goal, done, draft=None, card=False):
-            calls.append((goal, draft))
-            return real(controller, goal, done, draft=draft, card=card)
+    def counting_note(self, calls):
+        """A `send_owner_note` spy: records the text that goes to the architect and reports it taken."""
+        def spy(app, message, error=None):
+            calls.append(message)
+            return True
         return spy
 
     def draft_tab(self):
@@ -510,9 +507,8 @@ class DraftNoteTests(DraftShell):
         line once again. The Drafts tab holds the draft's time and whole text and comes forward; `/plan` is offered in
         the line because the screen is in `draft`.
 
-        A2/A3 on the reopened shell: a bare `/plan` calls `start_planning` once with the draft's text and its own
-        identity, the draft stops being sendable (the state is no longer `draft`), the fixture planner proposes, and
-        the typed `/approve` acts — a draft never stands in its way.
+        A2/A3 on the reopened shell: a bare `/plan` sends the draft's text to the architect once (0.15) and the draft
+        stops being sendable (the state is no longer `draft`).
 
         The store is written once, before the first shell opens, and only the second pass starts anything."""
         store = self.seed_goal_draft()
@@ -521,7 +517,7 @@ class DraftNoteTests(DraftShell):
         for opening in ("first", "reopen"):
             with self.subTest(opening=opening):
                 calls = []
-                with patch.object(Controller, "start_planning", self.counting_start(calls)):
+                with patch.object(ui.ZplanApp, "send_owner_note", self.counting_note(calls)):
                     async with self.shell(size=(120, 40), store=store) as pilot:
                         await self.settled(pilot)
                         notes = await self.note_shown(pilot)
@@ -542,14 +538,9 @@ class DraftNoteTests(DraftShell):
                             continue
                         await self.send(pilot, "/plan")
                         await self.until(pilot, lambda: calls and not main.draft_sendable())
-                        self.assertEqual(calls, [(GOAL_DRAFT, NO_PLAN)])
-                        plan = await self.plan_card_shown(pilot)
+                        self.assertEqual(calls, [GOAL_DRAFT])
                         self.assertNotEqual(ui.screen_slash_state(self.app), "draft")            # A3
-                        await self.send(pilot, "/approve")
-                        await self.until(pilot, lambda: self.plan_card() is not None and self.plan_card().spec.done)
-                        self.assertRegex(self.plan_card().spec.done, "^%s$" % receipt_pattern())
                         self.assertEqual(len(self.notes()), 1)                                   # the line stayed
-                        self.assertEqual(calls, [(GOAL_DRAFT, NO_PLAN)])                         # and nothing re-sent
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)
@@ -563,7 +554,7 @@ class StaleDraftTests(DraftShell):
         Interpretation: «a snapshot that names a plan» is a snapshot with a revision (`snapshot.version`); the
         retirement runs on the screen's own refresh, so the test only waits for the snapshot and the refresh."""
         calls = []
-        with patch.object(Controller, "start_planning", self.counting_start(calls)):
+        with patch.object(ui.ZplanApp, "send_owner_note", self.counting_note(calls)):
             async with self.shell(size=(120, 40), store=self.seed_goal_draft()) as pilot:
                 await self.settled(pilot)
                 await self.note_shown(pilot)
@@ -586,34 +577,7 @@ class StaleDraftTests(DraftShell):
                 await pilot.pause(0.3)
                 self.assertEqual(len(self.notes()), 1)
                 await self.send(pilot, "/plan")
-                self.assertEqual(calls, [])                                 # nothing was started
-
-    async def test_regression_a_refused_plan_writes_no_revision_and_the_retry_starts(self):
-        """RC6 (0.6.0 smoke defect 3): the draft's own `/plan` met a dirty tree and `start_planning` saved an unsent
-        revision before it looked at the gate, so the plan identity moved off «no plan» and the draft was
-        «черновик устарел» for good. C1: the refusal names the checks, writes no revision and the draft stays
-        sendable; C2: after the owner fixes readiness the same bare `/plan` starts the planner (one sent revision, no
-        stale line); C3 (the goal form keeps saving an unsent revision) is pinned by
-        `tests/test_tui_chat.py::GoalDraftTests` and not repeated here.
-
-        Interpretation: the refusal is the readiness gate's `unsent` answer, so the plan identity is read through
-        the authority file: absent after the refusal, one revision after the retry."""
-        readiness = Readiness(check("git"), check("branch", False, DIRTY, key="d"))
-        authority_path = RealAuthority(self.state, self.project, fixture_id="test").path
-        async with self.shell(self.controller(readiness), size=(120, 40), store=self.seed_goal_draft()) as pilot:
-            await self.settled(pilot)
-            await self.note_shown(pilot)
-            await self.send(pilot, "/plan")
-            self.assertIn("отсоединён", screen_text(self.app))        # C1: the checks are named...
-            self.assertFalse(authority_path.exists())                    # ...no revision, no run
-            self.assertTrue(self.main().draft_sendable())                # ...and the draft is still sendable
-            readiness.fix("branch")
-            await self.send(pilot, "/plan")                              # C2: the retry
-            await self.until(pilot, lambda: authority_path.exists())
-            await self.until(pilot, lambda: not self.main().draft_sendable())
-            self.assertNotIn(chat_module.OUTDATED, screen_text(self.app))
-        revisions = json.loads(authority_path.read_text())["revisions"]
-        self.assertEqual(len(revisions), 1)
+                self.assertEqual(calls, [])                                 # nothing was sent
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)
@@ -799,68 +763,6 @@ def _app_method(name):
     return missing if ui is None else getattr(ui.ZplanApp, name)
 
 
-class _DraftSendScreen(_Screen):
-    """The screen double a draft submission runs against: the bookkeeping of `_Screen` plus the log of the sends it
-    was told about (a submission that did not start the planner must report none)."""
-
-    def __init__(self):
-        super().__init__()
-        self.sent = 0
-
-    def draft_sent(self):
-        self.sent += 1
-
-
-class _Controller:
-    """The controller side of `start_goal`: `start_planning` records the call and answers the prepared verdict at
-    once, so the delivered handler runs synchronously as it would on the UI thread."""
-
-    def __init__(self, outcome, error, calls):
-        self.outcome, self.error, self.calls = outcome, error, calls
-
-    def start_planning(self, goal, done, draft=None, card=False):
-        self.calls.append((goal, draft))
-        done(self.outcome, self.error)
-        return None
-
-
-class _GoalApp:
-    """The app double of a draft submission: the real `ZplanApp.start_goal` and its own refusal/sent callbacks run
-    on it, so each verdict is checked against the stand-in screen without a shell (A6 keeps the failure paths at
-    unit level; the third whole-app method that covered them is retired)."""
-
-    start_goal = _app_method("start_goal")
-    note_card_refusal = _app_method("note_card_refusal")
-    draft_sent = _app_method("draft_sent")
-
-    def __init__(self, outcome, error=None):
-        self.starting, self.goal_block = False, ()
-        self.goal_message = ""
-        self.goal_identity = NO_PLAN
-        self.changes, self.checks, self.refreshes = 0, 0, 0
-        self.after, self.calls = [], []
-        self.screen = _DraftSendScreen()
-        self.controller = _Controller(outcome, error, self.calls)
-
-    def deliver(self, handler):
-        return handler
-
-    def changed(self):
-        self.changes += 1
-
-    def request_check(self):
-        self.checks += 1
-
-    def request_refresh(self):
-        self.refreshes += 1
-
-    def after_submission(self, outcome):
-        self.after.append(outcome)
-
-    def main_screen(self):
-        return self.screen
-
-
 class _PlanScreen(_Screen):
     """The screen double `/plan` is dispatched on: the real `action_plan` runs, the app records what it was asked."""
 
@@ -874,29 +776,32 @@ class _PlanScreen(_Screen):
         self.app.snapshot = SimpleNamespace(version=None, plan_state=None)  # no plan: the "no plan" draft is current
         self.sendable_drafts = {key: chat_module.Draft("goal", "%s %s" % (GOAL_DRAFT, key), "", NO_PLAN, True)
                                 for key in drafts}
-        self.started, self.unsent = [], []
-        self.app.goal_identity = "untouched"
-        self.app.start_goal = lambda goal, card_key=None: self.started.append((goal, card_key, self.app.goal_identity))
+        self.started, self.sent_keys, self.unsent = [], [], []
+        self.app.send_owner_note = lambda text: self.started.append(text) or True  # the chat takes it
+        self.app.draft_sent = self.sent_keys.append
         self.app.send_unsent_plan = lambda: self.unsent.append(True)
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)
 class PlanCommandDispatchTests(unittest.TestCase):
-    """K1b C3 and C2, v3e A2: what `/plan` acts on. Interpretation: a goal typed after the command (`argument`) wins
-    over a sendable draft; a bare `/plan` sends the *newest* sendable draft with its own identity; one whose plan
-    moved on is refused on the status line and starts nothing; a bare `/plan` with no draft goes to
-    `send_unsent_plan`, while a `key` that names no draft only says `note.not_now`."""
+    """What `/plan` acts on (0.15: the goal goes to the architect as the owner's message, `send_owner_note`). A goal
+    typed after the command (`argument`) wins over a sendable draft; a bare `/plan` sends the *newest* sendable
+    draft's text and marks that draft sent; one whose plan moved on is refused on the status line and sends nothing;
+    a bare `/plan` with no draft goes to `send_unsent_plan`, while a `key` that names no draft only says
+    `note.not_now`."""
 
     def test_typed_text_is_the_goal_even_beside_a_sendable_draft(self):
         screen = _PlanScreen()
         screen.action_plan("add slugify", None)
-        self.assertEqual(screen.started, [("add slugify", None, None)])  # the text, no draft, no provenance
-        self.assertEqual(sorted(screen.sendable_drafts), ["k1"])         # the draft is still sendable
+        self.assertEqual(screen.started, ["add slugify"])          # the text goes to the architect
+        self.assertEqual(screen.sent_keys, [])                      # no draft was sent
+        self.assertEqual(sorted(screen.sendable_drafts), ["k1"])   # the draft is still sendable
 
-    def test_a2_a_bare_plan_sends_the_newest_draft_with_its_identity(self):
+    def test_a_bare_plan_sends_the_newest_draft_to_the_architect(self):
         screen = _PlanScreen(drafts=("older", "newer"))
         screen.action_plan("", None)
-        self.assertEqual(screen.started, [("%s newer" % GOAL_DRAFT, "newer", NO_PLAN)])
+        self.assertEqual(screen.started, ["%s newer" % GOAL_DRAFT])
+        self.assertEqual(screen.sent_keys, ["newer"])
         self.assertEqual(screen.unsent, [])
 
     def test_a2_a_draft_the_plan_moved_past_is_refused_on_the_status_line_and_starts_nothing(self):
@@ -916,49 +821,3 @@ class PlanCommandDispatchTests(unittest.TestCase):
         self.assertEqual(screen.app.chat_note, strings.text("note.not_now", name="/plan"))
 
 
-@unittest.skipUnless(HAVE, MISSING_REASON)
-class CardSubmissionTests(unittest.TestCase):
-    """The draft-submission failure paths at unit level (A6: the whole-app budget is two). The real
-    `ZplanApp.start_goal` runs on `_GoalApp` with the controller answering one prepared verdict, so a submission
-    that did not start the planner is checked against what it leaves behind and the line the owner reads."""
-
-    def test_a_submission_that_does_not_start_keeps_the_draft_and_says_why(self):
-        """Code-review finding 1: `start_goal` reported the draft as sent for *every* non-error, non-`unsent`
-        verdict, so `Outcome("stale")` — `planning.submission` returns it when the target changed between preparation
-        and submission and starts no planner — sent the draft away and started nothing. The stale verdict is now a
-        refused submission like the others.
-
-        The readiness refusal (`unsent`) and the controller error are the same two paths: they keep the draft
-        sendable and say why on the main screen's own status line. Interpretation: the draft is sent only when the
-        planner actually started, so `stale` and `unsent` are treated alike; the line for `stale` is `PLAN_OUTDATED`,
-        the wording the plan screen's own watch already shows."""
-        unsent = Outcome("unsent", checks_of([check("branch", False, DIRTY, key="d")]))
-        stale = Outcome("stale")
-        cases = ((None, "planner unavailable", "Not done: planner unavailable"),
-                 (unsent, None, ui.NOT_STARTED_BELOW),
-                 (stale, None, ui.PLAN_OUTDATED))
-        for outcome, error, expected in cases:
-            with self.subTest(kind=outcome.kind if outcome is not None else "error"):
-                app = _GoalApp(outcome, error)
-                app.start_goal(GOAL_DRAFT, card_key="k1")
-                self.assertEqual(app.calls, [(GOAL_DRAFT, NO_PLAN)])  # the draft's own identity travelled
-                self.assertEqual(app.screen.sent, 0)                  # the draft was not sent
-                self.assertEqual(app.after, [])                       # nothing was submitted to the plan watch
-                self.assertIn(expected, app.screen.app.chat_note)     # the refusal is on the main line
-                self.assertFalse(app.starting)                        # another press is not swallowed
-                if outcome is unsent:  # the readiness refusal names the failing check it lists
-                    self.assertIn("отсоединён", app.screen.app.chat_note)
-
-    def test_a_started_submission_sends_the_draft(self):
-        """The other half of the same callback (no regression): a verdict that *did* start the planner sends the
-        draft (it is not sendable any more), clears the draft's provenance and hands the verdict to the plan watch —
-        so the stale branch did not swallow the success case. A goal typed as `/plan <text>` (no key) sends no draft."""
-        app = _GoalApp(Outcome("ready"))
-        app.start_goal(GOAL_DRAFT, card_key="k1")
-        self.assertEqual(app.calls, [(GOAL_DRAFT, NO_PLAN)])
-        self.assertNotEqual(app.after, [])
-        self.assertIsNone(app.goal_identity)
-        self.assertEqual(app.screen.sent, 1)
-        typed = _GoalApp(Outcome("ready"))
-        typed.start_goal("add slugify")
-        self.assertEqual(typed.screen.sent, 0)

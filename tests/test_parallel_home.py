@@ -113,7 +113,7 @@ class BusyTests(ParallelRunsTest):
                          "All 2 slots are busy (M1, M2): a new start, a continuation and a new attempt wait. "
                          "[w] watch, [g] check.")
 
-    def test_c2_pick_and_home_start_below_the_cap_and_refuse_with_the_full_line_at_it(self):
+    def test_home_starts_below_the_cap_and_offers_no_start_at_it(self):
         with self.fixture_authority() as a:
             self.approve_parallel(a)
             self.bind_slots(a, 3)
@@ -123,15 +123,11 @@ class BusyTests(ParallelRunsTest):
             home = service.home()  # one of three slots taken: a ready milestone is startable
             self.assertEqual((home.slots, home.busy), (3, None))
             self.assertEqual(home.g, "home.start")
-            self.assertEqual(service.pick("g", "M2", home).kind, "start")
             service.start(service.preview("M2", ROLES), ROLES)
             service.start(service.preview("M5", ROLES), ROLES)  # three disjoint attempts: the cap is reached
             full = service.home()
             self.assertEqual((full.slots, full.busy), (3, "M1"))
             self.assertIsNone(full.g)
-            pick = service.pick("g", "M7", full)  # [g] on a ready milestone behind the full slots
-            self.assertEqual(pick.kind, "message")
-            self.assertEqual(pick.text, full_line(["M1", "M2", "M5"], 3))
 
 
 class GuardTests(ParallelRunsTest):

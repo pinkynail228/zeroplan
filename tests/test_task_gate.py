@@ -136,7 +136,10 @@ class OffIdenticalTests(tpr.ProfileTest):
     def journey(self, configuration):
         """Accept the configuration, approve a fixture plan and digest the stored revision, the preview and home."""
         self.accept_file(self.CONFIG[configuration])
-        self.approved_plan()
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:  # the old planner's revision
+            self.begin_old_planner(authority)
+            self.propose(authority)
+            authority.approve(1)
         with RealAuthority(self.state, self.project, fixture_id="test") as authority:
             revision = copy.deepcopy(authority.state["revisions"][0])
         with self.app() as app:

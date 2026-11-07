@@ -183,8 +183,7 @@ class PlanCardScopeTests(unittest.TestCase):
         self.assertTrue(added[-1].endswith("…"), added)
 
 
-@unittest.skipUnless(HAVE, MISSING_REASON)
-class DemoJourneyTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
+class DemoShell(ProjectTest, unittest.IsolatedAsyncioTestCase):
     """The app `cli.main` builds for `--fixture demo`, driven through the chat input. The project has no origin, as a
     demo project may not, and the accepted profile is at `auto`."""
 
@@ -283,6 +282,10 @@ class DemoJourneyTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
     def spoken(self, role):
         return [row for row in self.rows("transcript.jsonl") if row["role"] == role]
 
+
+
+@unittest.skipUnless(HAVE, MISSING_REASON)
+class DemoJourneyTests(DemoShell):
     async def test_an_owner_goal_reaches_the_merge_card_through_one_owner_approval(self):
         app = self.demo_app()
         self.assertFalse((Path(setup.data_root()) / "architect").exists())

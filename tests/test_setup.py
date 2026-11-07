@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from terminal_planner import agent_profile, catalog, process, setup, toolchain
 from terminal_planner.authority import Blocked
-from terminal_planner.cli import Terminal, configure_roles, main, session
+from terminal_planner.cli import Terminal, configure_roles, main
 from terminal_planner.engine import FixtureEngine
 
 
@@ -289,28 +289,6 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(exit_status.exception.code, 0)
             install.assert_not_called()
 
-    def test_first_launch_shows_readiness_and_q_exits_without_project_changes(self):
-        project = self.root / "project"
-        project.mkdir()
-        for args in (("init", "-q", "-b", "main"), ("-c", "user.name=F", "-c", "user.email=f@example.invalid",
-                                                    "commit", "-q", "--allow-empty", "-m", "fixture")):
-            subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
-        terminal = Terminal(io.StringIO("q\n"), io.StringIO())
-        with patch.dict(os.environ, {"HOME": str(self.root / "home")}), \
-                patch("terminal_planner.cli.Terminal", return_value=terminal), \
-                patch("terminal_planner.cli.choose_project", return_value=project), \
-                patch("terminal_planner.cli.install_tools") as install:
-            self.assertEqual(main([]), 0)
-            install.assert_not_called()
-        output = terminal.output.getvalue()
-        self.assertIn("zplan · project · main", output)
-        self.assertIn("! The zplan tools are not installed", output)
-        self.assertIn("! No GitHub origin — [i] instructions", output)
-        self.assertIn("[u] install tools", output)
-        self.assertIn("[q] quit", output)
-        self.assertNotIn("There is no plan.", output)  # q on the readiness block exits; home is never reached
-        self.assertEqual(sorted(p.name for p in project.iterdir()), [".git"])
-
     def test_setup_timeout_is_not_success(self):
         with patch.object(setup.subprocess, "run", side_effect=subprocess.TimeoutExpired("npm", 600)):
             with self.assertRaises(Blocked):
@@ -376,21 +354,6 @@ class DoctorTests(unittest.TestCase):
                      ("remote", "add", "origin", "https://github.com/owner/project.git")):
             subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
         return project
-
-    def journey(self, project, name, *steps, install=None, login=None):
-        """One startup through the real readiness list; returns (output, goals sent to the planner)."""
-        submitted = []
-
-        class Engine(FixtureEngine):
-            def proposal(self, authority, progress, slice=None):
-                submitted.append(authority.current["goal"])
-                return super().proposal(authority, progress, slice)
-        output = io.StringIO()
-        session(Terminal(Steps(*steps), output), project, self.root / ("state-" + name), lambda *_: Engine(),
-                fixture_id=name, readiness=lambda: setup.readiness(project), install=install, login=login)
-        text = output.getvalue()
-        self.assertNotIn(self.SECRET, text)
-        return text, submitted
 
     def run_doctor(self, project=None):
         messages = []

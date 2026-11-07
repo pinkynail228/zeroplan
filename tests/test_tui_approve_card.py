@@ -43,12 +43,12 @@ from unittest.mock import patch
 import tui_support  # noqa: F401
 from tui_support import HAVE_TEXTUAL, screen_text
 
-from terminal_planner.authority import Authority, Blocked, canonical
+from terminal_planner.authority import Authority, Blocked
 from terminal_planner.cli import refusal
 from terminal_planner.engine import FixtureEngine
 from terminal_planner.planning import PlanView
 from terminal_planner.tui import strings
-from test_terminal_planner import ROLES
+from test_terminal_planner import ROLES, ProjectTest
 from test_tui_planning import GOAL, PlanningShell
 
 MISSING_REASON = "Rich и Textual недоступны: нужен ZPLAN_TEST_WHEELHOUSE с wheels textual 8.2.8"
@@ -155,10 +155,12 @@ class _App:
     exercised, not re-implemented."""
 
     revision_note = _app_method("revision_note")
+    send_owner_note = _app_method("send_owner_note")
 
     def __init__(self, snapshot=None):
         self.snapshot, self.controller = snapshot, _Plan()
         self.chat_note, self.plan_lines = "", ()
+        self.chat, self.kept = None, []  # no architect: a note waits in the input (`keep_chat_text`)
         self.decisions, self.pushed = [], []
         self.decide_error = None  # the refusal text the callback delivers (None: the decision succeeds)
 
@@ -172,6 +174,13 @@ class _App:
 
     def push_screen(self, screen, callback=None):
         self.pushed.append((screen, callback))
+
+    def keep_chat_text(self, text):
+        self.kept.append(text)
+        return True
+
+    def chat_snapshot(self):
+        return {"revision": getattr(self.snapshot, "version", None), "plan_state": None}
 
     def deliver(self, handler):
         return handler
@@ -316,8 +325,9 @@ class PlanCardCommandTests(unittest.TestCase):
         self.assertEqual(screen.app.controller.revisions, [])
         self.assertEqual([spec.key for spec in ui.CARD_SOURCES["plan"](screen)], ["plan:1"])
         self.assertIsNone(screen.card_specs["plan:1"].done)  # still an open decision
-        callback("короче")  # enter: the revision request goes to the controller
-        self.assertEqual(screen.app.controller.revisions, ["короче"])
+        callback("короче")  # enter: with no architect in this session the note waits in the input
+        self.assertEqual(screen.app.controller.revisions, [])
+        self.assertEqual(screen.app.kept, ["Revise plan r1: короче"])
 
     def test_declining_the_architects_plan_goes_to_the_architect_and_cannot_approve_it(self):
         """0.14 K: with a chat, declining the architect's (Goldfish) plan sends the owner's note to the architect as
@@ -370,16 +380,6 @@ class PlanCardCommandTests(unittest.TestCase):
 
 # The whole-app half: A1+A2 and A1+A4, one shell method each. --------------------------------------------------
 
-class JointEngine(FixtureEngine):
-    """The fixture engine whose review carries the joint example's plan (1 milestone, 3 tasks): the fixture's own plan
-    has two milestones of two tasks and would name other counts."""
-
-    def output(self, authority):
-        output = super().output(authority)
-        output["proposal"] = canonical(JOINT_PLAN)
-        return output
-
-
 @unittest.skipUnless(HAVE, MISSING_REASON)
 class ApproveCardShell(PlanningShell):
     """The planning shell that can seed the joint-example proposed plan and reads the main screen's card slot."""
@@ -388,8 +388,8 @@ class ApproveCardShell(PlanningShell):
         """The joint example's proposed revision, written before the shell opens (exactly as the fixture shell
         writes a proposed plan, only with this run's counts)."""
         with Authority(self.state, self.project, fixture_id="test") as authority:
-            authority.begin(GOAL, ROLES, "fixture")
-            JointEngine().proposal(authority, lambda _: None)
+            ProjectTest.begin(self, authority, goal=GOAL, draft=JOINT_PLAN)  # the architect's plan, as its draft
+            FixtureEngine().proposal(authority, lambda _: None)
 
     def main(self):
         """The main screen, whatever modal (if any) is on top."""
@@ -483,6 +483,7 @@ class ApproveCardTests(ApproveCardShell):
             message = "Revise plan r1: shorter"
             self.assertTrue(self.app.keep_chat_text(message))
             self.assertEqual(field.value, "typed " + message)
+            self.assertTrue(self.app.unbound_input)  # sent later from the input, it still approves nothing
 
 
 @unittest.skipUnless(HAVE, MISSING_REASON)

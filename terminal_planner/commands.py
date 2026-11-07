@@ -10,14 +10,12 @@ Flag = namedtuple("Flag", "names metavar purpose meaning commands")
 START = "start"  # the default command: plain `zplan`
 
 COMMANDS = (
-    Command(START, "zplan [--plain] [--project PATH]",
+    Command(START, "zplan [--project PATH]",
             "open the plan and milestones of the current Git project",
-            "Interactive mode: a full-screen interface on a terminal, otherwise (or with --plain, TERM=dumb) a "
-            "line-oriented one. The project is the current directory or --project. Screen keys: ? (lists the current screen's keys).",
-            "Opens the plan and milestones of the Git project in the working directory (full-screen on a terminal, "
-            "line-oriented otherwise).",
-            ("zplan --plain                  line-oriented mode without the full-screen interface",
-             "zplan --project ~/work/app     open another project",
+            "The full-screen interface; it needs an interactive terminal (for scripts: zplan status, zplan exec). "
+            "The project is the current directory or --project.",
+            "Opens the plan and milestones of the Git project in the working directory, full-screen.",
+            ("zplan --project ~/work/app     open another project",
              "zplan --fixture demo --state-dir /tmp/zplan-demo   demo without a model in an isolated directory")),
     Command("exec", "zplan exec --goal GOAL.md --operation-id ID [--project PATH]",
             "send one owner goal through the shared Application Service and print JSON",
@@ -106,8 +104,8 @@ FLAGS = (
          "Goal text, unchanged on replay; at most 1 MiB.", ("exec",)),
     Flag(("--operation-id",), "ID", "exec: stable submission key, 1-128 characters (required)",
          "Same id and different goal is a conflict; replay creates no new turn or effect.", ("exec",)),
-    Flag(("--plain",), None, "line-oriented mode without the full-screen interface (also when the output is not a terminal)",
-         "Forces the line-oriented UI.", (START,)),
+    Flag(("--plain",), None, "removed in 0.15: zplan is full-screen only",
+         "Says that zplan is full-screen only and exits 2.", (START,)),
     Flag(("--project",), "PATH", "Git project (default: the current directory)",
          "Selects the Git project instead of the working directory.", (START, "status", "doctor", "roles", "profile", "exec")),
     Flag(("--state-dir",), "DIR", "fixture only: root of the isolated state",

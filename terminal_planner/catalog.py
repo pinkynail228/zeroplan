@@ -453,7 +453,7 @@ ERRORS = _entries(
      "zplan.process.json or the saved roles were edited meanwhile.", "Look at the preview shown again and confirm it."),
     # Interface
     ("tui.unavailable", "The full-screen interface cannot start.", "Textual is missing or not importable.",
-     "`zplan --plain`, or reinstall zplan."),
+     "Reinstall zplan."),
     (UNKNOWN, "A failure that has no catalog family.", "An unclassified message or exception.",
      "The bounded text shown with it is the only detail: `zplan doctor`, [i] on home, then docs/REFERENCE.md."),
 )
@@ -469,13 +469,7 @@ _BACK = "Enter or q — back."
 SCREENS = {s.id: s for s in (
     Screen("home", "Home screen", "Plan overview and milestone list.",
            "Enter opens what “Next” names (start and check only with their own letter); Ctrl-D quits."),
-    Screen("readiness", "Readiness", "What is missing before a model run.", _BACK),
-    Screen("bootstrap", "Process profile", "First start in a project without an accepted process profile.",
-           "Accept writes the profile; later works from the snapshot; q quits without deciding."),
-    Screen("goal", "Goal saved", "After the goal text, before the planner starts.", _BACK),
     Screen("plan", "Plan", "A plan revision at any status.", _BACK),
-    Screen("observe", "Observation", "Live view of a running attempt (type a key, then Enter).",
-           "Ctrl-C detaches: the run continues."),
     Screen("unknown", "Run: status unknown", "Unconfirmed submission or an interrupted attempt.", _BACK),
     Screen("awaiting_merge", "Run: done, awaiting merge", "An accepted, exported result.", _BACK),
     Screen("conflict", "Run: merge conflict", "A conflicting merge.", _BACK),
@@ -536,44 +530,12 @@ _a("home", "attempt", "g", "new attempt", "start a new attempt of a stopped or f
 _a("home", "open", "o", "open", "the end screen of a milestone that needs attention", "Open the end screen of a milestone that needs attention.")
 _a("home", "tail", "e", "log", "the last lines of the Zeroshot log (on request): a running or failed run", "Show the tail of the run log.")
 
-_a("readiness", "install", "u", "install tools", "install the pinned Zeroshot and Codex", "Run setup.")
-_a("readiness", "login", "l", "log in", "log in to Codex in this terminal", "Run the Codex login.")
-_a("readiness", "changes", "d", "changes", "show uncommitted changes (changes nothing)", "List uncommitted changes; changes nothing.")
-_a("readiness", "recheck", "g", "check again", "repeat the check after the fix", "Re-run the readiness check.")
-_a("readiness", "details", "i", "details", "instructions for each finding", "Fix instructions for each item.")
-_a("readiness", "back", "q", "back", "go back", "Return to the previous screen.")
-_a("readiness", "leave", "q", "quit", "quit zplan", "Leave zplan (the first readiness screen).")
 
-_a("bootstrap", "accept", "a", "accept", "write zplan.process.json and accept the profile", "Accept the proposed profile (writes the file).")
-_a("bootstrap", "later", "l", "later", "work from the proposal without writing to the project", "Postpone; the snapshot is used and the header says so.")
-_a("bootstrap", "leave", "q", "quit", "quit without deciding", "Leave without deciding.")
 
-_a("goal", "start", "g", "start the planner", "check readiness and submit the goal to the planner", "Check readiness, then submit the goal.")
-_a("goal", "settings", "s", "settings", "edit the roles before starting", "Edit roles before submitting.")
-_a("goal", "back", "q", "back", "leave the goal unsaved and go back", "Leave without saving the goal.")
 
-_a("plan", "start", "g", "start the planner", "check readiness and submit the goal; a stale unsent plan is first rebuilt on the current project; an unconfirmed submission is sent again unchanged",
-   "Check readiness, then submit the unsent revision; a stale unsent one is first rebuilt on the current project; an unconfirmed submission is sent again unchanged.")
-_a("plan", "renew", "n", "prepare a new plan on the current project", "the same goal on the current project state; no model is run",
-   "Prepare a new unsent revision, same goal, current project; nothing is sent.")
 _a("plan", "details", "i", "details", "full record and diagnostic commands", "Full record and diagnostics.")
-_a("plan", "tail", "e", "log", "the last lines of the planner's Zeroshot log (on request)", "Show the tail of the planner run log.")
-_a("plan", "watch", "w", "watch", "follow the planner", "Watch the planner.")
-_a("plan", "stop", "s", "stop planning", "stop the running planner", "Stop the running planner; the run is never resubmitted.")
-_a("plan", "approve", "a", "approve", "approve the plan; no implementation is started", "Approve this revision (starts nothing).")
-_a("plan", "revise", "r", "revise", "write what to change and re-plan", "Request a revision.")
 _a("plan", "requirements", "i", "requirements and checks", "the full plan: requirements, tasks, checks", "Full plan with requirements and checks.")
-_a("plan", "override", "o", "approve despite the check", "approve a plan the check rejected; a reason is required",
-   "Approve a plan the critic rejected, with a typed reason (starts nothing).")
-_a("plan", "restart", "g", "start the planner again", "a new revision of the same goal", "Run the planner again.")
-_a("plan", "retry", "g", "check readiness and start again", "check readiness and submit a new revision", "Check readiness and resubmit.")
-_a("plan", "login", "l", "refresh login", "log in to Codex again", "Refresh the Codex login.")
-_a("plan", "back", "q", "back", "return to the home screen", "Back to home.")
 
-_a("observe", "stop", "k", "stop", "k and Enter: stop the attempt (after a confirmation)", "Stop the attempt after a confirmation.")
-_a("observe", "detach", "Ctrl-C", "detach", "quit; the run continues", "Detach; the run continues.")
-_a("observe", "help", "?", "help", "this help", "This help.")
-_a("observe", "tail", "e", "log", "the last lines of the Zeroshot log (on request)", "Show the tail of the run log.")
 
 _a("unknown", "check", "g", "check", "reconcile with Zeroshot without resubmitting", "Reconcile without resubmitting.")
 _a("unknown", "back", "q", "back", "go back", "Back.")

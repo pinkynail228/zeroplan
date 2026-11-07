@@ -697,59 +697,6 @@ class Delivery:
         return ApprovedPlan(plan["version"], tuple([goal_line(plan["goal"], 100, "home.details")]
                                                    + self.overview_lines(plan, items, self.item_text)))
 
-    @staticmethod
-    def next_view(home):
-        """The key Enter follows on home: only a view, never a start or a check."""
-        if home.kind != "approved":
-            return "p"
-        if home.focus is None:
-            return ""
-        return {"running": "w", "unknown": "", "stopping": "", "ready": ""}.get(home.focus.state, "o")
-
-    def pick(self, key, target, home):
-        """The milestone a plain home key (w/g/o) applies to: `target` or the first one in a matching state, else
-        the focus."""
-        items = self.runs.overview()
-        if key == "g":
-            found = self.g_item(items)
-            default = found["id"] if found else None
-        else:
-            wanted = {"w": ("running",), "o": ATTENTION}[key]
-            default = next((i["id"] for i in items if i["state"] in wanted), None)
-        focus = home.focus.id if home.focus else None
-        milestone_id = target or default or focus
-        item = next((i for i in items if i["id"] == milestone_id), None)
-        if item is None:
-            return Pick("message", None, "Stage %s is not in the plan." % milestone_id)
-        row = self.row(item)
-        if key == "w":
-            if item["state"] != "running":
-                return Pick("message", row, "%s is not running now." % milestone_id)
-            return Pick("follow", row)
-        if key == "g":
-            state = item["state"]
-            if state in CHECK:
-                return Pick("check", row)
-            slots = self.slots()  # the profile's own bound, read once for the busy hint and the refusal
-            busy = self.busy(items, slots)
-            if state in ("ready", "failed_recoverable", "failed", "stopped") and busy is not None:
-                full = full_line([i["id"] for i in items if i["state"] in ACTIVE + ("unknown",)], slots)
-                return Pick("message", row, full or (
-                    "%s is busy now (%s): a new start, a continuation and a new attempt wait. [w] watch, "
-                    "[g] check." % (busy["id"], self.state_text(busy))))
-            if state == "ready":
-                return Pick("start", row)
-            if state == "failed_recoverable":
-                return Pick("resume", row)
-            if state in ("failed", "stopped"):
-                return Pick("attempt", row)
-            if state == "waiting":
-                return Pick("start", row)
-            return Pick("message", row, "%s: %s. Open: [o] %s" % (milestone_id, self.state_text(item), milestone_id))
-        if row.token is None:
-            return Pick("message", row, "%s: %s." % (milestone_id, self.state_text(item)))
-        return Pick("follow", row)
-
     def resolve(self, token, exact=True):
         """The attempt of the token's milestone the current revision selects, or Changed when the plan revision,
         the attempt, the run or (exact) its status, outcome and delivery are no longer the ones the view was built
@@ -875,10 +822,6 @@ class Delivery:
                      p["tasks"], limits["max_additions"], limits["task_iterations"] - 1, limits["final_repairs"])]
         return Preview(milestone_id, p["milestone"]["title"], self.authority.current["version"], p["attempt"],
                        tuple(lines), status.digest if status is not None else "")
-
-    @staticmethod
-    def start_question(preview):
-        return "Start %s?" % preview.milestone
 
     @staticmethod
     def start_text(preview):
@@ -1048,14 +991,6 @@ class Delivery:
 
     # Observation and stop ------------------------------------------------------
 
-    def now_line(self, r):
-        """`now: …` of an active attempt, or None when nothing is known yet."""
-        now = self.runs.activity_now(r)
-        if not (now["task"] or now["phase"]):
-            return None
-        return "  now: %s" % " · ".join(
-            ([("task %s/%s (%s)" % now["task"])] if now["task"] else []) + ([now["phase"]] if now["phase"] else []))
-
     def step(self, r, mark=None, seconds=None):
         """One bounded observation slice: the only caller of the mutating poll. `active` is False once the
         attempt is no longer submitted/running/stopping."""
@@ -1148,20 +1083,12 @@ class Delivery:
             raise Blocked("The planner has no run yet: no journal.", family="action.refused")
         return "%s journal r%s" % (plan_worker(plan).capitalize(), plan["version"]), self.tail(None)
 
-    @staticmethod
-    def stop_question(r):
-        return "Stop %s? The attempt's unfinished work will not be accepted." % r["milestone"]
-
     def stop(self, r):
         """The confirmed stop; a second request while stopping is refused."""
         if r["status"] == "stopping":
             raise Blocked("%s is already stopping." % r["milestone"], family="action.refused")
         self.runs.stop(r)
         return r
-
-    @staticmethod
-    def check_line(r):
-        return ("Checking the stop of %s…" if r["status"] == "stopping" else "Checking the unfinished submission of %s…") % r["milestone"]
 
     def reconcile(self):
         return self.runs.reconcile()
@@ -1280,7 +1207,8 @@ class Delivery:
                 body.append("  Proposal: " + one_line(proposal, 400))
                 if problem:
                     body.append("  Not usable as the stage's task list: " + summary(problem))
-                body.append("  Difference from the plan: it changes the stage plan → accepting opens a plan revision.")
+                body.append("  Difference from the plan: it changes the stage plan → accepting sends it to the architect, "
+                            "who changes the plan with you.")
             else:
                 body.append("  Proposal: change the stage's tasks")
                 for item in candidate["amendments"]:
@@ -1578,10 +1506,6 @@ class Delivery:
 
     # Owner actions that create an attempt or a revision --------------------------
 
-    @staticmethod
-    def attempt_line(r):
-        return NEW_ATTEMPT % r["destination"]["branch"]
-
     def live_roles(self, kind):
         """The accepted profile's roles as they are now (None without a profile: the attempt or revision then
         inherits the previous one's); frozen revisions and attempts are never rewritten."""
@@ -1597,8 +1521,8 @@ class Delivery:
         return self.runs.answer(r, text, self.live_roles("milestone"))
 
     def accept(self, r):
-        """needs_owner: ("attempt", the new attempt) or ("plan", the new revision, to be sent to the planner). Only
-        the attempt branch opens a run, so only it takes the cap guard; a plan revision is not an attempt."""
+        """needs_owner: ("attempt", the new attempt) or ("architect", the owner's message for the architect, when the
+        proposal does not fit the milestone). Only the attempt branch opens a run, so only it takes the cap guard."""
         if self.runs.candidate(r)[0] is not None:
             self.admission(r)
         return self.runs.accept_proposal(r, self.live_roles("milestone"))
@@ -1606,9 +1530,6 @@ class Delivery:
     def resume(self, r):
         self.admission(r)
         return self.runs.resume(r)
-
-    def to_plan(self, r, feedback):
-        return self.runs.revise(r, feedback, self.live_roles("plan"))
 
     @staticmethod
     def leave_line(r):

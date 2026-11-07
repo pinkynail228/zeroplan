@@ -2031,14 +2031,6 @@ class MilestoneRuns:
         self.check_followup(r)
         return self.start(r["milestone"], r["plan_revision"], roles or r["roles"], destination=r["destination"]["branch"])
 
-    def revise_plan(self, text, roles=None):
-        """Owner plan revision from home. `roles` as in `retry`; the no-active-writer precondition is the one
-        `Authority.begin` enforces (the mutation that owns the state)."""
-        require(nonempty(text), "Text is required: what to change in the plan.", family="action.refused")
-        current = self.authority.current
-        return self.authority.begin(current["goal"], roles or current["roles"], current["engine"],
-                                    feedback=self.authority.amended_feedback(text))
-
     # Owner actions -----------------------------------------------------------
 
     def merge_failed(self, r):
@@ -2097,7 +2089,8 @@ class MilestoneRuns:
         return candidate, None
 
     def accept_proposal(self, r, roles=None):
-        """needs_owner: a structured in-scope candidate → ("attempt", run); otherwise → ("plan", new revision)."""
+        """needs_owner: a structured in-scope candidate → ("attempt", run); otherwise ("architect", the owner's
+        message): the proposal goes to the architect, who changes the plan with him (0.15); nothing is written."""
         self.check_followup(r)
         require(r["outcome"] == "needs_owner" and nonempty(r["output"].get("proposal")), "There is no steward proposal to accept.", family="action.refused")
         output = r["output"]
@@ -2108,14 +2101,8 @@ class MilestoneRuns:
             return "attempt", self.start(r["milestone"], r["plan_revision"], roles or r["roles"], context,
                                          destination=r["destination"]["branch"])
         question = output.get("question") or output["message"]
-        return "plan", self.revise(r, "Steward question: %s\nAccepted proposal: %s" % (question, output["proposal"]), roles)
-
-    def revise(self, r, text, roles=None):
-        """Back to planning: plan begin with the owner's feedback (this compares the planning baseline)."""
-        require(nonempty(text), "Text is required for revise.", family="action.refused")
-        revision = self.check_followup(r)
-        return self.authority.begin(revision["goal"], roles or revision["roles"], revision["engine"], feedback=self.authority.amended_feedback(
-            "Milestone %s attempt %s: %s" % (r["milestone"], r["attempt"], text)))
+        return "architect", "The owner accepts the steward's proposal for %s attempt %s. Steward question: %s\nProposal: %s" % (
+            r["milestone"], r["attempt"], question, output["proposal"])
 
 
 class NativeDriver(NativeEngine):

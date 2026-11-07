@@ -15,7 +15,7 @@ import test_terminal_planner as planner
 from terminal_planner import live, milestone, runs, toolchain
 from terminal_planner.authority import (Authority as RealAuthority, Blocked, atomic_state, canonical, decode, digest,
                                         require_terminal_result, require_workspace_outside_state)
-from terminal_planner.engine import fixture_proposal
+from terminal_planner.engine import fixture_draft, fixture_proposal
 from terminal_planner.runs import FixtureDriver, MilestoneRuns, NativeDriver
 
 ROLES = planner.ROLES
@@ -521,16 +521,15 @@ class NativeLifecycleTests(RunsTest):
         self.assertEqual(path.read_bytes(), raw)
 
     def test_details_prints_copyable_native_diagnostics_for_root_and_successor(self):
-        from terminal_planner.cli import App, Terminal
+        from terminal_planner.cli import App
+        from terminal_planner.tui.controller import Capture
         r = self.started()
         with self.authority() as a:
             controller, _ = self.native_runs(a, [
                 (self.finished(r, reason="worker_failed"),), self.status(r, {"recoverable": True}),
                 self.status(r, {"recoverable": True}), {"runId": "m-run-2", "resumedFrom": "m-run"}])
             controller.resume(controller.observe(controller.active()))
-            output = io.StringIO()
-            App(Terminal(io.StringIO(""), output), a, None, controller.engine, self.worktrees).details()
-        text = output.getvalue()
+            text = "\n".join(App(Capture(), a, None, controller.engine, self.worktrees).delivery.details()) + "\n"
         root = Path(r["binding"]["state_root"])
         prefix = "ZEROSHOT_STATE_DIR=%s ZEROSHOT_CONFIG_DIR=%s %s" % (
             shlex.quote(str(root / "runs")), shlex.quote(str(root / "config")), shlex.quote(r["binding"]["executable"]))
@@ -1143,11 +1142,13 @@ class FixtureDriverTests(RunsTest):
             self.assertEqual(sorted(p.name for p in (self.root / "fixture-runs").iterdir()), [first + ".json"])
 
 
-def split_candidate(additions=2):
-    """Steward task-list candidate for M1 of the fixture plan: split T1 into `additions` children."""
+def split_candidate(additions=2, briefed=True):
+    """Steward task-list candidate for M1 of the fixture plan: split T1 into `additions` children. A plan task keeps
+    its frozen brief: the fixture plan's as the architect wrote it, none for an old-planner plan (`briefed=False`)."""
     children = ["T1.%s" % i for i in range(1, additions + 1)]
+    brief = {"brief": fixture_draft()["milestones"][0]["slices"][0]["tasks"][0]["brief"]} if briefed else {}
     return {"tasks": [{"id": "T1", "title": "Implement the agreed behavior", "checks": ["Deterministic interaction test"],
-                       "status": "dropped", "origin": "plan", "notes": ""}]
+                       "status": "dropped", "origin": "plan", "notes": "", **brief}]
             + [{"id": c, "title": "Part %s" % c, "checks": ["Deterministic interaction test"], "status": "open",
                 "origin": "amendment", "notes": "", "parent": "T1"} for c in children],
             "amendments": [{"seq": 1, "kind": "split", "tasks": children, "parents": ["T1"], "reason": "Smaller steps."}]}
@@ -1448,7 +1449,7 @@ class OwnerActionTests(RunsTest):
             self.assertEqual(len(a.state["runs"]), 2)
 
     def test_bootstrap_reopens_done_tasks_of_a_structured_candidate_with_the_owner_note(self):
-        baseline, _ = runs.milestone.build_manifest(fixture_proposal(), "M1", 1)
+        baseline, _ = runs.milestone.build_manifest(fixture_draft(), "M1", 1)
         candidate = split_candidate()
         candidate["tasks"][1]["status"] = "done"
         context = {"kind": "proposal", "source": 1, "text": "Fixture: approve?", "candidate": candidate}
@@ -1457,7 +1458,9 @@ class OwnerActionTests(RunsTest):
                          [("T1", "dropped"), ("T1.1", "open"), ("T1.2", "open")])
         self.assertEqual(manifest["tasks"][1]["notes"], "Owner accepted proposal (attempt 1): Fixture: approve?")
 
-    def test_out_of_scope_or_free_text_proposal_goes_to_plan_revision(self):
+    def test_an_out_of_scope_or_free_text_proposal_goes_to_the_architect_and_writes_nothing(self):
+        """0.15: accepting a proposal that does not fit the milestone gives the owner's message for the architect
+        (with the steward's proposal) and writes no revision and no attempt; the attempt still takes an answer."""
         for proposal in (canonical(split_candidate(runs.milestone.MAX_ADDITIONS + 1)), "Fixture: split the first task."):
             with self.subTest(proposal=proposal[:20]):
                 planner.shutil.rmtree(self.state, ignore_errors=True)
@@ -1465,13 +1468,10 @@ class OwnerActionTests(RunsTest):
                 self.approve_fixture()
                 with self.fixture_authority() as a:
                     controller, r = self.needs_owner(a, proposal)
-                    kind, revision = controller.accept_proposal(r)
-                    self.assertEqual((kind, revision["version"], revision["status"]), ("plan", 2, "planning"))
-                    self.assertIn(proposal, revision["feedback"])
-                    self.assertEqual(len(a.state["runs"]), 1)
-                    # The plan is being revised: revision 1's runs take no new actions.
-                    with self.assertRaisesRegex(Blocked, "is stale"):
-                        controller.answer(r, "Never mind.")
+                    kind, message = controller.accept_proposal(r)
+                    self.assertEqual(kind, "architect")
+                    self.assertIn(proposal, message)
+                    self.assertEqual((len(a.state["revisions"]), len(a.state["runs"])), (1, 1))
 
     def test_owner_actions_by_state(self):
         base = {"status": "finished", "outcome": "done", "recoverable": None}
@@ -1508,14 +1508,14 @@ class CarryForwardTests(RunsTest):
 
     def approve(self, a, plan):
         with patch("terminal_planner.engine.fixture_proposal", return_value=plan):
-            a.begin("Next goal", ROLES, "fixture")
+            self.begin(a, goal="Next goal")
             self.propose(a)
             a.approve(a.current["version"])
 
     def test_integrated_result_counts_under_a_new_revision_only_when_carried(self):
         with self.fixture_authority() as a:
-            self.begin(a)
-            with patch("terminal_planner.engine.fixture_proposal", return_value=roadmap()):
+            with patch("terminal_planner.engine.fixture_proposal", return_value=roadmap()):  # the draft is built from it
+                self.begin(a)
                 self.propose(a)
             a.approve(1)
             controller = self.fixture_runs(a)

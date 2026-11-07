@@ -23,7 +23,8 @@ from terminal_planner.process import Profile
 from terminal_planner.runs import FixtureDriver
 import test_process as tpr
 import test_terminal_planner as tp
-from test_terminal_planner import PLAN, ROLES, ScriptedTerminal, fixture_proposal
+from terminal_planner.engine import fixture_draft
+from test_terminal_planner import ROLES, ScriptedTerminal, fixture_proposal
 
 # sha256 of the canonical v1 documents of the revision before planner graph 2. The graph golden was refreshed once,
 # for the review bar A3 adds to the v1 verifier text and again for the task brief A2a adds to the planner and verifier
@@ -372,7 +373,7 @@ class GateBase(tp.ProjectTest):
     native = tp.NativeTests.native
     engine = tp.NativeTests.engine
     projection = tp.NativeTests.projection
-    terminal = tp.NativeTests.terminal
+    terminal = tp.NativeTests.old_terminal  # the old planner's own review
     authority = tp.NativeTests.authority
 
     def documents(self, options):
@@ -387,7 +388,7 @@ class AdapterTests(GateBase):
                                  findings="fine", response="fixed")
         engine, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, terminal])
         with self.authority() as authority:
-            self.begin(authority, "native")
+            self.begin_old_planner(authority, "native")
             with self.assertRaises(Blocked):
                 engine.proposal(authority, lambda _: None)
             self.assertIsNone(authority.current["evidence"])
@@ -400,7 +401,7 @@ class AdapterTests(GateBase):
         terminal = self.terminal(discussion=rounds, verdict="accepted", findings="ok", response="F1 fixed")
         engine, calls = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, terminal])
         with self.authority() as authority:
-            self.begin(authority, "native")
+            self.begin_old_planner(authority, "native")
             engine.proposal(authority, lambda _: None)
             current = authority.current
             evidence = current["evidence"]
@@ -449,7 +450,7 @@ class AdapterTests(GateBase):
     def test_an_output_of_the_other_version_is_refused(self):
         engine, _ = self.engine([{"valid": True}, {"runId": "fixture-native-run"}, self.terminal(execution=1)])
         with self.authority() as authority:
-            self.begin(authority, "native")  # a version 2 revision
+            self.begin_old_planner(authority, "native")  # a version 2 revision
             with self.assertRaises(Blocked):
                 engine.proposal(authority, lambda _: None)
             self.assertIsNone(authority.current["evidence"])
@@ -476,7 +477,7 @@ class FreezeTests(tpr.ProfileTest):
     native = tp.NativeTests.native
     engine = tp.NativeTests.engine
     projection = tp.NativeTests.projection
-    terminal = tp.NativeTests.terminal
+    terminal = tp.NativeTests.old_terminal  # the old planner's own review
     authority = tp.NativeTests.authority
 
     def native_session(self):
@@ -667,21 +668,6 @@ class FixtureScenarioTests(tpr.ProfileTest):
             self.assertNotEqual(app.authority.current["status"], "approved")
             self.assertIsNone(app.authority.current["approval"])
 
-    def test_the_line_ui_offers_no_approval_for_an_exhausted_plan_and_shows_the_rounds(self):
-        self.accept_file()
-        output = io.StringIO()
-        terminal = ScriptedTerminal(PLAN + "i\n\na\nq\n", output)
-        driver = FixtureDriver(self.root / "fixture-runs", "done")
-        cli.session(terminal, self.project, self.state, lambda *_: FixtureEngine("exhausted"), fixture_id="test",
-                    driver_factory=lambda _: driver, worktrees=self.root / "worktrees", profile=True)
-        text = output.getvalue()
-        self.assertIn("rounds 3 of 3", text)
-        self.assertIn("Round 1", text)
-        self.assertIn("Planner reply:", text)
-        stored = self.stored()
-        self.assertEqual(stored["revisions"][-1]["status"], "review_exhausted")
-        self.assertIsNone(stored["revisions"][-1]["approval"])
-
     def test_the_same_text_serves_the_service_and_the_info_screen(self):
         current = self.plan("repair")
         lines = planning.Planning.gate_lines(current["evidence"])
@@ -746,23 +732,12 @@ class InvalidationTests(tpr.ProfileTest):
         with self.app() as app:
             with self.assertRaises(Blocked):
                 app.planning.approve(app.authority.current["version"])
-            app.planning.revise("Again")
+            app.planning.revise_draft(app.authority.current["version"], fixture_draft(), response="Again")
             FixtureEngine().proposal(app.authority, lambda _: None)
             self.assertEqual(app.authority.current["frozen"]["rules"][0]["text"], "two\n")
             app.planning.approve(app.authority.current["version"])
             self.assertEqual(app.authority.current["status"], "approved")
 
-    def test_a_stale_gate_is_a_refusal_in_the_line_ui(self):
-        self.rules("AGENTS.md", "one\n")
-        self.proposed()
-        (self.project / "AGENTS.md").write_text("two\n")
-        output = io.StringIO()
-        terminal = ScriptedTerminal("p\na\ny\nq\nq\n", output)
-        driver = FixtureDriver(self.root / "fixture-runs", "done")
-        cli.session(terminal, self.project, self.state, lambda *_: FixtureEngine(), fixture_id="test",
-                    driver_factory=lambda _: driver, worktrees=self.root / "worktrees", profile=True)
-        self.assertIn("out of date", output.getvalue())
-        self.assertEqual(self.stored()["revisions"][-1]["status"], "proposed")
 
 
 class PureReadTests(tpr.ProfileTest):

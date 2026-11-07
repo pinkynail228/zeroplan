@@ -435,64 +435,6 @@ class ValidationTests(OverrideCase):
 
 # O-4 (plain mode) ----------------------------------------------------------------------------------------------
 
-class PlainTests(OverrideCase):
-    def session(self, text, engine=None):
-        output = io.StringIO()
-        terminal = ScriptedTerminal(text, output)
-        driver = FixtureDriver(self.root / "fixture-runs", "done")
-        cli.session(terminal, self.project, self.state, lambda *_: engine or FixtureEngine(), fixture_id="test",
-                    driver_factory=lambda _: driver, worktrees=self.root / "worktrees", profile=True)
-        return output.getvalue()
-
-    def test_o4_the_line_ui_offers_the_action_asks_for_the_reason_and_shows_the_override(self):
-        self.exhausted()
-        text = self.session("p\no\n" + REASON + "\n\np\ni\n\nq\nq\n")
-        self.assertIn("[o] approve despite the check", text)
-        self.assertIn("Plan r1 approved despite the check.", text)
-        self.assertIn("The plan check did not accept it:", text)
-        self.assertIn('Approved despite the check: "%s"' % REASON, text)
-        self.assertIn('  Approved despite the check: "%s"' % REASON, text)  # the [i] gate lines
-        self.assertNotIn("this plan cannot be approved", text.split("Plan r1 approved despite the check.", 1)[1])
-        stored = self.stored()["revisions"][-1]
-        self.assertEqual((stored["status"], stored["override"]["reason"]), ("approved", REASON))
-
-    def test_a10_b4_the_exhausted_line_of_the_details_names_both_ways(self):
-        """A10 B4: [i] of a rejected plan says "[r] revise or approve anyway with a reason", not "cannot be approved"."""
-        self.exhausted()
-        with self.app() as app:
-            lines = "\n".join(app.planning.gate_lines(app.authority.current["evidence"]))
-        self.assertIn("[r] revise or approve anyway with a reason", lines)
-        self.assertNotIn("cannot be approved", lines)
-
-    def test_o4_an_empty_reason_cancels_and_a_too_long_one_is_refused(self):
-        self.exhausted()
-        before = self.raw()
-        text = self.session("p\no\n\nq\nq\n")
-        self.assertIn("Empty text: the plan is unchanged.", text)
-        self.assertEqual(self.raw(), before)
-        text = self.session("p\no\n" + "x" * 501 + "\n\nq\nq\n")
-        self.assertIn("A reason is required: one line, at most 500 characters.", text)
-        self.assertIn("[code: action.refused]", text)
-        self.assertEqual(self.raw(), before)
-        text = self.session("p\no\nfirst line of text\nsecond line of text\n\nq\nq\n")
-        self.assertIn("A reason is required", text)
-        self.assertEqual(self.raw(), before)
-
-    def test_o4_a_version_one_review_exhausted_plan_offers_no_override(self):
-        self.reset()
-        self.make(engine=V1Rejecting(), execution=1)
-        before = self.raw()
-        text = self.session("p\no\n" + REASON + "\n\nq\nq\n", engine=V1Rejecting())
-        self.assertNotIn("approve despite the check", text)
-        self.assertEqual(self.raw(), before)
-
-    def test_o4_an_accepted_plan_offers_approve_only(self):
-        self.reset()
-        self.make("accept")
-        text = self.session("p\nq\nq\n")
-        self.assertIn("[a] approve", text)
-        self.assertNotIn("despite the check", text)
-
 
 if __name__ == "__main__":
     unittest.main()

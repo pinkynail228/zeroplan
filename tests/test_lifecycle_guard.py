@@ -48,7 +48,7 @@ import unittest
 
 from terminal_planner import runs
 from terminal_planner.authority import Authority as RealAuthority, Blocked
-from terminal_planner.engine import FixtureEngine
+from terminal_planner.engine import FixtureEngine, fixture_draft
 from terminal_planner.planning import Planning
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
 import test_terminal_planner as tp
@@ -191,8 +191,9 @@ class BeginGuardTests(GuardCase):
             ("Planning.begin", lambda p, a: p.begin("Second goal", ROLES)),
             ("Planning.renew", lambda p, a: p.renew()),
             ("Planning.restart", lambda p, a: p.restart()),
-            ("Planning.revise", lambda p, a: p.revise("Change it")),
-            ("Runs.revise_plan", lambda p, a: p.runs.revise_plan("Change it")),
+            ("Planning.plan_draft", lambda p, a: p.plan_draft("Second goal", fixture_draft())),
+            ("Planning.revise_draft", lambda p, a: p.revise_draft(a.current["version"], fixture_draft(),
+                                                                  response="Change it")),
             ("Planning.send", lambda p, a: p.send()),
         )
         states = [("running", "running"), ("done", "done")]
@@ -219,68 +220,6 @@ class BeginGuardTests(GuardCase):
                             self.assertEqual(len(authority.state["revisions"]), before[2] + 1)
                             self.assertEqual(self.refs(), before[1])            # no Git side effect either way
 
-    def delivered_then_failed(self, authority):
-        """M1 attempt 1 delivered and merged (so a second milestone may start) and attempt 2 an unsuccessful, latest
-        attempt: the `(controller, target)` a steward follow-up needs. `check_followup`'s own conditions hold for
-        the target, so the only thing left that can refuse `Runs.revise` is the owner guard."""
-        self.driver = CountingDriver(self.root / "fixture-runs", "done")
-        controller = self.runs_of(authority)
-        done = controller.observe(controller.start("M1", authority.current["version"], ROLES))
-        controller.finish(done)
-        controller.merge(done)  # M1 delivered, so M2 may start
-        self.driver = CountingDriver(self.root / "fixture-runs", "failed")
-        controller = self.runs_of(authority)  # a controller over the failed-outcome driver
-        target = controller.observe(controller.start("M1", authority.current["version"], ROLES))
-        self.assertEqual((target["status"], target["outcome"], target["attempt"]), ("failed", None, 2))
-        self.driver = CountingDriver(self.root / "fixture-runs", "done")
-        return self.runs_of(authority), target
-
-    def test_a1_steward_revise_refuses_in_every_active_writer_state_and_proceeds_for_every_terminal_attempt(self):
-        """`Runs.revise` (steward follow-up) x run states, over a *valid* target `check_followup` accepts.
-
-        An independent M2 writer is refused with the owner guard — the same `Milestone … is still running` message
-        `revise_plan` gives — so the refusal is the shared lifecycle precondition, never `check_followup`'s "not
-        the latest attempt". With no active writer the same follow-up creates the revision for an unsuccessful
-        terminal attempt, and is refused by a different, pre-existing condition for a successful (`done`) attempt.
-        Interpretation: the guard is one `status in ACTIVE` check, so one active writer (`submitted`, as started)
-        stands for the six, and `check_followup`'s `outcome != "done"` has two sides, `done` and `failed`."""
-        # Branches kept: one active writer (`status in ACTIVE`); `done` (refused) and `failed` (proceeds).
-        self.reset()
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            self.begin(authority)
-            self.propose(authority)
-            authority.approve(authority.current["version"])
-            controller, target = self.delivered_then_failed(authority)
-            writer = controller.start("M2", authority.current["version"], ROLES)
-            self.assertIs(controller.active(), writer)
-            self.assertIn(writer["status"], runs.ACTIVE)
-            before = self.counters(authority)
-            with self.assertRaises(Blocked) as raised:
-                self.planning_of(authority).runs.revise(target, "Change it")
-            self.assertEqual(raised.exception.family, "action.refused")
-            self.assertIn("M2 is still running", str(raised.exception))
-            self.assertEqual(self.counters(authority), before)  # the follow-up wrote nothing at all
-            self.assertEqual(len(authority.state["revisions"]), 1)
-            controller.stop(writer)
-            controller.observe(writer)  # release the independent writer
-        for key in ("done", "failed"):
-            with self.subTest(target=key):
-                self.reset()
-                self.build(key)
-                with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-                    target = authority.state["runs"][0]
-                    before = self.counters(authority)
-                    if key == "done":  # a successful attempt is not a follow-up: the pre-existing condition refuses
-                        with self.assertRaises(Blocked) as raised:
-                            self.planning_of(authority).runs.revise(target, "Change it")
-                        self.assertEqual(raised.exception.family, "action.refused")
-                        self.assertIn("only after an unsuccessful attempt", str(raised.exception))
-                        self.assertEqual(self.counters(authority), before)
-                    else:  # no active writer: the follow-up proceeds and creates revision 2
-                        self.planning_of(authority).runs.revise(target, "Change it")
-                        self.assertEqual(len(authority.state["revisions"]), 2)
-                        self.assertEqual(authority.current["status"], "planning")
-
     def test_a1_approve_and_override_are_refused_for_the_revision_status_in_every_state(self):
         """Interpretation: `approve` (`status != "proposed"`) and `override` (`status != "review_exhausted"`) refuse
         on the revision's own status and read no run record, so each is checked once on the already approved
@@ -301,7 +240,7 @@ class BeginGuardTests(GuardCase):
 
     def test_a1_approve_and_override_are_allowed_on_a_new_revision_beside_every_terminal_outcome(self):
         """The valid approval contexts the refusal matrix cannot reach: revision 1 is approved with a terminal
-        attempt (`done`) and no active writer, so `revise_plan` creates revision 2. Its gate leaves revision 2
+        attempt (`done`) and no active writer, so the architect's edit creates revision 2. Its gate leaves revision 2
         `proposed` (accepted scenario) for `approve` or `review_exhausted` (rejected scenario) for `override`, and
         either then succeeds with the historical revision record and every run record untouched.
 
@@ -320,7 +259,7 @@ class BeginGuardTests(GuardCase):
                     planning = self.planning_of(authority)
                     first = copy.deepcopy(authority.state["revisions"][0])
                     history = copy.deepcopy(authority.state.get("runs", []))
-                    planning.runs.revise_plan("Change it")   # no active writer: revision 2 is created
+                    planning.revise_draft(authority.current["version"], fixture_draft(), response="Change it")  # revision 2
                     self.assertEqual([r["version"] for r in authority.state["revisions"]], [1, 2])
                     FixtureEngine(scenario).proposal(authority, lambda _: None)
                     self.assertEqual(authority.current["status"], expected)
@@ -370,42 +309,6 @@ class AllowedPathsTests(GuardCase):
             self.assertIs(r["recoverable"], True)
             successor = controller.resume(r)
             self.assertEqual(successor["status"], "submitted")   # resume/adopt is not blocked by R-1
-
-
-class PlainFlowTests(GuardCase):
-    """A-3 (plain): [r] while a writer is active is refused and the later observe/export/merge stay usable.
-
-    Interpretation (amended A-3): this refusal is not a base failure on either base — the regression baseline
-    `56a8b57` refuses it through the `Runs.revise_plan` caller copy that R-1 removes, and the repair base `684c4b6`
-    (that copy already gone) refuses it through the owner guard. This is therefore the regression guard for the
-    plain path, and its evidence is a candidate-only mutation in a scratch copy: with *only* the `Authority.begin`
-    guard disabled, the plain `r` creates revision 2, so the named behavioral assertion
-    `len(authority.state["revisions"]) == 1` (and the "is still running" assertion) fires. The class-level A-3 base
-    failure stays the TUI chat hand-over (`test_tui_chat.LifecycleGuardChatTests`)."""
-
-    def session(self, text, keys=()):
-        from terminal_planner import cli
-        import io
-        output = io.StringIO()
-        driver = FixtureDriver(self.root / "fixture-runs", "done")
-        cli.session(ScriptedTerminal(text, output, keys), self.project, self.state, lambda *_: FixtureEngine(),
-                    fixture_id="test", driver_factory=lambda _: driver, worktrees=self.root / "worktrees")
-        return output.getvalue()
-
-    def test_a3_plain_revise_is_refused_while_active_and_the_run_still_delivers(self):
-        self.reset()
-        self.build("submitted")
-        # The trailing [q]s only matter when the guard is gone: the mutated `r` then reaches the planner and the
-        # plan screen (`Plan r2`), so the run must be able to end for the assertion below — not input exhaustion —
-        # to be the failure.
-        output = self.session("r\nChange roadmap\n\nq\nq\n")
-        self.assertIn("is still running", output)                 # the R-1 message, in the line UI
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            self.assertEqual(len(authority.state["revisions"]), 1)   # revision identity unchanged
-            self.assertEqual(len(authority.state["runs"]), 1)        # run identity unchanged
-        output = self.session("w\n" + "m\ny\n" + "q\n")           # observation, then export + merge
-        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
-            self.assertEqual(authority.state["runs"][0]["delivery"], "integrated")
 
 
 if __name__ == "__main__":

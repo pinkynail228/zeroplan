@@ -405,12 +405,14 @@ class MergeCriticWiringTests(tpr.ProfileTest):
         self.assertEqual(self.merge(engine).kind, "integrated")
         gate, record = self.stored()["runs"][0]["gate"], self.record()
         names, paths = merge_critic.reasons(gate["risk"], {}), self.changed_paths(gate)
+        milestone_one = self.stored()["revisions"][0]["proposal"]["milestones"][0]
+        briefs = [task["brief"] for part in milestone_one["slices"] for task in part["tasks"]]  # the frozen briefs
         self.assertTrue(names)                                # the high tier raises the critic
         self.assertEqual(record["reasons"], names)
         self.assertEqual(record["identity"], {
             "milestone": "M1", "plan_revision": 1, "attempt": 1, "destination": "refs/heads/main",
             "base": gate["head"], "result": gate["result"], "candidate": gate["candidate"], "tree": gate["tree"],
-            "config_digest": gate["config_digest"], "input_digest": merge_critic.input_digest(names, paths, []),
+            "config_digest": gate["config_digest"], "input_digest": merge_critic.input_digest(names, paths, briefs),
             "risk": gate["risk"]})
         self.assertEqual(record["identity"]["config_digest"], self.peek().status().resolved.digest)
         self.assertEqual(record["binding"], {"fixture_id": "test"})
@@ -612,21 +614,6 @@ class MergeCriticWiringTests(tpr.ProfileTest):
             digest = app.delivery.guard("merge").digest
             self.assertEqual(app.delivery.merge(app.delivery.latest("M1"), expected=digest).kind, "integrated")
 
-    def test_c4_the_plain_cli_waits_without_a_slice(self):
-        """C4: the plain CLI's own `[m]` passes `slice=None` (wait) all the way into `critic_run`."""
-        self.gated()
-        self.owner_commit()
-        slices, real = [], FixtureEngine.critic_run
-
-        def spy(self_engine, authority, record, documents, progress, slice=None):
-            slices.append(slice)
-            return real(self_engine, authority, record, documents, progress, slice)
-
-        with patch.object(FixtureEngine, "critic_run", spy):
-            output = self.run_session("o\n" + tpr.MERGE + "q\n")
-        self.assertEqual(slices, [None])
-        self.assertIn("Merged: M1 → main.", output)
-        self.assertEqual(self.stored()["runs"][0]["delivery"], "integrated")
 
 if __name__ == "__main__":
     unittest.main()

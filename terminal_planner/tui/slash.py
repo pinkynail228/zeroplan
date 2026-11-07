@@ -68,7 +68,7 @@ class Command:
 # (a card outlives the state it was raised in) and, with no open card that offers it, says `note.not_now`. T4e: `/scheme`
 # acts in every state and toggles the block scheme on the whole window.
 COMMANDS = (
-    Command("/plan", "cmd.plan", frozenset(("idle", "draft", "error")), Arg("goal")),
+    Command("/plan", "cmd.plan", frozenset(("idle", "draft", "error", "planning", "plan_ready")), Arg("goal")),
     Command("/approve", "cmd.approve", frozenset(("plan_ready", "question", "error"))),
     Command("/decline", "cmd.decline", frozenset(("plan_ready", "question"))),
     Command("/run", "cmd.run", STATES),

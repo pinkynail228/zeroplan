@@ -657,7 +657,7 @@ class MergeCardShell(MilestoneShell):
         a time and the card's own `show_chat()` is what brings the chat (and the card) into view — with the counts
         read from the attempt and the title and both buttons drawn."""
         self.approve(running=False)
-        self.plain("g\ny\nl\nq\n")  # the stage done and waiting for its merge, made by the line UI
+        self.finished("M1")  # the stage done and waiting for its merge
         async with self.shell(size=(80, 24)) as pilot:
             await self.loaded(pilot)
             card = await self.counted_card(pilot)

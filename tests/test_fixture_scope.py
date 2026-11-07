@@ -6,7 +6,7 @@ session built a real architect chat (a production `ArchitectChat`/`ArchitectStor
 production transcript access), the empty `--fixture ''` slipped past the wiring into `setup`, and accepting the
 process profile in a fixture session wrote the target's `zplan.process.json`.
 
-These tests enter through the existing `cli.main` / `cli.session` / `tui.run` composition, never a new factory, so
+These tests enter through the existing `cli.main` / `tui.run` composition, never a new factory, so
 the mode decision under test is the wiring's own (R-1). They need Textual only for the shell classes and skip
 without it; the profile, refusal and docs parts need no Textual. No provider, no network: the one "provider" is
 the scripted codex of `test_tui_chat`.
@@ -41,7 +41,7 @@ import unittest
 from unittest.mock import patch
 
 from terminal_planner import architect as adapter, catalog, cli, process, setup
-from terminal_planner.authority import Authority as RealAuthority, Blocked
+from terminal_planner.authority import Authority as RealAuthority, discover, Blocked
 from terminal_planner.cli import Terminal
 from terminal_planner.engine import FixtureEngine
 from terminal_planner.process import Profile
@@ -119,8 +119,11 @@ def capture_tui(argv):
     from terminal_planner.tui import app as app_module
     from terminal_planner.tui import controller as controller_module
 
+    from terminal_planner.tui import start as start_module
+
     captured = []
     with patch.object(cli, "tui_wanted", lambda *args, **kwargs: True), \
+            patch.object(start_module, "choose", lambda start, origin=True: discover(start)), \
             patch.object(app_module.ZplanApp, "run", lambda self: captured.append(self)), \
             patch.object(controller_module.Controller, "stop", lambda self, timeout=None: None):
         code = cli.main(argv)
@@ -164,7 +167,7 @@ class StartupRefusalTests(ProjectTest):
                    patch.object(cli, "Terminal", lambda: Terminal(io.StringIO(), out)),
                    patch.object(cli, "check_installation", lambda *a, **k: calls.append(("check",))),
                    patch.object(cli, "load_roles", lambda: {}),
-                   patch.object(cli, "session", lambda *a, **k: calls.append(("session",)))]
+                   patch.object(cli, "tui_wanted", lambda *a, **k: calls.append(("session",)) or False)]
         with contextlib.ExitStack() as stack:
             for patcher in patches:
                 stack.enter_context(patcher)
@@ -184,7 +187,7 @@ class StartupRefusalTests(ProjectTest):
 
     def test_a2_an_invalid_fixture_id_and_the_tui_entry_are_refused_before_the_session(self):
         """An invalid id (`bad/id`, `bad id`, the empty one) is refused for `setup` and for the plain/TUI entry,
-        before `cli.session` is ever reached or a tool probe runs."""
+        before the full-screen entry is ever reached or a tool probe runs."""
         for fixture_id in ("bad/id", "bad id", ""):
             with self.subTest(fixture_id=fixture_id):
                 code, calls = self.run_main(fixture_argv(self.project, self.state, fixture_id, "setup"))
@@ -216,30 +219,11 @@ class StartupRefusalTests(ProjectTest):
                     self.assertEqual(calls, [])
 
     def test_a2_a_valid_id_still_reaches_the_wiring(self):
-        """The guard refuses only what is not an id: a valid one is not stopped by it (the session path runs)."""
+        """The guard refuses only what is not an id: a valid one is not stopped by it (the entry asks for the
+        terminal, which this test does not have: exit 2)."""
         code, calls = self.run_main(fixture_argv(self.project, self.state, "demo"))
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 2)
         self.assertIn(("session",), calls)
-
-
-@unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)
-class FixtureChatIsolationTests(ProjectTest, unittest.IsolatedAsyncioTestCase):
-    """R-2/A-1: a fixture TUI session shows the disabled chat and touches no production sink."""
-
-    async def test_a1_a_plain_fixture_session_has_no_chat_and_makes_no_sink(self):
-        """The line UI in a fixture session is unchanged (it never had the chat) and reaches no sink either."""
-        accept_fixture_profile(self.project, self.state, "demo")
-        sinks = Sinks()
-        out = io.StringIO()
-        driver = FixtureDriver(self.root / "fixture-runs")
-        with contextlib.ExitStack() as stack:
-            for p in spies(sinks):
-                stack.enter_context(p)
-            cli.session(ScriptedTerminal("q\n", out), self.project, self.state, lambda *_: FixtureEngine(),
-                        fixture_id="demo", driver_factory=lambda _: driver,
-                        worktrees=self.root / "worktrees", profile=True)
-        self.assertEqual(sinks.empty(), ([], [], [], [], [], []))
-        self.assertIn("full-screen only", out.getvalue())
 
 
 class FixtureProfileTests(ProjectTest):
@@ -262,13 +246,24 @@ class FixtureProfileTests(ProjectTest):
             code = cli.main(argv)
         return code, out.getvalue()
 
-    def run_session(self, text, fixture_id="demo", profile=True):
-        out = io.StringIO()
-        driver = FixtureDriver(self.root / "fixture-runs")
-        cli.session(ScriptedTerminal(text, out), self.project, self.state, lambda *_: FixtureEngine(),
-                    fixture_id=fixture_id, driver_factory=lambda _: driver,
-                    worktrees=self.root / "worktrees", profile=profile)
-        return out.getvalue()
+    def session(self, step=None):
+        """A writable fixture session: opening it reads the profile (which adopts a file that appeared and finishes
+        an interrupted accept), then `step`: "accept", "defer", or "plan" (a plan written under the profile's guard,
+        whose revision number is returned)."""
+        with RealAuthority(self.state, self.project, fixture_id="demo") as authority:
+            app = cli.App(ScriptedTerminal("", io.StringIO()), authority, lambda *_: FixtureEngine(),
+                          FixtureDriver(self.root / "fixture-runs"), self.root / "worktrees",
+                          profile=Profile.of(authority))
+            app.profile.status()
+            if step == "accept":
+                app.profile.accept()
+            elif step == "defer":
+                app.profile.defer()
+            elif step == "plan":
+                app.planning.guard()
+                ProjectTest.begin(self, authority)
+                FixtureEngine().proposal(authority, lambda _: None)
+                return authority.current["version"]
 
     def test_a3_profile_init_records_the_snapshot_and_creates_no_file(self):
         """`cli.main --fixture demo profile init` accepts into the fixture state and never writes
@@ -283,14 +278,12 @@ class FixtureProfileTests(ProjectTest):
     def test_a3_bootstrap_accept_keeps_the_snapshot_and_reopen_stays_usable(self):
         """A plain fixture session accepting at bootstrap writes no file; accept -> plan -> reopen without the file
         still works (the profile is not read as deleted)."""
-        self.run_session("a\nq\n")
+        self.session("accept")
         self.assertFalse((self.project / PROFILE_FILE).exists())
         with RealAuthority(self.state, self.project, fixture_id="demo") as authority:
             self.assertEqual(Profile.of(authority).status().state, "accepted")
         # accept -> plan: the fixture profile guards planning, and no "deleted" refusal appears without the file
-        out = self.run_session("p\nRequested feature\n\ng\nq\nq\n")
-        self.assertNotIn("deleted", out)
-        self.assertIn("Plan r1", out)
+        self.assertEqual(self.session("plan"), 1)
         # reopen: the accepted profile is still there without the file
         status_out = io.StringIO()
         cli.status(Terminal(io.StringIO(), status_out), self.project, self.state, "demo",
@@ -308,7 +301,7 @@ class FixtureProfileTests(ProjectTest):
         code, _text = self.run_main(["profile", "init"] + fixture_argv(self.project, self.state, "demo"))
         self.assertEqual(code, 1)  # refused: the file is the source
         self.assertEqual((self.project / PROFILE_FILE).read_bytes(), before)
-        self.run_session("a\nq\n")
+        self.session("accept")
         self.assertEqual((self.project / PROFILE_FILE).read_bytes(), before)
 
     def test_a3_accept_over_an_existing_file_keeps_the_snapshot_and_survives_its_removal(self):
@@ -319,14 +312,13 @@ class FixtureProfileTests(ProjectTest):
                               indent=2) + "\n"
         (self.project / PROFILE_FILE).write_text(document, encoding="utf-8")
         before = (self.project / PROFILE_FILE).read_bytes()
-        self.run_session("a\nq\n")  # accept at bootstrap, with the file present
+        self.session("accept")  # accept at bootstrap, with the file present
         self.assertEqual((self.project / PROFILE_FILE).read_bytes(), before)
         with RealAuthority(self.state, self.project, fixture_id="demo") as authority:
             record = process.read_record(authority.directory)
         self.assertEqual(record["state"], "accepted")
         self.assertIsNotNone(record["snapshot"])  # the fixture record keeps the effective snapshot
-        plan = self.run_session("p\nRequested feature\n\ng\nq\nq\n")
-        self.assertIn("Plan r1", plan)
+        self.assertEqual(self.session("plan"), 1)
         (self.project / PROFILE_FILE).unlink()
         self.assertFalse((self.project / PROFILE_FILE).exists())
         self.assertEqual(Profile.peek(self.project, root=self.state, fixture_id="demo").status().state, "accepted")
@@ -335,10 +327,10 @@ class FixtureProfileTests(ProjectTest):
         """R-3 (the other half of the reviewer's finding): a project file that appears is the source, but a fixture
         session keeps its snapshot beside the file's digest, so the file may go away again and the profile is still
         accepted — status() must not erase the snapshot."""
-        self.run_session("a\nq\n")  # a fixture accept without any project file
+        self.session("accept")  # a fixture accept without any project file
         self.assertFalse((self.project / PROFILE_FILE).exists())
         (self.project / PROFILE_FILE).write_text("{}", encoding="utf-8")
-        self.run_session("q\n")  # a session adopts the file that appeared
+        self.session()  # a session adopts the file that appeared
         with RealAuthority(self.state, self.project, fixture_id="demo") as authority:
             record = process.read_record(authority.directory)
         self.assertEqual(record["state"], "accepted")
@@ -350,7 +342,7 @@ class FixtureProfileTests(ProjectTest):
         """The reported spec gap, resolved: `profile init` refuses only an already *accepted* demo profile; a
         deferred one is promoted, exactly like a production `init` that writes the file over a "later"; the
         refusal message names the demo state, never a project file that was never created."""
-        self.run_session("l\nq\n")  # defer at bootstrap
+        self.session("defer")  # defer at bootstrap
         self.assertEqual(Profile.peek(self.project, root=self.state, fixture_id="demo").status().state, "later")
         code, text = self.run_main(["profile", "init"] + fixture_argv(self.project, self.state, "demo"))
         self.assertEqual(code, 0)
@@ -364,7 +356,7 @@ class FixtureProfileTests(ProjectTest):
 
     def test_a3_a_fixture_defer_still_leaves_no_file(self):
         """`l` (later) in a fixture session decides in fixture state only: no file is written."""
-        self.run_session("l\nq\n")
+        self.session("defer")
         self.assertFalse((self.project / PROFILE_FILE).exists())
         self.assertEqual(self.sidecar().exists(), True)
 
@@ -376,15 +368,14 @@ class FixtureProfileTests(ProjectTest):
         document = json.dumps({"roles": {"worker": {"model": "owner-model", "effort": "low"}}}, ensure_ascii=False,
                               indent=2) + "\n"
         (self.project / PROFILE_FILE).write_text(document, encoding="utf-8")
-        self.run_session("a\nq\n")  # a fixture accept with the file present: the record adopts the file's snapshot
+        self.session("accept")  # a fixture accept with the file present: the record adopts the file's snapshot
         record = self.raw_record()
         self.assertEqual(record["state"], "accepted")
         self.assertIsNotNone(record["snapshot"])
         record["snapshot"] = None  # exactly the base's record: the file's digest, no snapshot
         self.write_raw_record(record)
         self.assertEqual(Profile.peek(self.project, root=self.state, fixture_id="demo").status().state, "accepted")
-        plan = self.run_session("p\nRequested feature\n\ng\nq\nq\n")  # a writable session adopts the snapshot
-        self.assertIn("Plan r1", plan)
+        self.assertEqual(self.session("plan"), 1)  # a writable session adopts the snapshot
         self.assertIsNotNone(self.raw_record()["snapshot"])
         (self.project / PROFILE_FILE).unlink()
         self.assertEqual(Profile.peek(self.project, root=self.state, fixture_id="demo").status().state, "accepted")
@@ -397,7 +388,7 @@ class FixtureProfileTests(ProjectTest):
                               indent=2) + "\n"
         (self.project / PROFILE_FILE).write_text(document, encoding="utf-8")
         self.write_raw_record({"schema": 1, "state": "accepting", "digest": None, "snapshot": None, "previous": None})
-        self.run_session("q\n")  # a writable session finishes the interrupted accept
+        self.session()  # a writable session finishes the interrupted accept
         record = self.raw_record()
         self.assertEqual(record["state"], "accepted")
         self.assertIsNotNone(record["snapshot"])
@@ -407,13 +398,13 @@ class FixtureProfileTests(ProjectTest):
     def test_a3_an_interrupted_fixture_accept_after_a_defer_recovers_with_the_snapshot(self):
         """R-3: the same interruption with a nested previous record (the base writes one when a deferred profile
         existed) still recovers to an accepted record that carries the snapshot."""
-        self.run_session("l\nq\n")  # defer: the later record with its snapshot
+        self.session("defer")  # defer: the later record with its snapshot
         later = self.raw_record()
         self.assertEqual(later["state"], "later")
         (self.project / PROFILE_FILE).write_text("{}", encoding="utf-8")  # the file the accept wrote before crashing
         self.write_raw_record({"schema": 1, "state": "accepting", "digest": None, "snapshot": None,
                                "previous": {"state": "later", "digest": later["digest"], "snapshot": later["snapshot"]}})
-        self.run_session("q\n")
+        self.session()
         record = self.raw_record()
         self.assertEqual(record["state"], "accepted")
         self.assertIsNotNone(record["snapshot"])
@@ -426,7 +417,7 @@ class FixtureProfileTests(ProjectTest):
         target's file — it re-records the snapshot in the fixture state (like a production `init` deciding from the
         proposal), so a reopen is usable again."""
         (self.project / PROFILE_FILE).write_text("{}", encoding="utf-8")
-        self.run_session("a\nq\n")
+        self.session("accept")
         record = self.raw_record()
         record["snapshot"] = None
         self.write_raw_record(record)

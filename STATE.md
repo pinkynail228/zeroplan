@@ -5,9 +5,9 @@ After a context compaction, resume from this file and the files it names.
 
 ## Production
 
-- v0.13.0 is the latest release (published 2026-11-06): export 8b39c87 of a9c8142 to pinkynail228/zeroplan (main,
-  tag v0.13.0, GitHub release), qualified on the installed product with the real provider.
-- Earlier releases: v0.12.0 (8f09913) and v0.11.0 (8e5ca98).
+- v0.14.0 is the latest release (published 2026-11-07 on the owner's yes): export ecf15d1 of 37847ee to
+  pinkynail228/zeroplan (main, tag v0.14.0, GitHub release), qualified on the installed product with the real provider.
+- Earlier releases: v0.13.0 (8b39c87), v0.12.0 (8f09913), v0.11.0 (8e5ca98).
 - The owner's Mac runs 0.10.0 until he runs `zplan update`.
 - The private repository's main is not pushed; pushing it is the owner's action.
 
@@ -33,26 +33,22 @@ After a context compaction, resume from this file and the files it names.
 
 ## Plan (resume here)
 
-**0.14, a lean zplan** (the owner, 2026-11-06: a deep refactor and cleanup, then Astra's evaluation). Design
-`docs/designs/2026-11-06-0-14-lean-zplan.md`, revision 3: 0.14 does the work that changes no fixture and no consent
-rule; 0.15 does the single planning path after a test-fixture migration.
+**0.14, a lean zplan:** published (design `docs/designs/2026-11-06-0-14-lean-zplan.md`): the decline is stored and
+goes to the architect; dead code, Linux leftovers and stale docs removed; Astra's evaluation resolved.
 
-| Slice | State |
+**0.15, one planning path, the line UI gone.** Design `docs/designs/2026-11-06-0-15-one-planning-path.md`, revision 3
+(its section 8 overrides the sections above it).
+
+| Step | State |
 |---|---|
-| K The decline defect: the decline is stored on the revision, so the architect can never approve it; the note goes to the architect | Done |
-| D Dead code: foreman, plan_tree, connections, disk; four functions (test observers wait for 0.15) | Done |
-| X Linux leftovers; setup refuses all but macOS arm64 | Done |
-| S Docs and state: ARCHITECTURE rewritten, two cancelled designs archived, this file | Done |
-| E Astra's evaluation of the tree (`.local/goldfish/2026-11-06-0-14-tree/`) | Done: 1 Blocker and the Majors fixed, design section 9 |
-| Release 0.14 | Qualified (record in the private evidence): the full lane, three live runs and a smoke on the candidate, contract section 9, the role outcomes; publishing waits for the owner's yes |
+| F1-F3 Fixtures on Goldfish revisions; the plan check's documents pinned | Done 59d11cd, 2a4693d, 6c82ced |
+| L The line UI goes; zplan is full-screen only | Done 5e575b1, 627e06b, 6f07e50 |
+| P1-P4 Every entry point goes to the architect, binding no yes; the structural guard | Done 4ae0d32 |
+| Docs (ARCHITECTURE, README, USER_FLOW, REFERENCE, UPGRADE) | Done |
+| Astra as built (section 9); release 0.15 qualified (record in the private evidence) | Done e5cbe87; publishing waits for the owner's yes |
 
-**0.15:**
-- **One planning path for every entry point.** The owner's `/plan`, retry, renew and "back to plan", and steward
-  proposals all go to the architect.
-- **The removals.** The line UI's menu, goal drafts, the old planner's and the task gate's writers, the planner-era
-  settings, and the legacy `devtools/zeroshot/`.
-- **The fixture migration comes first.** Revision 2's second Goldfish pass is its list of requirements (design
-  section 8).
+After 0.15, one design for the removals: the old planner's and the task gate's writers, the planner-era settings,
+the goal-draft UI, `devtools/zeroshot/`, the observer functions (0.15 design section 6).
 
 The plan to the target flow: `docs/plans/2026-11-03-roadmap.md` (revision 12). Ideas and deferred work, each with
 its trigger: `docs/plans/backlog.md`.

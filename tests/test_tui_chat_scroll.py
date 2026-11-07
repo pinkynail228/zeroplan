@@ -439,7 +439,7 @@ class InlineCardRefreshTests(ChatScroll):
             async with self.shell(size=(120, 24), store=store) as pilot:
                 await self.start(pilot, 40)
                 main = self.main()
-                self.app.checks, self.app.goal_block = failing, failing  # a start blocked by the failing readiness
+                self.app.checks, self.app.plan_block = failing, failing  # a start blocked by the failing readiness
                 main.render_state()  # a live render: its own `render_card_sources` shows the card
                 await pilot.pause(0.3)
                 await pilot.pause(0.3)

@@ -64,42 +64,6 @@ class StaleLines(unittest.TestCase):
         app.merge_wait_shown(None)
         self.assertEqual(app.run_note, "Merged: M1 → main.")
 
-    def test_l2_a_revision_asked_closes_the_old_card_until_the_new_snapshot(self):
-        self.enterContext(patch.dict(ui.CARD_SOURCES, {"plan": ui.CARD_SOURCES["plan"]}, clear=True))
-        screen = _Screen(proposal())
-        screen.render_card_sources()
-        self.assertIn("plan:1", screen.card_specs)
-        screen.app.revision_note("x")
-        screen.render_card_sources()
-        self.assertEqual(list(screen.card_specs), [])  # the old card's buttons are gone at once
-        self.assertIsNone(screen.newest_card_for("/approve"))  # so its approve key finds nothing to approve
-        revision_seen = _app_method("revision_seen")
-        revision_seen(screen.app, proposal())  # the same proposal again: the revision is not shown yet
-        self.assertEqual(screen.app.revising, 1)
-        screen.app.snapshot = replace(proposal(), version=2)
-        revision_seen(screen.app, screen.app.snapshot)
-        self.assertIsNone(screen.app.revising)  # the new revision's snapshot: its own card is offered as usual
-        screen.render_card_sources()
-        self.assertEqual(list(screen.card_specs), ["plan:2"])
-
-    def test_l2_a_revision_that_fails_gives_the_card_back(self):
-        self.enterContext(patch.dict(ui.CARD_SOURCES, {"plan": ui.CARD_SOURCES["plan"]}, clear=True))
-        for outcome, error in ((None, "engine refused"), (SimpleNamespace(kind="blocked"), None)):
-            screen = _Screen(proposal())
-            app = screen.app
-            app.screen_stack = (screen,)
-            for name in ("plan_action_done", "say_note", "request_refresh", "changed", "after_submission"):
-                setattr(app, name, getattr(app, name, lambda *args: None))
-            app.plan_action_done = _app_method("plan_action_done").__get__(app)
-            screen.render_card_sources()
-            app.revision_note("x")
-            screen.render_card_sources()
-            self.assertEqual(list(screen.card_specs), [])
-            app.plan_action_done("Not done: ", outcome, error)
-            screen.render_card_sources()
-            self.assertEqual(list(screen.card_specs), ["plan:1"])  # the plan is still proposed: its choices are back
-            self.assertEqual(screen.newest_card_for("/approve"), "plan:1")
-
     def test_l3_a_start_the_architect_asked_for_holds_the_pending_line_until_it_ends(self):
         app = _Start()
         for outcome, held in (("done", True), ("failed", False)):

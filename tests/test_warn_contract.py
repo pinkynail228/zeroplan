@@ -32,7 +32,7 @@ from terminal_planner import setup
 from terminal_planner.authority import Authority as RealAuthority
 from terminal_planner.planning import Planning
 from test_docs import glued
-from test_ux import UxTest
+from test_terminal_planner import ProjectTest
 from test_tui import ShellTest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -120,32 +120,14 @@ class DoctorWarnTests(unittest.TestCase):
         self.assertNotIn("Plan: ready.", messages)
 
 
-class PlainStartWarnTests(UxTest):
-    """A-2w (plain half): the line start says each warning once and goes on, with no readiness menu."""
+class UxTest(ProjectTest):
+    """A project whose zplan data and config live in the test's own temporary directories."""
 
-    def readiness(self):
-        return lambda: [warn_item(), ok_item("identity"), ok_item("repo"), ok_item("branch")]
-
-    def test_a2w_plain_start_shows_the_warning_and_proceeds_without_a_menu(self):
-        """A literal warn dict through the existing session: on the base nothing is shown and this fails."""
-        output, _ = self.fixture("q", "q", "q", readiness=self.readiness())
-        self.assertIn("! " + WARN_LINE, output)
-        self.assertNotIn("[g] check again", output)  # no readiness menu: the run was not blocked
-        self.assertIn("zplan · " + self.project.name, output)  # ... and the home screen was reached
-
-    def test_a2w_readiness_screen_lists_the_warning_without_adding_a_key(self):
-        """The warning is listed while another check is missing; the menu line is unchanged (no key, no action)."""
-        def ready():
-            return [warn_item(), ok_item("identity"), ok_item("repo"),
-                    {"id": "branch", "ok": False, "doctor": "branch", "line": "HEAD detached",
-                     "detail": "git switch", "key": "i"}]
-        without = lambda: [dict(i) for i in ready() if i["id"] != "git"]
-        with_warn, _ = self.fixture("q", readiness=ready)
-        without_warn, _ = self.fixture("q", readiness=without)
-        self.assertIn("! " + WARN_LINE, with_warn)          # R-3: the readiness screen lists it too
-        self.assertIn("! HEAD detached", with_warn)        # beside the missing check
-        menu = lambda text: [line for line in text.splitlines() if "check again" in line]
-        self.assertEqual(menu(with_warn), menu(without_warn))  # the warning added no key or action
+    def setUp(self):
+        super().setUp()
+        xdg = patch.dict(os.environ, {"XDG_DATA_HOME": str(self.root / "data"), "XDG_CONFIG_HOME": str(self.root / "config")})
+        xdg.start()
+        self.addCleanup(xdg.stop)
 
 
 class PlanningWarnTests(UxTest):

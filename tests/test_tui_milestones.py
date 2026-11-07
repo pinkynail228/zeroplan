@@ -4,8 +4,8 @@ Textual Pilot over real temporary Git repositories, the fixture store and a gate
 submissions and can hold a watch slice. No provider, no network. They need Textual (the interpreter's own, or the
 wheels of ZPLAN_TEST_WHEELHOUSE) and skip without it."""
 
+import contextlib
 import copy
-import io
 import queue
 import re
 import subprocess
@@ -17,18 +17,16 @@ from unittest.mock import patch
 
 from terminal_planner import catalog, delivery, live, milestone, planning
 from terminal_planner.authority import Authority, Blocked, atomic_state, decode
-from terminal_planner.cli import session
 from terminal_planner.delivery import Delivery
 from terminal_planner.engine import FixtureEngine
 from terminal_planner.process import ProfileChanged
 from terminal_planner.runs import FixtureDriver, MilestoneRuns
 from terminal_planner.tui import strings
-from test_terminal_planner import ROLES, ScriptedTerminal
+from test_terminal_planner import ROLES
 from test_tui import Readiness, ShellTest, check
 from test_tui_planning import GOAL, Planner
 from tui_support import HAVE_TEXTUAL, screen_lines, screen_text
 
-START_KEYS = "g\ny\n"          # line UI: start the focused milestone
 DIRTY = "Target: HEAD отсоединён — [d] посмотреть"
 HEX = re.compile(r"\b[0-9a-f]{40}\b")
 
@@ -152,12 +150,27 @@ class MilestoneShell(ShellTest):
         with Authority(self.state, self.project, fixture_id="test") as authority:
             return copy.deepcopy(authority.state)
 
-    def plain(self, text, keys=()):
-        """A line-UI session over the same store and the same driver."""
-        output = io.StringIO()
-        session(ScriptedTerminal(text, output, keys), self.project, self.state, lambda *_: FixtureEngine(),
-                fixture_id="test", driver_factory=lambda _: self.driver)
-        return output.getvalue()
+    def main(self):
+        """The main screen, whatever modal sits on top."""
+        return next(screen for screen in self.app.screen_stack if type(screen).__name__ == "MainScreen")
+
+    @contextlib.contextmanager
+    def service(self):
+        """The delivery service the shell's controller builds, over the same store and driver."""
+        with Authority(self.state, self.project, fixture_id="test") as authority:
+            runs = MilestoneRuns(authority, self.driver, worktrees=authority.directory / "worktrees")
+            yield Delivery(authority, runs, planning.Planning(authority, runs, lambda *_: FixtureEngine()))
+
+    def finished(self, milestone="M1"):
+        """An attempt of `milestone` started, observed to its end and given its end view, which exports a done
+        attempt (it then waits for the merge)."""
+        with self.service() as service:
+            r = service.start(service.preview(milestone, ROLES), ROLES)
+            mark = None
+            while r["status"] in {"submitted", "running", "stopping"}:
+                mark = service.step(r, mark).mark
+            service.end(r)
+            return service.latest_only(r)
 
     async def begin_run(self, pilot):
         """The typed `/run` from the chat input: p4a, the command is the consent, so the start needs no confirmation.
@@ -261,7 +274,9 @@ class JourneyTests(MilestoneShell):
         run = self.stored()["runs"][0]
         self.assertEqual((run["status"], run["delivery"], len(self.driver.sent)), ("finished", "integrated", 1))
 
-    async def test_b3_needs_owner_accept_routes_to_a_plan_revision(self):
+    async def test_accepting_a_proposal_beyond_the_milestone_goes_to_the_architect(self):
+        """0.15 row 6: accepting the steward's free-text proposal writes no revision; it becomes the owner's message
+        for the architect (here the chat cannot take it, so it waits in the chat input)."""
         self.driver.outcomes = ("needs_owner",)
         self.approve(running=False)
         async with self.shell(size=(120, 40), follow=True) as pilot:
@@ -275,10 +290,11 @@ class JourneyTests(MilestoneShell):
             await self.run_button(pilot, "answer")
             self.assertFalse(self.app.screen.query("#run-buttons-merge"))
             await self.press_button(pilot, "accept")
-            await self.shows(pilot, "revision r2 was created")
+            await self.until(pilot, lambda: "steward's proposal" in self.main().query_one("#input").value)
+            self.assertIn("The owner accepts the steward's proposal for M1 attempt 1", self.main().query_one("#input").value)
+            self.assertIn("Fixture: split the first task.", self.main().query_one("#input").value)
         state = self.stored()
-        self.assertEqual([r["version"] for r in state["revisions"]], [1, 2])
-        self.assertIn("Accepted proposal: Fixture: split the first task.", state["revisions"][1]["feedback"])
+        self.assertEqual([r["version"] for r in state["revisions"]], [1])
         self.assertEqual(len(self.driver.sent), 1)
 
     async def test_b3_needs_owner_answer_starts_a_new_attempt_with_the_note(self):
@@ -330,7 +346,9 @@ class JourneyTests(MilestoneShell):
                 await self.until(pilot, lambda: len(self.driver.sent) == 1)
         self.assertEqual(refused, ["M1"])
 
-    async def test_b3_blocked_offers_answer_and_plan_only_and_a_scope_change_goes_to_plan_revision(self):
+    async def test_blocked_offers_answer_and_plan_only_and_back_to_plan_goes_to_the_architect(self):
+        """B3, and 0.15 row 5: "back to plan" writes no revision; the reason becomes the owner's message "Back to plan
+        after M1 attempt 1: ..." for the architect (here it waits in the chat input)."""
         self.driver.outcomes = ("blocked",)
         self.approve(running=False)
         async with self.shell(size=(120, 40), follow=True) as pilot:
@@ -351,10 +369,10 @@ class JourneyTests(MilestoneShell):
             await self.shows(pilot, "What to change in the plan")
             await self.type(pilot, "Narrow the scope")
             await self.press_button(pilot, "send")
-            await self.shows(pilot, "revision r2 was created")
+            await self.until(pilot, lambda: "Back to plan" in self.main().query_one("#input").value)
+            self.assertIn("Back to plan after M1 attempt 1: Narrow the scope", self.main().query_one("#input").value)
         state = self.stored()
-        self.assertEqual([r["version"] for r in state["revisions"]], [1, 2])
-        self.assertIn("Narrow the scope", state["revisions"][1]["feedback"])
+        self.assertEqual([r["version"] for r in state["revisions"]], [1])
         self.assertEqual(len(self.driver.sent), 1)
 
     async def failure_screen(self, outcome, code, key, plan="plan"):
@@ -564,18 +582,15 @@ class StopAndDetachTests(MilestoneShell):
             await self.open_merge_end(pilot)  # reopened: observation resumed on its own, to the end (i3c: [o] opens it)
         self.assertEqual(len(self.driver.sent), 1)
 
-    async def test_b4_a_run_started_in_the_line_ui_is_observed_by_the_tui_and_never_resubmitted(self):
+    async def test_a_run_started_by_another_session_is_observed_and_never_resubmitted(self):
         self.approve(running=False)
-        output = self.plain(START_KEYS, keys=[None, KeyboardInterrupt])  # detach: Ctrl-C while observing
-        self.assertIn("M1", output)
+        with self.service() as service:  # started by another session, which then left it running
+            service.start(service.preview("M1", ROLES), ROLES)
         self.assertEqual(len(self.driver.sent), 1)
         async with self.shell(size=(120, 40), follow=True) as pilot:
             await self.loaded(pilot)
             await self.open_merge_end(pilot)  # i3c: the stage-done card replaces the automatic end screen
         self.assertEqual(len(self.driver.sent), 1)
-        output = self.plain("o\nn\nl\nq\n")
-        self.assertEqual(len(self.driver.sent), 1)
-        self.assertIn("waiting for merge", output)
 
     async def test_b7_quitting_while_observing_ends_the_slice_and_skips_queued_observation(self):
         self.approve(running=False)
@@ -685,36 +700,6 @@ class RecoverableNewAttemptTests(MilestoneShell):
     task ([g] resumes the frozen submission, runs.py `resume`) is pinned by the graph A4 captures.
     """
 
-    def test_a1_the_line_ui_offers_resume_then_a_new_attempt_and_t_starts_one(self):
-        """A1/A3 from one journey: the four keys in order, [t] starts a fresh run, home drops the old resume.
-
-        Verified values: the end-screen menu line; `FixtureDriver.resume` calls (patched, must stay empty); the
-        submissions the driver received; the attempts/predecessors in the store; the home «Дальше:» line after
-        the new attempt. Interpretation: the four keys and the quoted wording are the line UI's own
-        (`failed_recoverable`'s catalog actions, which A1 names); the shell reuses the same delivery action IDs
-        (its own test), so this pins the shared `END_ACTIONS` entry A4 requires.
-        """
-        self.driver.outcomes = ("failed_recoverable", "failed")
-        self.approve(running=False)
-        resumed = []
-        original = FixtureDriver.resume
-        with patch.object(FixtureDriver, "resume",
-                          lambda driver, r, run_id: (resumed.append(run_id), original(driver, r, run_id))[1]):
-            output = self.plain("g\ny\nt\n\nq\nq\n")  # start, [t] + empty note, back, quit
-        flat = " ".join(output.split())
-        # A1: the recoverable end screen lists its four keys, in order, with the failed.new_attempt wording.
-        self.assertRegex(flat, r"\[g\][^\[]*\[t\][^\[]*\[p\][^\[]*\[q\]")  # the key bar in order; its labels are the catalog's (T1)
-        self.assertIn("failed_recoverable.new_attempt", catalog.ACTIONS)  # removing the entry fails this test
-        # A1/A4: [t] submitted exactly one fresh run (attempt 2, no predecessor) and never resumed.
-        self.assertEqual(resumed, [])
-        self.assertEqual(len(self.driver.sent), 2)
-        runs = self.stored()["runs"]
-        self.assertEqual([(r["attempt"], r["status"]) for r in runs], [(1, "failed"), (2, "failed")])
-        self.assertEqual([r["predecessor"] for r in runs], [None, None])
-        # A3: home now names the new (latest) attempt, never the old recoverable one for a resume.
-        self.assertIn("Next: [g] new attempt M1 — from the current HEAD", flat)
-        self.assertNotIn("Next: [g] continue M1", flat)
-
     def test_a4_the_new_attempt_submits_the_current_graph_not_the_frozen_one(self):
         """A4: [t] submits the graph generated now, not the graph frozen with attempt 1 (the review-timeout bug).
 
@@ -735,10 +720,10 @@ class RecoverableNewAttemptTests(MilestoneShell):
             return original(driver, r, paths)
 
         with patch.object(Gated, "submit", capture):
-            self.plain("g\ny\nq\nq\n")  # attempt 1 on the graph of the moment, back to home, quit
+            first = self.finished("M1")  # attempt 1 on the graph of the moment
             self.assertEqual(len(graphs), 1)
-            with patch.object(milestone, "WORKER_TIMEOUT", 7 * 60 * 1000):  # the graph generator has changed
-                self.plain("o\nt\n\nq\nq\n")  # open the end screen, [t] + empty note, back, quit
+            with patch.object(milestone, "WORKER_TIMEOUT", 7 * 60 * 1000), self.service() as service:
+                service.new_attempt(service.latest_only(first))  # the graph generator has changed
         self.assertEqual(len(graphs), 2)
         self.assertEqual(node_timeout(graphs[0], "acceptance_review"), milestone.WORKER_TIMEOUT)
         self.assertEqual(node_timeout(graphs[1], "acceptance_review"), 7 * 60 * 1000)
@@ -779,25 +764,6 @@ class RecoverableNewAttemptTests(MilestoneShell):
         self.assertEqual(len(self.driver.sent), 2)
         runs = self.stored()["runs"]
         self.assertEqual([(r["attempt"], r["predecessor"]) for r in runs], [(1, None), (2, None)])
-
-    def test_a2_home_names_resume_and_the_openable_new_attempt_and_g_still_resumes(self):
-        """A2: home's «Дальше:» for a recoverable failure names resume and the openable new attempt; [g] resumes.
-
-        Verified values: the home «Дальше:» line for the failed_recoverable milestone, and, after pressing [g]
-        from home, the store's run lineage (a successor with a predecessor, one submission total -- resume, not a
-        new attempt). Interpretation: home keeps [g] for resume, exactly as before the change; the new attempt is
-        reached through [o] and then [t], which the line announces."""
-        self.driver.outcomes = ("failed_recoverable",)
-        self.approve(running=False)
-        output = self.plain("g\ny\nq\nq\n")  # start, end screen back to home, quit
-        flat = " ".join(output.split())
-        self.assertIn("Next: [g] continue M1 — the same attempt in its worktree; [o] open — a new attempt",
-                      flat)
-        self.plain("g\nq\nq\n")  # [g] from home: resume, end screen back, quit
-        self.assertEqual(len(self.driver.sent), 1)  # a resume is not a new submission
-        runs = self.stored()["runs"]
-        self.assertEqual([(r["attempt"], r["predecessor"] is not None) for r in runs], [(1, False), (1, True)])
-
 
 class HeldHandOver:
     """Holds the worker inside the app's hand-over, past the production `closing` check, until the UI has entered
@@ -1075,7 +1041,7 @@ class DetailsTests(MilestoneShell):
     def words(text):
         return [" ".join(line.replace("│", " ").split()) for line in text.splitlines()]
 
-    async def test_b6_details_lead_with_the_outcome_drop_stale_claims_and_match_the_plain_text(self):
+    async def test_details_lead_with_the_outcome_and_drop_stale_claims(self):
         self.approve(running=False)
         async with self.shell(size=(200, 60), follow=True) as pilot:
             await self.loaded(pilot)
@@ -1101,11 +1067,6 @@ class DetailsTests(MilestoneShell):
             self.assertNotIn(internal, before)  # ids, worktrees and commands live only in the marked tail
         self.assertIn("fixture-", after)
         self.assertIn("M2 ready", text)
-        out = {" ".join(line.split()).replace("Choice: ", "", 1) for line in self.plain("i\nq\n").splitlines()}
-        for line in shown:
-            if "ZPLAN" in line or "[esc]" in line or "↑↓" in line or "Details" == line:
-                continue  # the full-screen chrome around the same text
-            self.assertIn(line, out, "the TUI details line is missing from the plain output")
 
     async def test_b6_a_running_milestone_leads_with_its_phase(self):
         self.approve(running=False)
@@ -1124,7 +1085,7 @@ class DetailsTests(MilestoneShell):
         self.assertRegex(running, r"^M1 is running(: .+)?$")
         self.assertLess(lines.index(running), next(i for i, l in enumerate(lines) if l.startswith("For diagnosis")))
 
-    async def test_b6_a_failed_planner_shows_the_same_diagnostic_commands_in_the_tui_as_in_plain(self):
+    async def test_a_failed_planner_shows_its_diagnostic_commands(self):
         binding = {"fixture_id": "test", "state_root": str(self.root / "zs-state"), "executable": "/opt/zs/bin/zeroshot"}
         with Authority(self.state, self.project, fixture_id="test") as authority:
             authority.begin("Requested feature", ROLES, "fixture")
@@ -1143,24 +1104,18 @@ class DetailsTests(MilestoneShell):
                 await self.press_button(pilot, "info")  # the plan screen's «подробнее» button (K1c2)
                 await self.shows(pilot, "ZEROSHOT_STATE_DIR=")
                 shown = self.flat()
-            out = " ".join(self.plain("i\nq\n").split())
         commands = re.findall(r"ZEROSHOT_STATE_DIR=\S+ ZEROSHOT_CONFIG_DIR=\S+ /opt/zs/bin/zeroshot (?:status|logs) "
-                              + re.escape(run_id), out)
+                              + re.escape(run_id), shown)
         self.assertEqual(len(commands), 2)
-        for command in commands:
-            self.assertIn(command, shown)
 
 
 class SharedServiceTests(MilestoneShell):
-    async def test_b1_one_patched_service_function_is_followed_by_both_uis(self):
+    async def test_one_patched_service_function_is_followed_by_the_tui(self):
         self.approve(running=False)
-        self.plain(START_KEYS + "l\nq\n")  # an attempt awaiting merge, made by the line UI
+        self.finished("M1")  # an attempt awaiting merge
         question = staticmethod(lambda r: "ВОПРОС ИЗ СЕРВИСА?")
         with patch.object(Delivery, "merge_question", question), \
                 patch.object(Delivery, "diff_text", lambda self_, r: "ПАТЧ-ДИФФ"):
-            output = self.plain("o\nd\nm\nn\nl\nq\n")
-            self.assertIn("ВОПРОС ИЗ СЕРВИСА?", output)
-            self.assertIn("ПАТЧ-ДИФФ", output)
             async with self.shell(size=(120, 40), follow=True) as pilot:
                 await self.loaded(pilot)
                 await self.panel(pilot)  # D4: the input has the start focus; [o] is a pane key
@@ -1169,7 +1124,7 @@ class SharedServiceTests(MilestoneShell):
                 await self.press_button(pilot, "diff")
                 await self.shows(pilot, "ПАТЧ-ДИФФ")
                 await pilot.press("escape")
-                await self.press_button(pilot, "merge")  # u3: the TUI's button merges at once, the line UI asks
+                await self.press_button(pilot, "merge")  # u3: the TUI's button merges at once, asking nothing
                 await self.shows(pilot, "Merged: M1 → main.")
                 self.assertNotIn("ВОПРОС ИЗ СЕРВИСА?", self.flat())
 
@@ -1222,7 +1177,7 @@ class UxNoteTests(MilestoneShell):
             await self.until(pilot, lambda: self.app.checks is not None
                              and all(c.ok for c in self.app.checks))
 
-    async def test_missing_driver_blocks_driver_actions_with_the_tools_remedy_in_both_uis(self):
+    async def test_missing_driver_blocks_driver_actions_with_the_tools_remedy(self):
         """After a failed tools check the milestone driver is None: checking an interrupted attempt stops with the
         catalog family and the [u]/zplan setup remedy, never a traceback, and nothing reaches Zeroshot."""
         self.driver.lose_receipt = True
@@ -1232,13 +1187,6 @@ class UxNoteTests(MilestoneShell):
             await self.begin_run(pilot)
             await self.pane_shows(pilot, "submission status unknown")
         self.driver.lose_receipt = False
-        remedy = "[u] install on the readiness screen, or zplan setup"
-        output = io.StringIO()
-        session(ScriptedTerminal("g\nq\n", output), self.project, self.state, lambda *_: FixtureEngine(),
-                fixture_id="test", driver_factory=lambda _: None)
-        self.assertIn(remedy, output.getvalue())
-        self.assertIn("[code: readiness.tools]", output.getvalue())
-        self.assertNotIn("Traceback", output.getvalue())
         controller = self.controller(driver_factory=lambda _: None)
         async with self.shell(controller, size=(120, 40), follow=True) as pilot:
             await self.loaded(pilot)
@@ -1248,17 +1196,6 @@ class UxNoteTests(MilestoneShell):
             self.assertIn("zplan tools", screen_text(self.app))
         self.assertEqual(len(self.driver.sent), 1)
         self.assertEqual(self.stored()["runs"][0]["status"], "submission_unknown")
-
-    async def test_b7_an_invalid_goal_uses_the_shared_problem_text_in_both_uis(self):
-        marker = "ПРОБЛЕМА ЦЕЛИ ИЗ СЕРВИСА"
-        with patch.object(planning, "GOAL_PROBLEM", marker):
-            output = self.plain("p\n\nq\n")
-            self.assertIn(marker, output)
-            async with self.shell(size=(120, 40)) as pilot:
-                await self.loaded(pilot)
-                await self.command(pilot, "/plan " + "x" * 9000)  # K1b: the goal is typed; too long is refused
-                await self.shows(pilot, marker)
-
 
 class HeldPlanner(Planner):
     """The planner double with a hand inside its first submission, at `point`: "prepare" (before the checkout is
@@ -1313,9 +1250,10 @@ class QuitSafetyTests(MilestoneShell):
         return super().controller(readiness, **kw)
 
     def unsent(self, goal=GOAL):
-        """A saved revision the planner has not been given: the next watch slice submits it (no receipt yet)."""
+        """A saved revision of the architect's the plan check has not been given: the next watch slice submits it
+        (no receipt yet)."""
         with Authority(self.state, self.project, fixture_id="test") as authority:
-            authority.begin(goal, ROLES, "fixture")
+            self.begin(authority, goal=goal)
 
     def dispatched(self, goal=GOAL):
         """A revision already given to the planner: a watch slice only observes it."""
@@ -1400,12 +1338,13 @@ class QuitSafetyTests(MilestoneShell):
                 return
 
     async def quit_while_the_submission_holds(self, point):
-        """Submit a goal whose first planner slice holds at `point`, quit while it holds, then let it end."""
+        """Send an unsent plan whose first slice holds at `point`, quit while it holds, then let it end."""
+        self.unsent()
         self.planner.point = point
         controller = self.controller()
         async with self.shell(controller, size=(120, 40)) as pilot:
             await self.loaded(pilot)
-            await self.command(pilot, "/plan " + GOAL)  # ready: the revision is accepted, the watch submits it
+            await self.command(pilot, "/plan")  # ready: the unsent revision is sent, the watch submits it
             await self.until(pilot, self.planner.reached.is_set)
             await pilot.press("ctrl+q")
             await self.shows(pilot, "Finishing the operation")  # the app does not leave a submission unfinished

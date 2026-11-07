@@ -135,7 +135,8 @@ class PlanningTests(tpr.ProfileTest):
         self.rejected(app, briefed())
         app.planning.plan_draft("Other goal", briefed(), request="b1")
         self.assertEqual(app.authority.current["feedback"], "b1")
-        self.assertEqual(app.authority.amended_feedback("b2"), "b1\n\nb2")
+        app.planning.revise_draft(app.authority.current["version"], briefed("Edited"), request="b2")
+        self.assertEqual(app.authority.current["feedback"], "b1\n\nb2")  # an edit carries the chain's requests on
 
 
 class ChainTests(tpg.GateBase):

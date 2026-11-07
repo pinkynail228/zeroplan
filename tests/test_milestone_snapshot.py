@@ -24,7 +24,7 @@ from unittest.mock import patch
 from terminal_planner import live, milestone, planning, runs
 from terminal_planner.authority import Blocked, decode
 from terminal_planner.delivery import Delivery, Token
-from terminal_planner.engine import FixtureEngine, fixture_proposal
+from terminal_planner.engine import FixtureEngine, fixture_draft, fixture_proposal
 from test_runs import ROLES, RunsTest
 
 
@@ -45,7 +45,7 @@ def proposal(change=None):
 class MilestoneSnapshotTests(RunsTest):
     def approve(self, authority, plan):
         with patch("terminal_planner.engine.fixture_proposal", return_value=plan):
-            authority.begin("Next goal", ROLES, "fixture")
+            self.begin(authority, goal="Next goal")
             self.propose(authority)
             authority.approve(authority.current["version"])
 
@@ -65,8 +65,8 @@ class MilestoneSnapshotTests(RunsTest):
 
     def two_attempts_then_revised_m2(self, authority):
         """The brief's example state: M1 and M2 have an exported r1 attempt; r2 changes only M2's brief."""
-        self.begin(authority)
-        with patch("terminal_planner.engine.fixture_proposal", return_value=proposal()):
+        with patch("terminal_planner.engine.fixture_proposal", return_value=proposal()):  # the draft is built from it
+            self.begin(authority)
             self.propose(authority)
         authority.approve(1)
         controller, service = self.armed(authority)
@@ -138,8 +138,8 @@ class MilestoneSnapshotTests(RunsTest):
 
     def test_c2_a_carried_attempt_that_is_only_done_exports_under_the_new_revision(self):
         with self.fixture_authority() as authority:
-            self.begin(authority)
-            with patch("terminal_planner.engine.fixture_proposal", return_value=proposal()):
+            with patch("terminal_planner.engine.fixture_proposal", return_value=proposal()):  # the draft is built from it
+                self.begin(authority)
                 self.propose(authority)
             authority.approve(1)
             controller, service = self.armed(authority)
@@ -179,7 +179,9 @@ class MilestoneSnapshotTests(RunsTest):
             fresh = controller.observe(controller.start("M2", 2, ROLES))
             self.assertEqual((fresh["plan_revision"], fresh["attempt"]), (2, 1))
             baseline = decode((Path(fresh["worktree"]) / milestone.BASELINE).read_text())
-            self.assertEqual(baseline, milestone.build_baseline(proposal("M2"), "M2", 2))
+            with patch("terminal_planner.engine.fixture_proposal", return_value=proposal("M2")):
+                plan = fixture_draft()  # the revision's plan as the architect wrote it: the changed M2, briefed
+            self.assertEqual(baseline, milestone.build_baseline(plan, "M2", 2))
             self.assertEqual([task["title"] for task in baseline["tasks"]], ["Acceptance and code review (changed)"])
 
     # C4 ---------------------------------------------------------------------------------------------------------

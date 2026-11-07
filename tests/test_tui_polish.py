@@ -477,26 +477,21 @@ class GoalScreenTests(MilestoneShell):
             self.assertEqual(self.driver.sent, [])
             await pilot.press("escape")
 
-    async def test_a2_the_plain_home_line_and_the_tui_pane_are_the_same_text(self):
-        """R-2: the plain UI and the TUI print the same goal text and hint (the line UI's home line is the pane's)."""
+    async def test_the_pane_names_the_goal_with_its_details_hint(self):
+        """R-2: the pane's goal line carries the hint that the whole goal is in the details."""
         goal = "Ц" * 150 + " конец"
         self.proposal(goal)
-        plain = [line for line in self.plain("q\n").splitlines() if line.startswith(GOAL.rstrip())]
         async with self.shell(size=(120, 40), follow=False) as pilot:
             await self.loaded(pilot)
             pane = [line for line in self.app.snapshot.lines if line.startswith(GOAL.rstrip())]
-            self.assertTrue(pane and plain, (pane, plain))
+            self.assertTrue(pane, pane)
             self.assertIn(catalog.hint("home.details"), pane[0])
-            self.assertIn(catalog.hint("home.details"), plain[0])
-            self.assertEqual(plain[0], pane[0])
 
-    async def test_a2_the_plain_and_the_tui_plan_details_are_the_same_text(self):
-        """R-2/A-2: the plan [i] of both UIs is the delivery service's plan text — the whole stored goal, then the
-        requirements — so the line UI's plan [i] is not the requirements alone (its home [i] rule, applied to the
-        plan screen). Opening it starts no work."""
+    async def test_the_plan_details_are_the_whole_goal_then_the_requirements(self):
+        """R-2/A-2: the plan details are the delivery service's plan text — the whole stored goal, then the
+        requirements. Opening them starts no work."""
         goal = "Ц" * 220 + " конец"
         self.proposal(goal)
-        plain = self.plain("p\ni\nq\nq\n")
         async with self.shell(size=(120, 40), follow=False) as pilot:
             await self.loaded(pilot)
             await self.panel(pilot)                               # D4: the pane's [p] needs the pane
@@ -508,9 +503,7 @@ class GoalScreenTests(MilestoneShell):
             tui = "\n".join(self.app.details_lines)
             self.assertEqual(self.driver.sent, [])
         self.assertIn(goal, tui)                                  # the full stored goal, not the cut line
-        self.assertIn(goal, plain)
         self.assertIn("R1  Demonstrate the requested user interaction.", tui)  # the requirements block (heading is T1's text)
-        self.assertIn("R1  Demonstrate the requested user interaction.", plain)
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, TEXTUAL_REASON)

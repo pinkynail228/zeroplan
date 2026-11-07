@@ -10,6 +10,16 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
 
 ## For users: update zplan
 
+### What changes in 0.15
+
+- One planning path: every plan is the architect's. `/plan <goal>`, «back to plan» at a run's end, a steward proposal
+  you accept and any revision note go to the architect as your message, and none of them approves a plan. A plan the
+  old planner made before still shows and can be approved; send, renew and restart refuse it: plan again in the chat.
+- zplan is full-screen only. `zplan --plain`, and `zplan` without a terminal (piped input, `TERM` empty or `dumb`),
+  exit 2 and name `zplan status` and `zplan exec`; a broken install exits 1 with "reinstall zplan". The subcommands
+  are unchanged.
+- When your change alters what a plan is for, the architect writes a new plan, which you approve.
+
 ### What changes in 0.14
 
 - Declining or revising the architect's plan with a note sends the note to the architect, who revises the plan; the
@@ -48,7 +58,7 @@ no capability flags and no auto-discovery: a new Zeroshot is a new zplan release
   your screen showed as waiting; a settings change is a card you confirm.
 - The architect's plan format errors stay off your screen.
 - The architect writes the plan in the chat; a fresh reader's retelling and one critic pass review it, and the plan
-  card shows both. The separate planner remains only on the owner's `/plan` and line UI paths for now.
+  card shows both.
 - Before a milestone starts, the project's required checks run on the base. A check that fails or cannot run there
   refuses the start and names the check (`milestone.preflight`), instead of stopping the milestone at its end.
 - Without the owner, a milestone gets at most two new attempts; the next decision is the owner's.

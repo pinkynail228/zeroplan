@@ -41,6 +41,24 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(engine.goldfish_runtime(ROLES)["nodes"]["critic"]["model"], ROLES["plan_verifier"]["model"])
 
 
+class FrozenDocumentTests(unittest.TestCase):
+    def test_the_plan_check_documents_are_byte_identical_to_0_14(self):
+        """0.15 F3: the Goldfish graph, runtime and input for one fixed context (a chain's second revision with an
+        earlier request, a response and a red base) hash as they did in 0.14.0. A deliberate change of the plan
+        check updates these digests in its own commit, which says why."""
+        import hashlib
+        context = {"goal": "Goal", "feedback": "An earlier request.", "roles": ROLES, "version": 2,
+                   "draft": engine.fixture_draft(), "response": "A reply.",
+                   "base": {"outcome": "failed", "failed": ["unit"], "refused": "", "tail": "1 failed"}}
+        documents = {"graph": engine.goldfish_graph(), "runtime": engine.goldfish_runtime(ROLES),
+                     "input": engine.goldfish_input(context)}
+        digests = {name: hashlib.sha256(canonical(value).encode()).hexdigest() for name, value in documents.items()}
+        self.assertEqual(digests, {
+            "graph": "188772bd93c0b704b447fa4d6fa26f4f7c1f00ffe692c4295e68f6fd1dd845b3",
+            "runtime": "9819cce7205901d2d4d8cec107a5f3f157319dc9d244cc92db954d4c8cb818f2",
+            "input": "996d6c9fedb9c918f94492f6a8ecf9de5e674413c56619269c41c994d8446f94"})
+
+
 @unittest.skipUnless(pinned_binary(), "pinned zeroshot binary absent (set ZEROSHOT_TEST_BINARY)")
 class AdmissionTests(unittest.TestCase):
     def test_the_goldfish_documents_pass_native_admission(self):

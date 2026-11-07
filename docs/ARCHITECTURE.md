@@ -27,17 +27,13 @@ The flow and the modules that carry it:
 
 `application.py` is the operations layer that both the full-screen UI and headless automation call.
 
-The old planner graph in `engine.py` still serves these entry points:
-
-- the owner's `/plan`, retry and renew;
-- "back to plan" at a run's end;
-- a steward proposal the owner accepts;
-- revising a plan the old planner made;
-- the line UI (`cli.py`).
-
-Declining or revising the architect's own plan goes to the architect, and the decline is stored on the revision, so
-only the owner's card can still approve it. 0.15 moves every remaining entry point to the architect
-(`designs/2026-11-06-0-14-lean-zplan.md`).
+**One planning path** (0.15, `designs/2026-11-06-0-15-one-planning-path.md`). Every plan is the architect's:
+`/plan <goal>`, a goal draft, "back to plan", a steward proposal the owner accepts and any revision note reach the
+architect as the owner's message (`ZplanApp.send_owner_note`), and such a message binds no yes in words
+(`application.shown_plan`). Declining a proposed plan is stored on the revision first, so only the owner's card can
+still approve it. A revision the old planner made earlier still shows and can be approved, but send, renew and restart
+refuse it. The old planner's graph and its writer `Planning.begin` remain with no product caller until their
+removal; `tests/test_one_planning_path.py` guards that.
 
 ## Tests
 
@@ -91,7 +87,7 @@ Runs, verification and merge:
 
 Setup and the command line:
 
-- cli.py: the subcommands (`status`, `doctor`, `setup`, `login`, `logout`, `update`, `profile`, `roles`, `exec`) and the line UI.
+- cli.py: the `zplan` entry (full-screen only), the subcommands (`status`, `doctor`, `setup`, `login`, `logout`, `update`, `profile`, `roles`, `exec`) and `App`, the headless session core.
 - commands.py: the subcommands' help text.
 - setup.py: the pinned tools, login and doctor.
 - toolchain.py: the one qualified toolchain of this release.

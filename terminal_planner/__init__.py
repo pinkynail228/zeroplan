@@ -1,3 +1,3 @@
 """Terminal planning client; native Zeroshot remains the run authority."""
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"

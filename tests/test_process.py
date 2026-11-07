@@ -26,10 +26,10 @@ from terminal_planner.runs import FixtureDriver
 import test_terminal_planner as tp
 import test_tui as tt
 from test_runs import split_candidate
-from test_terminal_planner import PLAN, START, MERGE, ROLES, ScriptedTerminal
+from terminal_planner.engine import fixture_draft
+from test_terminal_planner import ROLES, ScriptedTerminal, Terminal
 from tui_support import HAVE_TEXTUAL, screen_lines, screen_text
 
-MERGE_REFUSED = "Not done: "  # the merge refusal line is delivery.py's (T2); T3 translates it with the text
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = {"model": "worker-model", "effort": "low"}
@@ -149,12 +149,27 @@ class ProfileTest(tp.ProjectTest):
             return Profile.of(authority).defer()
 
     def awaiting_merge(self):
-        """An accepted profile and M1 finished, waiting for the merge (made by the line UI)."""
-        self.run_session("a\n" + PLAN + "a\n" + START + "l\nq\n")
+        """An accepted profile and M1 finished, waiting for the merge: the services the TUI calls, in its order."""
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            Profile.of(authority).accept()
+        self.approved_plan()
+        self.finished("M1")
         self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
         # R-3: a fixture session accepts into the fixture state and writes no project file; the profile is usable.
         self.assertEqual(self.peek().status().state, "accepted")
         self.assertFalse(self.file.exists())
+
+    def finished(self, milestone, outcome="done", **fixture):
+        """Start `milestone` of the approved plan, observe it until its attempt ends and open its end view, which
+        exports a done attempt (the TUI's order). `fixture` scripts the driver (a steward `proposal`, ...)."""
+        with self.app() as app:
+            app.delivery.runs.engine = FixtureDriver(self.root / "fixture-runs", outcome, **fixture)
+            r = app.delivery.start(app.delivery.preview(milestone, app.roles), app.roles)
+            mark = None
+            while r["status"] in {"submitted", "running", "stopping"}:
+                mark = app.delivery.step(r, mark).mark
+            app.delivery.end(r)
+            return app.delivery.latest_only(r)
 
     def stored(self):
         with tp.Authority(self.state, self.project) as authority:
@@ -163,14 +178,12 @@ class ProfileTest(tp.ProjectTest):
             state.setdefault("runs", [])
         return state
 
-    def run_session(self, text, profile=True, outcome="done", terminal=None, **fixture):
-        output = io.StringIO()
-        driver = FixtureDriver(self.root / "fixture-runs", outcome, **fixture)
-        terminal = terminal or ScriptedTerminal(text, output)
-        terminal.output = output
-        cli.session(terminal, self.project, self.state, lambda *_: FixtureEngine(), fixture_id="test",
-                    driver_factory=lambda _: driver, worktrees=self.root / "worktrees", profile=profile)
-        return output.getvalue()
+    def status_text(self):
+        """`zplan status` of the fixture store: the home the session core prints."""
+        out = io.StringIO()
+        cli.status(Terminal(io.StringIO(), out), self.project, self.state, "test",
+                   lambda _: FixtureDriver(self.root / "fixture-runs"))
+        return out.getvalue()
 
     def env(self):
         return tt.plain_env(HOME=str(self.root / "home"), XDG_DATA_HOME=str(self.root / "data"),
@@ -1025,12 +1038,9 @@ class StateTests(ProfileTest):
         self.assertEqual(self.peek().status().state, "never")
 
     def test_later_snapshot_is_used_and_the_header_says_so(self):
-        out = self.run_session("l\nq\n")
-        self.assertIn("zplan · project with spaces (main, clean) · profile not saved", out)
+        self.defer()
+        self.assertIn("zplan · project with spaces (main, clean) · profile not saved", self.status_text())
         self.assertFalse(self.file.exists())
-        out = self.run_session("q\n")  # reopened: no bootstrap screen again, the note stays
-        self.assertNotIn("Project process profile", out)
-        self.assertIn("· profile not saved", out)
 
     def test_later_snapshot_keeps_the_rules_and_checks_the_screen_showed(self):
         (self.project / "AGENTS.md").write_text("rules\n")
@@ -1047,13 +1057,12 @@ class StateTests(ProfileTest):
         self.assertEqual(later.resolved.digest, shown.resolved.digest)
 
     def test_a_fixture_session_accepts_without_the_file_and_has_no_header_note(self):
-        """R-3: the line UI's accept keeps the snapshot in the fixture state; the target's file is not written, the
-        accepted state survives a reopen, and the header carries no «profile not saved» note."""
-        out = self.run_session("a\nq\n")
+        """R-3: a fixture session's accept keeps the snapshot in the fixture state; the target's file is not written,
+        the accepted state survives a reopen, and the header carries no «profile not saved» note."""
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            Profile.of(authority).accept()
         self.assertFalse(self.file.exists())
-        self.assertIn("Demo profile accepted", out)
-        self.assertNotIn("Commit it", out)
-        self.assertNotIn("· profile not saved", out)
+        self.assertNotIn("· profile not saved", self.status_text())
         self.assertEqual(self.peek().status().state, "accepted")
 
     def test_interrupted_accept_is_recovered_at_the_next_start(self):
@@ -1241,32 +1250,26 @@ class GuardTests(ProfileTest):
             self.assertEqual(self.snapshot(app), before)
             self.assertEqual(app.authority.state.get("runs", []), [])
 
-    def refusals(self, session_text, needle, prefix="Not done: "):
-        """The plain UI over `session_text` prints a refusal containing `needle` and changes nothing."""
-        head, state = self.head(), self.stored()
-        out = self.run_session(session_text)
-        self.assertIn(prefix, out)
-        self.assertIn(needle, out)
-        self.assertEqual(self.head(), head)
-        self.assertEqual(self.stored(), state)
-        return out
-
-    def test_plain_required_task_gate_refuses_the_start_and_creates_nothing(self):
-        self.run_session("a\n" + PLAN + "a\nq\n")
+    def test_a_required_task_gate_refuses_the_start_and_creates_nothing(self):
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            Profile.of(authority).accept()
+        self.approved_plan()
         self.write({"gates": {"task": "required"}})
-        worktrees = self.root / "worktrees"
-        out = self.refusals(START + "q\n", "the task check is not built yet: turn it off in zplan.process.json")
-        self.assertNotIn("Start M1 ·", out)  # refused before the owner is asked to confirm a preview
-        self.assertEqual(self.stored()["runs"], [])
+        head, worktrees = self.head(), self.root / "worktrees"
+        with self.app() as app, self.assertRaises(Blocked) as refused:
+            app.delivery.start(app.delivery.preview("M1", app.roles), app.roles)
+        self.assertIn("the task check is not built yet: turn it off in zplan.process.json", str(refused.exception))
+        self.assertEqual((self.head(), self.stored()["runs"]), (head, []))
         self.assertFalse(worktrees.exists() and any(worktrees.iterdir()))
 
-    def test_plain_required_merge_gate_and_deleted_profile_refuse_the_merge(self):
+    def test_a_deleted_profile_refuses_the_merge(self):
         self.awaiting_merge()
-        self.write({"gates": {"merge": "required"}})
-        self.refusals("o\n" + MERGE + "l\nq\n", "there are no checks", prefix=MERGE_REFUSED)
         self.accept_file({})  # a native file profile replaces the fixture snapshot, then its file goes away
         self.file.unlink()
-        self.refusals("o\n" + MERGE + "l\nq\n", "was deleted from the project", prefix=MERGE_REFUSED)
+        with self.app() as app:
+            result = app.delivery.merge(app.delivery.latest("M1"))
+        self.assertEqual(result.kind, "refused")
+        self.assertIn("was deleted from the project", result.line)
         self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
 
     def test_active_run_is_watched_to_its_end_and_exported_after_the_profile_is_deleted(self):
@@ -1294,7 +1297,9 @@ class GuardTests(ProfileTest):
         self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
 
     def test_required_merge_gate_blocks_merge_and_leaves_the_result_unmerged(self):
-        self.run_session("l\n" + PLAN + "a\n" + START + "l\nq\n", profile=True)  # M1 done, awaiting merge
+        self.defer()
+        self.approved_plan()
+        self.finished("M1")  # M1 done, awaiting merge
         self.write({"gates": {"merge": "required"}})
         self.assertEqual(self.stored()["runs"][0]["delivery"], "awaiting_merge")
         head = self.head()
@@ -1326,39 +1331,17 @@ class GuardTests(ProfileTest):
             run = app.delivery.start(fresh, app.roles)
             self.assertEqual(run["roles"]["worker"], {"model": "worker-two", "effort": "high"})
 
-    def test_plain_start_shows_the_new_preview_after_a_change(self):
-        self.accept_file({"roles": {"worker": WORKER}})
-        self.approved_plan()
-
-        class Edits(ScriptedTerminal):
-            changed = False
-
-            def ask(inner, label, default=None):
-                if label.startswith("Start M1") and not inner.changed:
-                    inner.changed = True
-                    self.write({"roles": {"worker": {"model": "worker-two", "effort": "high"}}})
-                return super().ask(label, default)
-        out = self.run_session("g\ny\ny\nl\nq\n", terminal=Edits("g\ny\ny\nl\nq\n", io.StringIO()))
-        self.assertIn("Not started: ", out)
-        self.assertIn("The process profile changed", out)  # T2 text (delivery.py), translated by T3
-        self.assertEqual(out.count("Start M1 ·"), 2)  # the preview was shown again
-        self.assertIn("worker worker-model/low", out)
-        self.assertIn("worker worker-two/high", out)
-        runs = self.stored()["runs"]
-        self.assertEqual(len(runs), 1)
-        self.assertEqual(runs[0]["roles"]["worker"], {"model": "worker-two", "effort": "high"})
-
     def test_watching_stop_and_export_stay_available_without_the_profile(self):
-        self.run_session("l\n" + PLAN + "a\n" + START + "l\nq\n", profile=True)
+        self.defer()
+        self.approved_plan()
+        self.finished("M1")
         self.accept_file()  # the "later" profile becomes accepted, then its file goes away
         self.assertTrue(self.file.exists())
         self.file.unlink()
         self.assertEqual(self.peek().status().state, "missing")
-        out = self.run_session("o\nl\nq\n", profile=True)  # open the finished run: watching is not a new action
-        self.assertIn("M1 · First usable increment — done, waiting for merge", out)
-        self.assertIn("profile: error", out)
         with self.app() as app:
             run = app.delivery.latest("M1")
+            self.assertEqual(app.delivery.end(run).state, "awaiting_merge")  # opening it is not a new action
             self.assertIn("ZPLAN_FIXTURE.md", app.delivery.diff_text(run))  # export / diff still work
             with self.assertRaises(Blocked):
                 app.delivery.new_attempt(run)
@@ -1376,13 +1359,12 @@ class GuardTests(ProfileTest):
             self.assertIsNotNone(run)
             self.assertEqual(app.delivery.stop(run)["status"], "stopping")  # stop has no profile guard
 
-    def test_missing_profile_refuses_new_plan_in_plain_flow_before_the_goal_is_asked(self):
+    def test_a_missing_profile_refuses_a_new_plan(self):
         self.accept_file()
         self.file.unlink()
-        out = self.run_session("p\nq\n", profile=True)
-        self.assertIn("Not done:", out)
-        self.assertIn("was deleted from the project", out)
-        self.assertNotIn("(several lines", out)
+        with self.app() as app, self.assertRaises(Blocked) as refused:
+            app.planning.guard()
+        self.assertIn("was deleted from the project", str(refused.exception))
         self.assertIsNone(self.stored())
 
 
@@ -1398,12 +1380,19 @@ class LiveRolesTests(ProfileTest):
         setup()
         self.write({"roles": {"planner": self.TWO, "worker": self.TWO}})
 
-    def planned(self):
-        self.run_session("l\n" + PLAN + "q\nq\n")
-        self.assertEqual(self.stored()["revisions"][0]["roles"]["planner"], WORKER)
+    def planned(self, profile=True):
+        """A proposed plan, its roles frozen from the session's profile (none: the fixture roles)."""
+        with self.app(profile=profile) as app:
+            self.begin(app.authority)
+            self.propose(app.authority)
+        if profile:
+            self.assertEqual(self.stored()["revisions"][0]["roles"]["planner"], WORKER)
 
     def needs_owner_run(self, **fixture):
-        self.run_session("l\n" + PLAN + "a\n" + START + "l\nq\nq\n", outcome="needs_owner", **fixture)
+        self.planned()
+        with RealAuthority(self.state, self.project, fixture_id="test") as authority:
+            authority.approve(1)
+        self.finished("M1", "needs_owner", **fixture)
         run = self.stored()["runs"][0]
         self.assertEqual((run["outcome"], run["roles"]["worker"]), ("needs_owner", WORKER))
 
@@ -1414,7 +1403,7 @@ class LiveRolesTests(ProfileTest):
     def test_plan_revision_takes_the_current_profile_roles(self):
         self.edited_after(self.planned)
         with self.app() as app:
-            app.planning.revise("Change the plan please")
+            app.planning.revise_draft(1, fixture_draft(), response="Change the plan please")
             revisions = app.authority.state["revisions"]
             self.assertEqual(revisions[0]["roles"]["planner"], WORKER)  # frozen
             self.assertEqual(revisions[-1]["roles"]["planner"], self.TWO)
@@ -1445,13 +1434,6 @@ class LiveRolesTests(ProfileTest):
     def test_answer_takes_the_current_profile_roles(self):
         self.attempt_after_edit(lambda delivery, run: delivery.answer(run, "Use the v2 API."))
 
-    def test_accepted_proposal_takes_the_current_profile_roles(self):
-        self.edited_after(self.needs_owner_run)
-        with self.app() as app:
-            kind, revision = app.delivery.accept(app.delivery.latest("M1"))  # free text: a plan revision
-            self.assertEqual(kind, "plan")
-            self.assertEqual(revision["roles"]["planner"], self.TWO)
-            self.assertEqual(app.authority.state["revisions"][0]["roles"]["planner"], WORKER)
 
     def test_structured_candidate_attempt_takes_the_current_profile_roles(self):
         self.edited_after(self.candidate_run)
@@ -1470,44 +1452,29 @@ class LiveRolesTests(ProfileTest):
             self.assertEqual(fresh["roles"]["worker"], self.TWO)
             self.assertEqual(app.authority.state["runs"][0]["roles"]["worker"], WORKER)
 
-    def test_return_to_plan_takes_the_current_profile_roles(self):
-        self.edited_after(self.needs_owner_run)
-        with self.app() as app:
-            revision = app.delivery.to_plan(app.delivery.latest("M1"), "Rethink the scope.")
-            self.assertEqual(revision["roles"]["planner"], self.TWO)
-            self.assertEqual(app.authority.state["revisions"][0]["roles"]["planner"], WORKER)
-
     def test_without_a_profile_new_revisions_keep_the_inherited_roles(self):
-        self.run_session("l\n" + PLAN + "q\nq\n", profile=False)
+        self.planned(profile=False)
         with self.app(profile=False) as app:
             before = app.authority.current["roles"]
-            app.planning.revise("Change the plan please")
+            app.planning.revise_draft(1, fixture_draft(), response="Change the plan please")
             self.assertEqual(len(app.authority.state["revisions"]), 2)
             self.assertEqual(app.authority.current["roles"], before)
 
 
-class BootstrapPlainTests(ProfileTest):
+class BootstrapTests(ProfileTest):
     def test_bootstrap_screen_lists_rules_and_obvious_checks(self):
         (self.project / "AGENTS.md").write_text("rules\n")
         (self.project / "CLAUDE.md").write_text("more rules\n")
         (self.project / "package.json").write_text(json.dumps({"scripts": {"test": "node run.js"}}))
-        out = self.run_session("l\nq\n")
+        out = "\n".join(process.bootstrap_lines(self.peek().status()))
         self.assertIn("Rules for agents (apply when planning): AGENTS.md, CLAUDE.md", out)
         self.assertIn("Check (qualification, for later stages): npm test", out)
-        self.assertIn("[a] accept  [l] later  [q] quit", out)
 
     def test_makefile_test_target_and_no_obvious_test(self):
         (self.project / "Makefile").write_text("build:\n\ttrue\ntest: build\n\ttrue\n")
-        self.assertIn("make test", self.run_session("l\nq\n"))
-        for name in ("Makefile",):
-            (self.project / name).unlink()
-        self.state_reset()
-        self.assertIn("Check: no qualification", self.run_session("l\nq\n"))
-
-    def state_reset(self):
-        path = self.sidecar()
-        if path.exists():
-            path.unlink()
+        self.assertIn("make test", "\n".join(process.bootstrap_lines(self.peek().status())))
+        (self.project / "Makefile").unlink()
+        self.assertIn("Check: no qualification", "\n".join(process.bootstrap_lines(self.peek().status())))
 
     def test_unittest_files_at_the_project_root_give_a_check(self):
         """C1 R1-R3. Root test_wc.py alone -> python3 -m unittest and merge required; tests/test_*.py, a Makefile
@@ -1573,7 +1540,6 @@ class BootstrapPlainTests(ProfileTest):
             proposal = process.propose(self.project, {})
             self.assertEqual(proposal["checks"][0]["argv"], ["npm", "test"])
             process.bootstrap_lines(process.Status("never", process.resolve(proposal, {}, self.project), False))
-        self.run_session("l\nq\n")
         self.assertFalse(marker.exists())
 
     def test_makefile_alone_is_detected_without_running_anything(self):
@@ -1588,7 +1554,6 @@ class BootstrapPlainTests(ProfileTest):
             self.assertEqual(proposal["checks"][0]["argv"], ["make", "test"])
             lines = process.bootstrap_lines(process.Status("never", process.resolve(proposal, {}, self.project), False))
             self.assertIn("make test", "\n".join(lines))
-        self.run_session("l\nq\n")
         self.assertFalse(marker.exists())
 
     def test_makefile_alone_and_package_without_a_test_script(self):
@@ -1597,45 +1562,6 @@ class BootstrapPlainTests(ProfileTest):
         (self.project / "package.json").write_text("{broken")
         self.assertEqual(process.detect_checks(self.project), [])
 
-    def test_leaving_the_screen_decides_nothing(self):
-        out = self.run_session("q\nq\n")
-        self.assertIn("Profile undecided", out)
-        self.assertFalse(self.file.exists())
-        self.assertFalse(self.sidecar().exists())
-        self.assertEqual(self.peek().status().state, "never")
-        self.assertFalse(self.file.exists())
-
-    def test_existing_valid_file_is_shown_and_offers_no_later(self):
-        self.write({"roles": {"worker": WORKER}})
-        before = self.file.read_bytes()
-        out = self.run_session("a\nq\n")
-        self.assertIn("found zplan.process.json", out)
-        self.assertIn("[a] accept  [q] quit", out)
-        self.assertNotIn("[l] later", out)
-        self.assertIn("The file is unchanged.", out)
-        self.assertEqual(self.file.read_bytes(), before)
-
-    def test_fixture_walkthrough_reaches_a_plan_after_later(self):
-        out = self.run_session("l\n" + PLAN + "a\nq\n")
-        self.assertIn("Plan r1 approved", out)
-        self.assertEqual(self.stored()["revisions"][0]["status"], "approved")
-        self.assertEqual(self.stored()["revisions"][0]["roles"]["planner"], {"model": "gpt-6.1-sol", "effort": "high"})
-
-
-class BootstrapPtyTests(tt.PtyTest):
-    def test_plain_mode_on_a_terminal_gets_the_same_choice_as_a_line_prompt(self):
-        output, status = self.pty(self.cli("--plain"), [("[l] later".encode(), b"l\n"), ("[p] plan".encode(), b"q\n")])
-        text = output.decode()
-        self.assertEqual(os.waitstatus_to_exitcode(status), 0, text)
-        self.assertNotIn("\x1b", text)
-        self.assertIn("Project process profile", text)
-        self.assertIn("profile not saved", text)
-        self.assertFalse((self.project / process.PROFILE_FILE).exists())
-
-    def test_term_dumb_shows_the_choice_as_a_line_prompt_too(self):
-        output, status = self.pty(self.cli(), [("[l] later".encode(), b"l\n"), ("[p] plan".encode(), b"q\n")], TERM="dumb")
-        self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
-        self.assertNotIn(b"\x1b", output)
 
 
 # G-A6 / G-A7 ---------------------------------------------------------------------------------------------------
@@ -1833,7 +1759,7 @@ class BootstrapTuiTests(tt.ShellTest):
                            "no check", "no qualification"):
                 self.assertIn(needle, text)
 
-    async def test_deleted_profile_blocks_a_new_plan_and_the_screen_names_the_error(self):
+    async def test_a_deleted_profile_shows_its_error_on_the_screen(self):
         # A real, committed file profile (a native accepted record beside the file: a fixture accept would keep its
         # snapshot), then the file goes away: the deletion is what must refuse.
         (self.project / process.PROFILE_FILE).write_text("{}")
@@ -1844,14 +1770,10 @@ class BootstrapTuiTests(tt.ShellTest):
         async with self.shell(controller, size=(120, 40)) as pilot:
             await self.loaded(pilot)
             # i9-look: the removed `#header` used to spell «profile: error»; the screen keeps the profile's own
-            # state (`Snapshot.profile`, `process.header_note`) instead, and the plan start is refused below.
+            # state (`Snapshot.profile`, `process.header_note`) instead; the planning guard's refusal itself is
+            # `GuardTests.test_a_missing_profile_refuses_a_new_plan`.
             self.assertEqual((self.app.snapshot.profile.state, self.app.snapshot.profile.note),
                              ("missing", "profile: error"))
-            outcomes = []
-            controller.start_planning("A goal", lambda outcome, error: outcomes.append((outcome, error)))
-            await self.until(pilot, lambda: outcomes)
-            self.assertIsNone(outcomes[0][0])
-            self.assertIn("was deleted from the project", outcomes[0][1])
         self.assertIsNone(self.stored_state())
 
     def stored_state(self):

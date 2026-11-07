@@ -96,11 +96,16 @@ screen says it is finishing and the shell exits when the job ends; only a watch 
 
 ### Plan revisions
 
-A goal produces a plan *revision*: `proposed` until you approve it with `[a]`. `[r]` asks for a new
-revision instead of editing the old one, and a revision records the tree it was made from. If the project
-(or the Zeroshot the plan was prepared for: another toolchain, a rebuilt binary, another state directory)
-changed since, the plan fails with the `plan.stale` error (the revision stays planning or proposed): an unsent plan is rebuilt and sent by `[g]` once readiness passes (`[n]` only prepares it); a proposal is re-planned with `[r]`. Approval is bound to one revision;
-milestones are attempted only from an approved one.
+A goal produces a plan *revision*: `proposed` until you approve it (the plan card's «yes, approve»). «no, revise»
+sends your note to the architect, which writes a new revision instead of editing the old one, and a revision
+records the tree it was made from. If the project (or the Zeroshot the plan was prepared for: another toolchain, a
+rebuilt binary, another state directory) changed since, the plan fails with the `plan.stale` error (the revision
+stays planning or proposed): an unsent plan is rebuilt and sent by the plan screen's «start the planner» once
+readiness passes («new revision» only prepares it); a proposal is revised through the architect. Approval is bound to
+one revision; milestones are attempted only from an approved one.
+
+Since 0.15 every new revision is the architect's (below). The rest of this section also describes the planner
+graph that wrote revisions before: they still show and can be approved, but send, renew and restart refuse them.
 
 A plan is *argued* before it reaches you. One revision freezes, once, at creation: the roles, `plan_rounds`, the
 rules files (bytes and hashes) and the digest of the resolved configuration; everything the run then uses is built
@@ -135,7 +140,8 @@ override work as above. The owner's requests travel with the chain (`request` jo
 sees only its own chain's earlier review. In one chain the architect may create at most `plan_rounds` revisions on
 its own; then an edit in an event turn is refused (the owner decides), while each owner message may still produce
 one revision. The method follows the Elephant-Goldfish Model (<https://github.com/google/elephant-goldfish-model>);
-zplan ships its own wording. The owner's own `p`, `r` and `/plan` still use the planner graph.
+zplan ships its own wording. `/plan <goal>`, a revision note, «back to plan» and an accepted steward proposal reach
+the architect as the owner's message, which approves nothing.
 
 A `review_exhausted` revision of execution version 2 can be approved by the owner anyway (`[o]`,
 `plan.override` / `tui_plan.override`; no CLI command) with a typed reason: the stripped text, one printable line,
@@ -267,7 +273,7 @@ its runs have a native status, an outcome and a delivery state. All of them are 
 <!-- BEGIN GENERATED: commands -->
 | Command | Usage | Purpose (as in `--help`) | Meaning |
 | --- | --- | --- | --- |
-| `zplan` | `zplan [--plain] [--project PATH]` | open the plan and milestones of the current Git project | Opens the plan and milestones of the Git project in the working directory (full-screen on a terminal, line-oriented otherwise). |
+| `zplan` | `zplan [--project PATH]` | open the plan and milestones of the current Git project | Opens the plan and milestones of the Git project in the working directory, full-screen. |
 | `zplan exec` | `zplan exec --goal GOAL.md --operation-id ID [--project PATH]` | send one owner goal through the shared Application Service and print JSON | Sends one owner message, returning JSON and durable replay by operation id; does not verify or merge. |
 | `zplan status` | `zplan status [--project PATH]` | show the home screen once, without prompts | Prints the home screen once (no prompts, no escape codes, nothing dispatched). |
 | `zplan setup` | `zplan setup` | install the pinned Zeroshot and Codex into zplan's data directory | Installs the pinned Zeroshot bundle and Codex into zplan's data directory (checksums verified, no model call). |
@@ -282,7 +288,7 @@ its runs have a native status, an outcome and a delivery state. All of them are 
 | --- | --- | --- | --- |
 | `--goal GOAL.md` | exec | exec: UTF-8 file containing one owner goal (required) | Goal text, unchanged on replay; at most 1 MiB. |
 | `--operation-id ID` | exec | exec: stable submission key, 1-128 characters (required) | Same id and different goal is a conflict; replay creates no new turn or effect. |
-| `--plain` | (none) | line-oriented mode without the full-screen interface (also when the output is not a terminal) | Forces the line-oriented UI. |
+| `--plain` | (none) | removed in 0.15: zplan is full-screen only | Says that zplan is full-screen only and exits 2. |
 | `--project PATH` | (none), status, doctor, roles, profile, exec | Git project (default: the current directory) | Selects the Git project instead of the working directory. |
 | `--state-dir DIR` | (none), status, profile, exec | fixture only: root of the isolated state | Fixture state root; production overrides are rejected. |
 | `--fixture ID` | (none), status, profile, exec | isolated demo without a model; native runs are forbidden | Runs against the deterministic fixture engine in an isolated authority. |
@@ -295,18 +301,13 @@ its runs have a native status, an outcome and a delivery state. All of them are 
 
 ## Screens and keys
 
-Screens of the line UI and of the full-screen shell. `?` shows the keys of the screen you are on; the line
-UI lists exactly the keys its menu offers at that moment.
+Screens of the full-screen shell and the end-of-run states, with the actions each offers.
 
 <!-- BEGIN GENERATED: screens -->
 | Screen | Title (as shown) | Meaning |
 | --- | --- | --- |
 | `home` | Home screen | Plan overview and milestone list. |
-| `readiness` | Readiness | What is missing before a model run. |
-| `bootstrap` | Process profile | First start in a project without an accepted process profile. |
-| `goal` | Goal saved | After the goal text, before the planner starts. |
 | `plan` | Plan | A plan revision at any status. |
-| `observe` | Observation | Live view of a running attempt (type a key, then Enter). |
 | `unknown` | Run: status unknown | Unconfirmed submission or an interrupted attempt. |
 | `awaiting_merge` | Run: done, awaiting merge | An accepted, exported result. |
 | `conflict` | Run: merge conflict | A conflicting merge. |
@@ -346,37 +347,8 @@ UI lists exactly the keys its menu offers at that moment.
 | `home` | `g` | `home.attempt` | new attempt | start a new attempt of a stopped or failed milestone | Start a new attempt after a stop or an unrecoverable failure. |
 | `home` | `o` | `home.open` | open | the end screen of a milestone that needs attention | Open the end screen of a milestone that needs attention. |
 | `home` | `e` | `home.tail` | log | the last lines of the Zeroshot log (on request): a running or failed run | Show the tail of the run log. |
-| `readiness` | `u` | `readiness.install` | install tools | install the pinned Zeroshot and Codex | Run setup. |
-| `readiness` | `l` | `readiness.login` | log in | log in to Codex in this terminal | Run the Codex login. |
-| `readiness` | `d` | `readiness.changes` | changes | show uncommitted changes (changes nothing) | List uncommitted changes; changes nothing. |
-| `readiness` | `g` | `readiness.recheck` | check again | repeat the check after the fix | Re-run the readiness check. |
-| `readiness` | `i` | `readiness.details` | details | instructions for each finding | Fix instructions for each item. |
-| `readiness` | `q` | `readiness.back` | back | go back | Return to the previous screen. |
-| `readiness` | `q` | `readiness.leave` | quit | quit zplan | Leave zplan (the first readiness screen). |
-| `bootstrap` | `a` | `bootstrap.accept` | accept | write zplan.process.json and accept the profile | Accept the proposed profile (writes the file). |
-| `bootstrap` | `l` | `bootstrap.later` | later | work from the proposal without writing to the project | Postpone; the snapshot is used and the header says so. |
-| `bootstrap` | `q` | `bootstrap.leave` | quit | quit without deciding | Leave without deciding. |
-| `goal` | `g` | `goal.start` | start the planner | check readiness and submit the goal to the planner | Check readiness, then submit the goal. |
-| `goal` | `s` | `goal.settings` | settings | edit the roles before starting | Edit roles before submitting. |
-| `goal` | `q` | `goal.back` | back | leave the goal unsaved and go back | Leave without saving the goal. |
-| `plan` | `g` | `plan.start` | start the planner | check readiness and submit the goal; a stale unsent plan is first rebuilt on the current project; an unconfirmed submission is sent again unchanged | Check readiness, then submit the unsent revision; a stale unsent one is first rebuilt on the current project; an unconfirmed submission is sent again unchanged. |
-| `plan` | `n` | `plan.renew` | prepare a new plan on the current project | the same goal on the current project state; no model is run | Prepare a new unsent revision, same goal, current project; nothing is sent. |
 | `plan` | `i` | `plan.details` | details | full record and diagnostic commands | Full record and diagnostics. |
-| `plan` | `e` | `plan.tail` | log | the last lines of the planner's Zeroshot log (on request) | Show the tail of the planner run log. |
-| `plan` | `w` | `plan.watch` | watch | follow the planner | Watch the planner. |
-| `plan` | `s` | `plan.stop` | stop planning | stop the running planner | Stop the running planner; the run is never resubmitted. |
-| `plan` | `a` | `plan.approve` | approve | approve the plan; no implementation is started | Approve this revision (starts nothing). |
-| `plan` | `r` | `plan.revise` | revise | write what to change and re-plan | Request a revision. |
 | `plan` | `i` | `plan.requirements` | requirements and checks | the full plan: requirements, tasks, checks | Full plan with requirements and checks. |
-| `plan` | `o` | `plan.override` | approve despite the check | approve a plan the check rejected; a reason is required | Approve a plan the critic rejected, with a typed reason (starts nothing). |
-| `plan` | `g` | `plan.restart` | start the planner again | a new revision of the same goal | Run the planner again. |
-| `plan` | `g` | `plan.retry` | check readiness and start again | check readiness and submit a new revision | Check readiness and resubmit. |
-| `plan` | `l` | `plan.login` | refresh login | log in to Codex again | Refresh the Codex login. |
-| `plan` | `q` | `plan.back` | back | return to the home screen | Back to home. |
-| `observe` | `k` | `observe.stop` | stop | k and Enter: stop the attempt (after a confirmation) | Stop the attempt after a confirmation. |
-| `observe` | `Ctrl-C` | `observe.detach` | detach | quit; the run continues | Detach; the run continues. |
-| `observe` | `?` | `observe.help` | help | this help | This help. |
-| `observe` | `e` | `observe.tail` | log | the last lines of the Zeroshot log (on request) | Show the tail of the run log. |
 | `unknown` | `g` | `unknown.check` | check | reconcile with Zeroshot without resubmitting | Reconcile without resubmitting. |
 | `unknown` | `q` | `unknown.back` | back | go back | Back. |
 | `awaiting_merge` | `m` | `awaiting_merge.merge` | merge into <branch> | merge the result (merge --ff-only of the finished commit) after a confirmation | Merge the result branch after a confirmation. |
@@ -687,7 +659,7 @@ shown only as a bounded detail next to the code; a failure without a family show
 | `process.missing` | The accepted zplan.process.json is gone from the project. | The file was deleted or the branch without it was checked out. | `git checkout -- zplan.process.json`, or `zplan profile init` to create it again. |
 | `process.unbuilt` | A gate the profile requires is not implemented in this version. | gates.task is `required`. | Set the gate to `off` in zplan.process.json. |
 | `process.changed` | The profile changed after the preview was shown. | zplan.process.json or the saved roles were edited meanwhile. | Look at the preview shown again and confirm it. |
-| `tui.unavailable` | The full-screen interface cannot start. | Textual is missing or not importable. | `zplan --plain`, or reinstall zplan. |
+| `tui.unavailable` | The full-screen interface cannot start. | Textual is missing or not importable. | Reinstall zplan. |
 | `unknown_error` | A failure that has no catalog family. | An unclassified message or exception. | The bounded text shown with it is the only detail: `zplan doctor`, [i] on home, then docs/REFERENCE.md. |
 <!-- END GENERATED: error -->
 
@@ -699,16 +671,15 @@ shown only as a bounded detail next to the code; a failure without a family show
 2. `zplan setup` — installs the pinned Zeroshot and Codex (`readiness.tools`, `readiness.codex`).
 3. `zplan login` — device login for Codex (`readiness.auth`).
 4. `zplan doctor` again: every line is `ok`.
-5. In the project: `zplan --plain` (or `zplan` on a terminal), `p`, type the goal, `g` — the planner starts.
-   `?` on any screen lists the keys it accepts.
+5. In the project, on a terminal: `zplan`, then write the goal to the architect in the chat (or `/plan <goal>`).
+   The architect writes the plan, the plan check judges it, and its card waits for your yes.
 
 ### 2. From an approved plan to a merged milestone
 
-1. The plan status is `proposed`; read it (`i` for the requirements and checks), then `a` to approve. Nothing
-   is started yet.
-2. On the home screen the first milestone is `ready`: `g` shows a preview (worktree, branches, limits); `y`
-   confirms. The state becomes `running`; `w` watches, Ctrl-C detaches and the run continues.
-3. The outcome is `done` and the state `awaiting_merge`: `o`, `d` to read the diff, `m` then `y` to merge.
+1. The plan card shows the reader's retelling and the milestones; «yes, approve» (or `/approve`) approves it.
+   «no, revise» opens a note that goes to the architect; nothing is started yet.
+2. `/run` starts the first ready milestone. The plan pane follows it; `/stop` stops it, quitting only detaches.
+3. The outcome is `done` and the state `awaiting_merge`: the merge card offers «see the changes» and «merge».
 4. The milestone is `integrated`; dependents turn `ready` and step 2 repeats.
 
 ### 3. Uncommitted changes
@@ -718,23 +689,25 @@ shown only as a bounded detail next to the code; a failure without a family show
    see the committed one).
 2. The plan, the checks and the attempts read the last commit; your files stay as they are and a plan stays current
    while only the tree changes. The architect lists the uncommitted paths.
-3. A new commit or a branch switch makes a plan made earlier `plan.stale`: `[g]` on an unsent stale plan rebuilds it
-   on the current project and sends it in the same step (`[n]` prepares it without sending).
+3. A new commit or a branch switch makes a plan made earlier `plan.stale`: the plan screen's «start the planner»
+   rebuilds an unsent stale plan on the current project and sends it in the same step («new revision» prepares it
+   without sending).
 
 ### 4. Blocked milestone: answer, accept or a new attempt
 
-1. A milestone shows `blocked`, `needs_owner` or `failed`; `[o]` opens its attempt screen with the reason.
-2. `blocked` or `needs_owner`: `[t]` answers and restarts as a new attempt (`blocked.answer`,
+1. A milestone shows `blocked`, `needs_owner` or `failed`; `/attempt` opens its attempt screen with the reason.
+2. `blocked` or `needs_owner`: «answer» restarts it as a new attempt with your answer (`blocked.answer`,
    `needs_owner.answer`).
-3. `needs_owner`: `[a]` accepts the steward's proposal instead (`needs_owner.accept`).
-4. `failed`: `[t]` starts a new attempt; `[p]` revises the plan when the task itself is wrong.
+3. `needs_owner`: «accept» takes the steward's proposal (`needs_owner.accept`); a proposal that changes more than the
+   milestone goes to the architect, who changes the plan with you.
+4. `failed`: «new attempt» starts one; «to plan» sends your reason to the architect when the task itself is wrong.
 
 ### 5. After an interruption
 
 1. You closed the terminal during a run. Reopen zplan: the milestone shows `unknown` (submission not
    confirmed) or `running` (still going).
-2. For `unknown`, press `g`. zplan asks Zeroshot what happened and never resubmits on its own.
-3. If the run failed with `failed_recoverable`, `o` then `g` continues the same attempt in its worktree; for
-   `failed` or `stopped`, `o` then `t` starts a new attempt, or `p` revises the plan.
+2. For `unknown`, `/run` asks Zeroshot what happened; zplan never resubmits on its own.
+3. If the run failed with `failed_recoverable`, `/run` continues the same attempt in its worktree; for `failed` or
+   `stopped`, «new attempt» starts one, or «to plan» goes back to the architect.
 4. A code you do not recognise, or `unknown_error`: look it up in [Error families](#error-families); the
    detail line next to it is the only extra information zplan has.

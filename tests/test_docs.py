@@ -9,7 +9,6 @@ REPO = Path(__file__).resolve().parents[1]
 LIVE = ("README.md", "docs/USER_FLOW.md", "docs/INSTALLATION.md", "docs/UPGRADE.md", "docs/REFERENCE.md", "docs/ARCHITECTURE.md")
 LIST = re.compile(r"\s*(?:[-*+] |\d+[.)] )")
 TABLE = re.compile(r"\s*\|")
-LINE_UI = "\n# Line UI\n"
 # What the full-screen shell no longer has: a bracketed letter (`[g]`), a backticked single letter as a key, the keys
 # `Ctrl+G`, `Ctrl+S`, `Ctrl+R` and `F1`, and the goal form.
 LETTER_KEY = re.compile(r"\[[A-Za-z?]\]|`[A-Za-z?]`|Ctrl\+[GSR]\b|\bF1\b|goal form", re.IGNORECASE)
@@ -36,13 +35,6 @@ def glued(text):
         if LIST.match(line) or TABLE.match(line) or line.startswith("#"):
             found.append((number + 1, line))
     return found
-
-
-def full_screen_part(text):
-    """The text before the line UI's heading: the part of USER_FLOW that describes the full-screen shell."""
-    head, found, _ = text.partition(LINE_UI)
-    assert found, "docs/USER_FLOW.md lost its line UI heading"
-    return head
 
 
 def letter_keys(text):
@@ -74,15 +66,12 @@ class DocsMarkdownTests(unittest.TestCase):
 
 
 class FullScreenDocsTests(unittest.TestCase):
-    """K1e C5: the full-screen part of USER_FLOW describes slash commands and buttons, never a letter key.
+    """K1e C5: USER_FLOW describes slash commands and buttons, never a letter key (zplan is full-screen only since
+    0.15). Interpretation: "a backticked single letter as a key" is a code span holding one ASCII letter or `?`."""
 
-    Interpretation: "the full-screen part" is everything before the line UI's heading, because the line UI keeps its
-    letters; "a backticked single letter as a key" is a code span holding one ASCII letter or `?`."""
-
-    def test_the_full_screen_part_names_no_letter_key_and_no_removed_key(self):
+    def test_user_flow_names_no_letter_key_and_no_removed_key(self):
         text = (REPO / "docs/USER_FLOW.md").read_text(encoding="utf-8")
-        self.assertEqual(letter_keys(full_screen_part(text)), [])
-        self.assertIn("[g]", text.partition(LINE_UI)[2])  # the line UI part keeps its letters
+        self.assertEqual(letter_keys(text), [])
 
     def test_the_check_sees_each_removed_key_form(self):
         for line in ("| main | `p` | plan |", "start with [g] now", "press Ctrl+G", "`F1` helps", "Ctrl+S opens it",

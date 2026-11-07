@@ -82,7 +82,7 @@ class ChatAfterMergeTests(ChatScroll):
         (before the fix `scroll_y` stayed one row short of `max_scroll_y`: the receipt's row was cut), through the
         resize chain 80x24 -> 100x30 -> 140x40 -> 80x24, and after the reply."""
         self.approve(running=False)
-        self.plain("g\ny\nl\nq\n")  # the stage done and waiting for its merge, made by the line UI
+        self.finished("M1")  # the stage done and waiting for its merge
         store = self.seed_history(30)
         async with self.shell(size=(80, 24), store=store) as pilot:
             await self.start(pilot, 30)

@@ -15,11 +15,9 @@ from unittest.mock import patch
 
 from terminal_planner import catalog, cli, planning, setup, toolchain
 from terminal_planner.authority import Authority, Blocked
-from terminal_planner.cli import Terminal, session
+from terminal_planner.cli import Terminal
 from terminal_planner.engine import STALE, FixtureEngine, NativeEngine, SliceEnded, digest
 from terminal_planner.planning import PlanView, Submission
-from terminal_planner.runs import FixtureDriver
-from test_setup import Steps
 from test_terminal_planner import ROLES
 import test_tui
 from test_tui import Readiness, ShellTest, check
@@ -107,7 +105,7 @@ class PlanningShell(ShellTest):
         """A stored unsent revision; `receipt` makes it a sent one (observing), `prepared` one with a frozen intent
         and no receipt; `changes` then move it to another status."""
         with Authority(self.state, self.project, fixture_id="test") as authority:
-            authority.begin(goal, ROLES, "fixture")
+            self.begin(authority, goal=goal)  # the architect's plan, not yet given to the plan check
             if receipt or failed:
                 self.planner.receipt(authority)
                 if failed:
@@ -121,7 +119,7 @@ class PlanningShell(ShellTest):
 
     def propose(self):
         with Authority(self.state, self.project, fixture_id="test") as authority:
-            authority.begin(GOAL, ROLES, "fixture")
+            self.begin(authority, goal=GOAL)
             FixtureEngine().proposal(authority, lambda _: None)
 
     def stored(self):
@@ -157,10 +155,15 @@ class PlanningShell(ShellTest):
         await self.until(pilot, lambda: text in screen_text(self.app), timeout)
 
     async def open_plan(self, pilot, goal=GOAL):
-        """K1b: the goal is `/plan <goal>` typed in the chat (the goal form is gone); `/view` then opens the plan
-        screen of the revision it started."""
+        """The architect's plan for `goal`, saved on the controller's worker as its tool saves one, is sent to the plan
+        check with a bare `/plan` (0.15: a goal itself goes to the architect); `/view` then opens the plan screen."""
         await self.loaded(pilot)
-        await self.command(pilot, "/plan " + goal)
+        done = threading.Event()
+        self.app.controller.post("test", lambda app: (self.begin(app.authority, goal=goal), done.set()))
+        await self.until(pilot, done.is_set)
+        self.app.request_refresh()
+        await self.until(pilot, lambda: self.app.snapshot is not None and self.app.snapshot.goldfish)
+        await self.command(pilot, "/plan")
         await self.until(pilot, lambda: self.app.snapshot is not None and self.app.snapshot.version == 1)
         await self.command(pilot, "/view")
         await self.until(pilot, lambda: type(self.app.screen).__name__ == "PlanScreen")
@@ -169,70 +172,34 @@ class PlanningShell(ShellTest):
 # A2 ---------------------------------------------------------------------------------------------------------
 
 class GoalCommandTests(PlanningShell):
-    async def test_a2_dirty_refusal_writes_nothing_and_says_the_checks_then_fix_and_plan_streams_to_a_proposal(self):
-        """K1b C1. Interpretation: a readiness refusal of `/plan <text>` is the card path's — nothing is saved, no
-        revision exists, and the failing checks are said on the main screen's status line (the old form saved the goal
-        as an unsent revision). The clean re-check before the retry is asked with `app.request_check()` after the fix
-        (the blocked-start timer is 10 s); `progress` is compared once it holds all 4 lines."""
-        readiness = Readiness(check("git"), check("branch", False, DIRTY, key="d"))
-        async with self.shell(self.controller(readiness), size=(120, 40)) as pilot:
-            await self.loaded(pilot)
-            await self.command(pilot, "/plan " + GOAL)
-            await self.shows(pilot, "Not started:")
-            self.assertIn("Target: HEAD отсоединён", self.flat())
-            self.assertEqual(self.planner.sent, [])
-            self.assertIsNone(self.app.snapshot.version)  # a refusal writes nothing: no revision
-            readiness.fix("branch")
-            self.app.request_check()
-            await self.until(pilot, lambda: self.app.checks and all(c.ok for c in self.app.checks))
-            await self.command(pilot, "/plan " + GOAL)
-            await self.until(pilot, lambda: len(self.app.progress) == 4)
-            self.assertEqual(list(self.app.progress), ["Starting the planner…", "Drafting the plan…",
-                                                       "Checking that the plan covers the goal…",
-                                                       "Demo plan: no model was called."])
-            await self.until(pilot, lambda: self.app.snapshot.status == "proposed")
-        self.assertEqual(self.planner.sent, [1])
-        r1 = self.stored()["revisions"][0]
-        self.assertEqual((r1["goal"], r1["status"]), (GOAL, "proposed"))
-
     async def test_a2_a_bare_plan_with_nothing_to_send_says_so_and_writes_nothing(self):
-        """K1b C2, the "none" half: no card, no text, no unsent revision -> the note «write /plan <goal>»."""
+        """K1b C2, the "none" half: no card, no text, no unsent revision -> the note naming the goal."""
         async with self.shell(self.controller(), size=(120, 40)) as pilot:
             await self.loaded(pilot)
             await self.command(pilot, "/plan")
-            await self.shows(pilot, "write /plan <goal>")
+            await self.shows(pilot, "write the goal after /plan, or in the chat")
             await self.command(pilot, "/view")  # K1b C4: no plan -> a note, no screen
             await self.shows(pilot, "no plan yet — /plan <goal>")
             self.assertEqual(type(self.app.screen).__name__, "MainScreen")
         self.assertEqual(self.planner.sent, [])
         self.assertIsNone(self.stored())
 
-    async def test_a2_a_failed_check_between_the_gate_and_the_send_saves_an_unsent_goal(self):
-        """The readiness fails between the gate and the submission: the goal is kept as an unsent revision (the
-        controller's own rule, the card path included) and the refusal is said on the status line."""
-        class Flaky(Readiness):
-            def __call__(self):
-                self.calls += 1
-                # ok for the first gate, blocked right before the submission
-                return [dict(i, ok=self.calls <= 2) for i in self.items]
-        readiness = Flaky(check("git", line="git"))
-        async with self.shell(self.controller(readiness), size=(120, 40)) as pilot:
+    async def test_a_goal_the_architect_cannot_take_waits_in_the_chat_input(self):
+        """0.15 qualification: `/plan <goal>` with no architect to take it leaves the goal, alone, in the chat input
+        (the command's own line is cleared first), binding no yes when the owner sends it later."""
+        async with self.shell(self.controller(), size=(120, 40)) as pilot:
             await self.loaded(pilot)
-            await self.until(pilot, lambda: self.app.checks is not None)
-            readiness.calls = 1
             await self.command(pilot, "/plan " + GOAL)
-            await self.shows(pilot, "Not started:")
-        self.assertEqual(self.planner.sent, [])
-        self.assertEqual(self.stored()["revisions"][0]["status"], "planning")
+            field = self.app.main_screen().query_one("#input")
+            await self.until(pilot, lambda: field.value == GOAL)
+            self.assertTrue(self.app.unbound_input)
+        self.assertIsNone(self.stored())
 
-    def test_v2g_a1_a3_the_owners_plan_jobs_leave_one_result_each(self):
-        """V2g A1/A3: the goal saved but not sent (a readiness check fails) is `{plan, unsent, owner, revision 1}`
-        whose lines hold the failing item; the planner's stop is `{stop_planner, requested}` and a stop with no
-        running planner is refused with its family. The owner's results reach no `on_result`. Interpretation: the
-        unsent lines are the failing checks' lines; the fixture engine skips the origin check, so the failing item
-        is the branch one."""
-        readiness = Readiness(check("git"), check("branch", False, DIRTY, key="d"))
-        controller = self.controller(readiness)
+    def test_the_owners_stop_leaves_one_result_each(self):
+        """V2g A3: the planner's stop is `{stop_planner, requested}` and a stop with no running planner is refused with
+        its family. The owner's results reach no `on_result`."""
+        self.plan()
+        controller = self.controller()
         heard = []
         controller.on_result = heard.append
         controller.start()
@@ -243,13 +210,6 @@ class GoalCommandTests(PlanningShell):
             self.assertTrue(event.wait(20))
             return box[0]
 
-        outcome, error = run(controller.start_planning, GOAL)
-        self.assertEqual((outcome.kind, error), ("unsent", None))
-        [result] = controller.results()
-        self.assertEqual((result["operation"], result["outcome"], result["origin"], result["subject"]),
-                         ("plan", "unsent", "owner", {"revision": 1}))
-        self.assertEqual(result["lines"], [DIRTY])
-        self.assertNotIn("request", result)
         _, error = run(controller.stop_planner)  # nothing runs: the service refuses
         self.assertIn("running planner", error)
         refused = controller.results()[-1]
@@ -314,7 +274,7 @@ class RevisionStateTests(PlanningShell):
             ui.parent.mkdir(parents=True, exist_ok=True)
             ui.write_text('{"language": "en"}\n', encoding="utf-8")
             with Authority(None, self.project) as authority:
-                authority.begin(GOAL, ROLES, "native")
+                self.begin(authority, "native", goal=GOAL)
                 native(self.root / "state-a").prepare(authority)  # frozen for the first state directory
                 before = authority.state["revisions"][0]
             from terminal_planner.tui.controller import Controller
@@ -393,8 +353,8 @@ class RevisionStateTests(PlanningShell):
             await self.loaded(pilot)
             await self.panel(pilot)
             await self.command(pilot, "/view")
-            await self.shows(pilot, "the planner submission is unconfirmed")
-            self.assertIn("[code: submission.unknown]", screen_text(self.app))
+            await self.shows(pilot, "the plan check submission is unconfirmed")
+            self.assertIn("[code: submission.unknown]", self.flat())
             names = {b.name for b in self.app.screen.query("#plan-buttons Button")}
             self.assertIn("run", names)
             self.assertFalse(names & {"renew", "watch"}, names)
@@ -470,45 +430,9 @@ class FailureTests(PlanningShell):
 # A5 ---------------------------------------------------------------------------------------------------------
 
 class DecisionTests(PlanningShell):
-    def plain_state(self, *steps):
-        """The same decision through the line UI on a copy of the same starting store: revision summaries."""
-        output = io.StringIO()
-        sent = []
-        session(Terminal(Steps(*steps), output), self.project, self.root / "plain-state",
-                lambda *_: self.counting(sent), fixture_id="test",
-                driver_factory=lambda _: FixtureDriver(self.root / "plain-runs", delay=0),
-                worktrees=self.root / "plain-worktrees")
-        with Authority(self.root / "plain-state", self.project, fixture_id="test") as authority:
-            return self.summary(authority.state), output.getvalue(), sent
-
-    def counting(self, sent):
-        class Counting(FixtureEngine):
-            def proposal(inner, authority, progress, slice=None):
-                if authority.current["run_id"] is None:
-                    sent.append(authority.current["version"])
-                return super().proposal(authority, progress, slice)
-        return Counting()
-
-    @staticmethod
     def summary(state):
         return [(r["version"], r["status"], r["goal"], r["feedback"], r["roles"], bool(r["proposal"]))
                 for r in state["revisions"]]
-
-    async def tui_state(self, *keys, note=None):
-        """The plain flow's keys (`a`, `r`) answered on the TUI plan screen by their buttons (K1c2)."""
-        async with self.shell(size=(120, 40)) as pilot:
-            await self.open_plan(pilot)
-            await self.shows(pilot, "Plan r1 · 2 milestones")
-            for key in keys:
-                await self.press_button(pilot, {"a": "approve", "r": "revise"}[key])
-                await pilot.pause(0.2)
-                if key == "r" and note is not None:
-                    await self.type(pilot, note)
-                    await self.press_button(pilot, "send")
-                    await self.shows(pilot, "Plan r2 · 2 milestones")
-                elif key == "a":
-                    await self.until(pilot, lambda: self.app.snapshot.status == "approved")
-        return self.summary(self.stored())
 
     async def test_k1c2_the_plan_screen_answers_with_buttons_not_letters(self):
         """K1c2 C1/C2/C4: the plan screen has one button per offered action in `offered()` order, labelled by its
@@ -576,18 +500,6 @@ class DecisionTests(PlanningShell):
             await pilot.press("escape", "escape")  # the first closes the verdict note, the second goes back
             await self.until(pilot, lambda: type(self.app.screen).__name__ == "MainScreen")
 
-    async def test_a5_approve_equals_the_plain_flow(self):
-        plain, output, _ = self.plain_state("p", GOAL, "", "g", "a", "q")
-        self.assertIn("approved", output)
-        self.assertEqual(await self.tui_state("a"), plain)
-        self.assertEqual(plain[0][1], "approved")
-
-    async def test_a5_revise_equals_the_plain_flow(self):
-        plain, _, sent = self.plain_state("p", GOAL, "", "g", "r", "Add tests", "", "q", "q")
-        self.assertEqual(sent, [1, 2])
-        self.assertEqual(await self.tui_state("r", note="Add tests"), plain)
-        self.assertEqual([row[:2] for row in plain], [(1, "proposed"), (2, "proposed")])
-
     async def test_v3b_the_decline_action_is_gone_end_to_end(self):
         """v3b A1/A2: a proposal offers approve, revise, requirements (a stale one revise, requirements); no layer has
         a decline: `Planning.reject`, `Controller.reject_plan`, the CLI handler, the plan screen's action and the
@@ -602,10 +514,6 @@ class DecisionTests(PlanningShell):
                             (Terminal, "reject")):
             self.assertFalse(hasattr(owner, name), (owner, name))
         self.assertEqual([i for i in catalog.ACTIONS if i in ("plan.reject", "tui_plan.reject")], [])
-        plain, _, _ = self.plain_state("p", GOAL, "", "g", "x", "q", "q")
-        unknown, _, _ = self.plain_state("p", GOAL, "", "g", "z", "q", "q")
-        self.assertEqual(plain, unknown)
-        self.assertEqual(plain[0][1], "proposed")
 
     async def test_a5_the_approve_button_acts_at_once_without_a_question(self):
         """p4a A2: the plan screen's «approve» button (the focus starts on it, so Enter presses it too) is the
@@ -643,7 +551,7 @@ class ResponsivenessTests(PlanningShell):
         async with self.shell(controller, size=(120, 40)) as pilot:
             await self.open_plan(pilot)
             await self.until(pilot, lambda: self.planner.entered.is_set() and self.app.watching)
-            await self.shows(pilot, "the planner is working")  # the plan screen follows the receipt, not "not sent"
+            await self.shows(pilot, "the plan check is working")  # the plan screen follows the receipt, not "not sent"
             self.assertNotIn("[g] start", screen_lines(self.app)[-1])
             await pilot.press("escape")  # back to the main screen while the planner runs
             await pilot.pause(0.1)
@@ -669,7 +577,7 @@ class ResponsivenessTests(PlanningShell):
         async with self.shell(self.controller(), size=(120, 40)) as pilot:
             await self.loaded(pilot)
             await self.until(pilot, lambda: self.app.watching)
-            self.assertIn("the planner is working", " ".join(self.app.snapshot.plan.lines).lower())
+            self.assertIn("the plan check is working", " ".join(self.app.snapshot.plan.lines).lower())
             self.planner.running = False
             await self.until(pilot, lambda: self.app.snapshot.status == "proposed")
 
@@ -690,7 +598,7 @@ PLAIN_SCREEN_FRAGMENTS = ("has not been sent yet.", "planning did not finish.", 
 class SharedServiceTests(PlanningShell):
     """One patched service function changes what both UIs do: no lifecycle rule lives in a widget or a menu."""
 
-    async def test_a1_a_patched_service_view_and_submission_are_followed_by_both_uis(self):
+    async def test_a_patched_service_view_and_submission_are_followed_by_the_tui(self):
         self.plan()
         calls = []
 
@@ -699,19 +607,13 @@ class SharedServiceTests(PlanningShell):
             return Submission("sent")
         with patch.object(planning.Planning, "view", lambda _self: VIEW), \
                 patch.object(planning.Planning, "submission", submission):
-            output = io.StringIO()
-            session(Terminal(Steps("p", "g", "q", "q"), output), self.project, self.state,
-                    lambda *_: self.planner, fixture_id="test",
-                    driver_factory=lambda _: FixtureDriver(self.root / "runs", delay=0))
-            self.assertIn("ВИД ИЗ СЕРВИСА", output.getvalue())
-            self.assertEqual(calls, ["submission"])
             async with self.shell(size=(120, 40)) as pilot:
                 await self.loaded(pilot)
                 await self.panel(pilot)
                 await self.command(pilot, "/view")
                 await self.shows(pilot, "ВИД ИЗ СЕРВИСА")
                 await self.press_button(pilot, "run")
-                await self.until(pilot, lambda: len(calls) == 2)
+                await self.until(pilot, lambda: len(calls) == 1)
         self.assertEqual(self.planner.sent, [])
 
     async def test_a1_the_tui_has_no_second_copy_of_the_plain_screen_texts(self):
@@ -945,15 +847,14 @@ class PlanScreenInteractionTests(PlanningShell):
             self.assertIn("/status", self.app.screen.query_one("#palette").content.plain)
 
     def test_p1a_c4_an_empty_note_renews_a_stale_proposal_and_keeps_the_empty_change_line_otherwise(self):
-        """P1a C4: `revision_note("")` on a proposal whose view carries `plan.stale` re-plans with the fixed note naming
-        the cause; on a fresh proposal, or with no plan at all, it keeps EMPTY_CHANGE and calls no planner; a typed
+        """P1a C4: `revision_note("")` on a proposal whose view carries `plan.stale` sends the architect the fixed note
+        naming the cause; on a fresh proposal, or with no plan at all, it keeps EMPTY_CHANGE and sends nothing; a typed
         note is passed as typed."""
         from types import SimpleNamespace
         from terminal_planner.tui.app import EMPTY_CHANGE, RENEW_NOTE, ZplanApp
         revised = []
-        app = SimpleNamespace(
-            snapshot=None, plan_lines=(), changed=lambda: None, deliver=lambda callback: callback,
-            controller=SimpleNamespace(revise_plan=lambda text, done: revised.append(text)))
+        self.enterContext(patch.object(ZplanApp, "decline_to_architect", lambda app, view, text: revised.append(text)))
+        app = SimpleNamespace(snapshot=None, plan_lines=(), changed=lambda: None, deliver=lambda callback: callback)
         app.plan_is_stale = lambda: ZplanApp.plan_is_stale(app)
         app.say_note = lambda line: setattr(app, "plan_lines", (line,))  # the plan screen's half of `say_note`
 

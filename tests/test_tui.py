@@ -121,30 +121,26 @@ class PtyTest(ProjectTest):
 
 
 class PlainFallbackTests(PtyTest):
-    """A1: no escape bytes unless the full-screen UI is both wanted and possible."""
+    """zplan is full-screen only (0.15): without a terminal, with --plain or TERM=dumb it refuses with its reason and
+    prints no escape bytes; the subcommands stay plain."""
 
-    def test_piped_stdin_stays_plain(self):
+    def test_piped_stdin_refuses_and_names_status_and_exec(self):
         result = subprocess.run(self.cli(), input=b"q\n", capture_output=True, env=plain_env(), cwd=self.project, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn(ESC, result.stdout)
-        self.assertIn("zplan · project with spaces".encode(), result.stdout)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn(ESC, result.stdout + result.stderr)
+        self.assertIn(cli.NO_TERMINAL, result.stderr.decode())
 
-    def test_plain_flag_on_a_terminal_stays_plain(self):
-        output, status = self.pty(self.cli("--plain"), [(b"[l] ", b"l\n"), (b"[p] ", b"q\n")])
-        self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+    def test_plain_flag_on_a_terminal_refuses(self):
+        output, status = self.pty(self.cli("--plain"))
+        self.assertEqual(os.waitstatus_to_exitcode(status), 2)
         self.assertNotIn(ESC, output)
-        self.assertIn("zplan · project with spaces".encode(), output)
+        self.assertIn(cli.PLAIN_REFUSED.encode(), output)
 
-    def test_plain_session_says_the_chat_is_tui_only(self):
-        """The line UI of the installed zplan does not offer the architect chat: its home line says where it is."""
-        result = subprocess.run(self.cli(), input=b"q\n", capture_output=True, env=plain_env(), cwd=self.project, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(cli.PLAIN_CHAT, result.stdout.decode())
-
-    def test_term_dumb_on_a_terminal_stays_plain(self):
-        output, status = self.pty(self.cli(), [(b"[l] ", b"l\n"), (b"[p] ", b"q\n")], TERM="dumb")
-        self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+    def test_term_dumb_on_a_terminal_refuses(self):
+        output, status = self.pty(self.cli(), TERM="dumb")
+        self.assertEqual(os.waitstatus_to_exitcode(status), 2)
         self.assertNotIn(ESC, output)
+        self.assertIn(cli.NO_TERMINAL.encode(), output)
 
     def test_status_and_doctor_on_a_terminal_have_no_escape_codes(self):
         output, status = self.pty(self.cli("status"))
@@ -155,20 +151,20 @@ class PlainFallbackTests(PtyTest):
         self.assertNotIn(ESC, output)
         self.assertIn(b"Planning Kit", output)
 
-    def test_missing_textual_falls_back_to_the_plain_flow(self):
+    def test_missing_textual_refuses_with_reinstall(self):
         class Tty(io.StringIO):
             def isatty(self):
                 return True
-        out, stdin = Tty(), Tty("q\n")
+        out, err, stdin = Tty(), io.StringIO(), Tty("q\n")
         with patch.dict(sys.modules, {"terminal_planner.tui.app": None}), patch.object(sys, "stdin", stdin), \
-                patch.object(sys, "stdout", out), patch.object(cli, "Terminal", lambda: Terminal(stdin, out)), \
+                patch.object(sys, "stdout", out), patch.object(sys, "stderr", err), \
                 patch.dict(os.environ, {"TERM": "xterm"}):
             code = cli.main(["--project", str(self.project), "--state-dir", str(self.state), "--fixture", "pty"])
-        self.assertEqual(code, 0)
-        self.assertIn("zplan --plain", out.getvalue())
-        self.assertNotIn("\x1b", out.getvalue())
+        self.assertEqual(code, 1)
+        self.assertIn("reinstall zplan", err.getvalue())
+        self.assertNotIn("\x1b", out.getvalue() + err.getvalue())
 
-    def test_tui_wanted_needs_a_terminal_on_both_ends_and_no_override(self):
+    def test_tui_wanted_needs_a_terminal_on_both_ends_and_a_usable_term(self):
         class Stream:
             def __init__(self, tty):
                 self.tty = tty
@@ -182,8 +178,6 @@ class PlainFallbackTests(PtyTest):
         term = {"TERM": "xterm-256color"}
         yes = Stream(True)
         self.assertTrue(cli.tui_wanted(args(), term, yes, yes))
-        self.assertFalse(cli.tui_wanted(args(plain=True), term, yes, yes))
-        self.assertFalse(cli.tui_wanted(args(command="status"), term, yes, yes))
         self.assertFalse(cli.tui_wanted(args(), {"TERM": "dumb"}, yes, yes))
         self.assertFalse(cli.tui_wanted(args(), {}, yes, yes))
         self.assertFalse(cli.tui_wanted(args(), term, Stream(False), yes))

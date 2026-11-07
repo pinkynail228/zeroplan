@@ -1,15 +1,13 @@
-# zplan 0.8: user flow
+# zplan: user flow
 
-## Full-screen shell and `--plain`
+## Full-screen shell
 
 On a terminal `zplan` opens a full-screen shell (Python ≥ 3.11 and Textual; see INSTALLATION.md). The shell has
 no letter keys: every action is a `/` command typed in the chat input (see «`/` commands»), every screen and modal
 answers with buttons, and the keys are `Tab`, `←`/`→`, `↑`/`↓`, `PgUp`/`PgDn`, `Enter`, `Esc` and `Ctrl+Q` (see
-«Keys»). The part of this document that starts at its «Line UI» heading describes the line UI, which `zplan --plain`
-always gives you and which is used automatically for `TERM=dumb`, piped stdin/stdout and every subcommand
-(`status`, `doctor`, `setup`, `login`, `roles`, `profile`); those never print escape codes, and the line UI keeps its
-letter keys. The architect chat belongs to the full-screen shell only: the line session says so on its home screen
-and keeps every other action.
+«Keys»). zplan is full-screen only (0.15): without a terminal on both ends, with `TERM` empty or `dumb`, or with
+`--plain`, it refuses with its reason (exit 2) and names `zplan status` and `zplan exec` for scripts. The subcommands
+(`status`, `doctor`, `setup`, `login`, `logout`, `update`, `roles`, `profile`, `exec`) never print escape codes.
 
 ```
 ╭─ Conversation with the architect ╮╭─ my-project · nothing runs ───────────────────────╮
@@ -128,7 +126,7 @@ merge), `question` (a stage needs an owner answer) and `error` (a failure or a b
 
 | Command | Acts in | What it does |
 | --- | --- | --- |
-| `/plan GOAL` | `idle`, `draft`, `error` | Start the planner on the goal typed after it (a new goal); readiness is re-checked first and a goal is never lost. With no text it sends the newest sendable goal draft, or the unsent revision when there is none |
+| `/plan GOAL` | `idle`, `draft`, `error`, `planning`, `plan_ready` | Send the goal typed after it to the architect, as your message; it approves nothing. With no text it sends the newest sendable goal draft the same way, or an unsent plan of the architect's to the plan check when there is none |
 | `/approve` | `plan_ready`, `question`, `error` | Approve the proposed plan (the plan card's «yes, approve»); on an owner-question card send the answer draft, or open the answer note when there is none, and `/approve simplify`, `/approve split` or `/approve skip` sends that quick answer. With no card it opens the plan screen, whose button «approve» approves |
 | `/decline` | `draft`, `plan_ready`, `question` | Say «no» to the open card: a proposed plan opens the revision note, an owner question opens the answer note, where `Enter` sends. A goal draft has no card and nothing to decline: with no card the command says so |
 | `/run` | any | The «Next:» action of the selected milestone (else the first one that has an action): start a ready one at once (no confirmation), resume a recoverable failure, begin a new attempt at once, or check an unconfirmed submission or stop |
@@ -204,7 +202,7 @@ start in a project: the process profile»); `Ctrl+Q` leaves without deciding.
 ### UI language
 
 0.8.0 ships an English-only interface: the shell's texts (the bottom bar, the chat pane's titles and status lines, the
-canvas tabs «Scheme»/«Plan»/«Drafts» and the plan pane's own lines, the key hints and the input placeholder), the line UI, the
+canvas tabs «Scheme»/«Plan»/«Drafts» and the plan pane's own lines, the key hints and the input placeholder), the
 modals and the plan and journal lines the engine produces are all English. The catalog (`terminal_planner/tui/strings.py`)
 keeps its Russian and Chinese columns for a later localisation release, but only English is offered: there is no
 language chooser and `/language` is not listed. The setting is kept in `ui.json` outside the project
@@ -218,11 +216,14 @@ The theme is `ZPLAN_THEME` (`dark`, `light` or `auto`) at start, else the stored
 
 The plan pane is the same overview as `zplan status`, refreshed every few seconds without starting or
 polling anything; a slow check or setup never blocks the keys. Planning (goal, planner progress, proposal,
-approve / revise) works in the shell with the same rules as the line UI: the goal is typed as
-`/plan GOAL` (or a bare `/plan` sends the architect's newest goal draft), readiness is re-checked right before the
-planner is called, a goal is never lost, a stale unsent revision is replaced only by the plan screen's button
-«new revision» (or rebuilt by «start the planner»), and a sent or unconfirmed submission is observed, never
-sent again. Planner progress goes to the left pane while you keep typing; `Ctrl+Q` leaves the planner running and
+approve / revise) works in the shell by these rules: every plan is the architect's (0.15). A goal goes to the
+architect in the chat (or as `/plan GOAL`); a revision note, «back to plan» at a run's end and a steward proposal
+you accept go to it as your message too, and none of them approves a plan. Declining a proposed plan is recorded
+first, so the architect can never approve that revision; your own card still can. Readiness is re-checked right
+before the plan check is called, a stale unsent revision is replaced only by the plan screen's button «new
+revision» (or rebuilt by «start the planner»), and a sent or unconfirmed submission is observed, never sent again.
+A plan the old planner made in an earlier version still shows and can be approved; to change it, plan again in the
+chat. Planner progress goes to the left pane while you keep typing; `Ctrl+Q` leaves the planner running and
 reopening the shell resumes watching it.
 
 The architect chat writes no proposal, approval or run state itself: the architect acts only through zplan's own
@@ -253,12 +254,11 @@ its place among the replies the pane holds (`reply 1`, `reply 2`, …), so two r
 told apart. A goal draft opens no card and blocks nothing: a new actionable goal draft gets one zplan line in the
 chat right under its reply, «Draft saved in Drafts.» (followed by «Use /plan to send the latest draft to planning.»
 while `/plan` can act), is listed whole in the «Drafts» tab, and that tab comes forward. Nothing is typed again and
-no form opens: a bare `/plan` starts the planner from the newest sendable draft's own text and identity (a sent
-draft, and every older one, is not sendable any more), and a goal the owner types as `/plan GOAL` is a new goal,
-never overwritten by a draft. The draft keeps its original identity rather than the current view's, and `/plan` re-checks
-it against the current plan before the planner starts: a stale draft is refused with «draft is outdated» and its
-reason — a new revision, or the plan state changing, including `no plan` that became a plan — writing nothing and
-starting nothing; the draft's text stays copyable. An answer draft is opened by `/answer`: it opens the newest
+no form opens: a bare `/plan` sends the newest sendable draft's text to the architect (a sent draft, and every older
+one, is not sendable any more), and a goal the owner types as `/plan GOAL` is a new goal, never overwritten by a draft.
+The draft keeps its original identity rather than the current view's, and `/plan` re-checks it against the current
+plan first: a stale draft is refused with «draft is outdated» and its reason — a new revision, or the plan state
+changing, including `no plan` that became a plan — sending nothing; the draft's text stays copyable. An answer draft is opened by `/answer`: it opens the newest
 actionable answer draft of the milestone the plan pane selects in the answer note — the draft's text prefilled and
 editable, its original attempt identity held apart from the screen — and starts nothing; a milestone with no
 actionable answer draft gets a note saying so (the owner-question card offers «send the answer draft» only for a
@@ -278,12 +278,12 @@ actionable draft. The reply, its drafts and that identity are stored with the tu
 store outside the checkout), so a restart or a second window rebuilds the drafts with their original identity; a
 reply stored without that metadata comes back as copyable text only.
 
-Milestones follow the same rules in the shell and in the line UI, because both call one delivery service:
+Milestones follow the delivery service's rules:
 readiness is re-checked before a start, a start never sends a second submission for an attempt that already
 has one (an unconfirmed submission is shown as `submission status unknown` and only checked), and a merge is
 confirmed. Progress comes in short slices, so typing and navigation stay responsive; the plan pane rows show the
 live state (`running · task 1/3 (T2) · review`). `Ctrl+Q` while a milestone runs leaves it running;
-reopening the shell observes it again, also when it was started in the line UI. The end-of-run screen
+reopening the shell observes it again, also when another session started it. The end-of-run screen
 shows the outcome and only the actions the state allows (done, awaiting merge with the diff, conflict,
 needs an owner answer, blocked, recoverable or final failure with its cause, stopped, unknown submission). If the
 run, attempt or plan revision changed while a screen was open, the action is refused and the screen is
@@ -440,20 +440,17 @@ With a Git identity configured, the target branch checked out and its working tr
 (or type `/merge`) to merge the result; at `auto` (and at `supervised` for a change that is not high risk) the
 architect merges it itself. zplan never pushes; dependent milestones become ready after the merge.
 
-# Line UI
+# Commands and setup
 
-zplan is line-oriented: type a key (optionally followed by a milestone id, e.g. `g M2`) and press Enter.
-A bare Enter on the home screen follows the "Next" hint only when it opens a view (plan, observe, open);
-starting, submitting or checking always needs its letter (`g`, `n`, `y`). `q` goes back from every screen and
-exits from the home screen. Installation: [INSTALLATION.md](INSTALLATION.md).
+Installation: [INSTALLATION.md](INSTALLATION.md).
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `zplan` | Interactive session for the Git project in the current directory (`--project PATH` selects another) |
+| `zplan` | The full-screen shell for the Git project in the current directory (`--project PATH` selects another) |
 | `zplan status` | Prints the home screen once; no prompts, nothing started |
-| `zplan setup` | Installs the pinned Zeroshot 11.0.0 and Codex 0.162.1 (the readiness screen offers it as `u`) |
+| `zplan setup` | Installs the pinned Zeroshot 11.0.0 and Codex 0.162.1 (Settings offers it too) |
 | `zplan login` | Codex device login into zplan's own Codex home (file store); a login already there is kept. In your own `$CODEX_HOME` it runs no Codex (sign in with `codex login`) |
 | `zplan logout` | `codex logout` of zplan's own Codex home only; refused while a run or the architect is live there |
 | `zplan doctor` | Checks tools, Codex home/provider/login, Git identity, socket path, roles and the current project |
@@ -475,13 +472,12 @@ worktrees, merges and checker runs only — nothing is fetched, pushed or sent o
 chat has a scripted architect, with no model: it writes one plan for the first goal you type, never approves, starts
 or merges, so you approve the plan yourself; it makes no provider call and runs no tool probe. Accepting the profile keeps
 the snapshot in the fixture state without creating or changing `<project>/zplan.process.json`. `--fixture` needs a nonempty id of letters, digits, `-` or `_`; an empty
-or invalid id is refused before anything runs. The rest of this document describes the native flow; a fixture
-session is the same screens over the fixture stores.
+or invalid id is refused before anything runs. A fixture session is the same screens over the fixture stores.
 
 ## First start in a project: the process profile
 
-The first `zplan` in a project whose process profile was never decided shows one screen before home (full-screen
-shell and `--plain` alike): the rules files found (`AGENTS.md`, then `CLAUDE.md`), the test command when it is
+The first `zplan` in a project whose process profile was never decided shows one card before the main screen: the
+rules files found (`AGENTS.md`, then `CLAUDE.md`), the test command when it is
 obvious without running anything (`package.json` `scripts.test` → `npm test`, a Makefile `test:` target → `make
 test`; otherwise «no qualification»), the gates (plan check required, task and merge checks «no check»), and
 the role bindings. «configure» (and `/setup` → «profile») edits the autonomy level («auto», «ask about the plan and
@@ -489,10 +485,10 @@ risky merges», «ask about everything»), the parallel runs, the merge rule and
 «merge» rule row reads «checks before merging» or «no check before merging» (without a test check only the second,
 with the reason «There are no checks, so the merge check is unavailable.»). It decides whether checks run before a
 merge, not who merges: that follows the level (`auto` merges after the reviews, `supervised` unless the change is
-high risk, `manual` asks). Keys: `a` accept — writes `zplan.process.json` in the project root (commit it so the profile is
-shared; an existing valid file is only recorded, never rewritten); `l` later — nothing is written to the project,
-the shown values apply and the header says «profile not saved»; `q` leaves without deciding (new plans and
-runs are refused until you decide; watching, stopping and export keep working).
+high risk, `manual` asks). «accept» writes `zplan.process.json` in the project root (commit it so the profile is
+shared; an existing valid file is only recorded, never rewritten); «later» writes nothing to the project, the shown
+values apply and the header says «profile not saved»; leaving without deciding refuses new plans and runs until you
+decide (watching, stopping and export keep working).
 
 Once accepted, the file is the source: roles, `gates.plan: required`, `limits.plan_rounds` (1–5) and the rules
 files apply to planning (the rules reach the planner and the critic; at most 64 KiB in total); checks and the other
@@ -501,234 +497,6 @@ applies to the next planning or milestone start (never to a revision already cre
 accepted file refuses new planning and milestone starts with the fix; a profile that changed between the preview
 and the confirmation is refused and the preview is shown again. `zplan roles` in a project with the file only
 shows the roles — they live in the file.
-
-## Readiness screen
-
-`zplan` runs the same checks as `zplan doctor` at start. When everything is ready it goes straight to the home
-screen. When something is missing it shows only what matters, with the key that fixes it:
-
-```
-zplan · my-project · main
-✓ Codex: login found in ~/.local/share/planning-kit/codex-home · provider openai
-! No GitHub origin — [i] instructions
-[g] check again  [i] details  [q] quit
-```
-
-| Key | Action |
-| --- | --- |
-| `u` | Install the pinned tools (same as `zplan setup`) |
-| `l` | Codex login (only for a provider that signs in with a login file; an API-key provider shows `export VAR=...` under `i`) |
-| `d` | Show the uncommitted changes (`git status --short`); changes nothing |
-| `i` | The fix for each `!` line |
-| `g` | Check again; when nothing is missing, continue |
-| `q` | Exit (Enter opens the home screen anyway: viewing plans and runs needs nothing) |
-
-zplan never stashes or changes `origin` for you, never copies Codex credentials and never rewrites
-Codex config. It commits your own files only on your explicit «yes» (see «Commit card» below), and the profile file it writes itself. Login and every run use zplan's own Codex home, `~/.local/share/planning-kit/codex-home`; an
-explicit `CODEX_HOME` (your own Codex, signed in with `codex login`) overrides it for the runs, and zplan never logs in or out there.
-
-The check runs again right before every planner submission and milestone start. If something is missing then,
-the same screen appears (`q` goes back) and nothing is sent; a goal you have typed is already saved.
-
-Why zplan keeps its own tools: the planner and milestone graphs are qualified against exactly Zeroshot 11.0.0
-and Codex 0.162.1, so zplan installs those checksum-verified under its data directory and never uses or changes
-a global `zeroshot` or `codex`.
-
-## Home screen
-
-```
-zplan · my-project (main, clean)
-Goal: Add CSV export to the report page
-Plan r1 · approved · 1/3 stages merged
-  ✓ M1 Export format and parser       merged 3f2a9c1
-  ▶ M2 Export endpoint                running
-  · M3 UI button                      waiting for M2
-Next: [w] watch M2
-[w] watch  [o] open  [p] plan  [r] reconsider  [s] settings  [i] details  [q] quit
-```
-
-Without a plan the screen says `No plan.` and offers `[p] plan  [s] settings  [q] quit`.
-
-| Key | Action |
-| --- | --- |
-| `w` | Observe the running milestone |
-| `g` | The «Next:» action: start the ready milestone (`start`), `continue` a recoverable failure, `new attempt` after a stop or failure, or reconcile an unconfirmed submission / pending stop (`check`) |
-| `e` | Tail of the Zeroshot log of the running or failed milestone, on request |
-| `o` | Open a milestone that needs attention (finished, waiting for merge, failed, stopped, needs an answer) |
-| `p` | Plan: write the goal, run the planner, approve |
-| `r` | Revise the plan: describe what to change; the planner builds a new revision that you approve again |
-| `s` | Roles (model / effort per role) for the next planning and the next milestone start |
-| `i` | Details: plan, the run journal, every run record, worktree and branches, and ready-to-copy Zeroshot diagnostics |
-| `q` | Quit; running milestones keep running |
-
-When readiness fails, home names each failing check with its key (`! No GitHub origin — [i] instructions`). The
-plan screen re-checks before it says a start is blocked: a tree that was fixed since drops the message, a moved
-baseline stays and points to `[n]`. Refresh and status only read; they never renew or submit anything.
-
-Milestone states: `waiting for M1` (dependency not merged yet), `ready`, `running`, `stopping`,
-`waiting for merge`, `conflict`, `needs an answer`, `blocked`, `failed · can continue`, `failed · cannot continue`,
-`stopped`, `submission status unknown`, `merged <commit>`. One milestone runs at a time.
-
-## Plan
-
-1. `p`, then type the goal; several lines are fine, an empty line ends it.
-2. zplan shows the roles; `g` runs the planner (`s` changes roles first, `q` cancels).
-3. While the planner works, zplan prints plain phases as they happen (`Drafting the plan…`,
-   `Checking that the plan covers the goal…`, `Refining the plan from the findings…`) and, when nothing new happens for a
-   while, `…still working, N min elapsed`. Ctrl-C leaves; planning continues and `p` then `w` watches again.
-4. The proposal, summary first:
-
-   ```
-   Plan r2 · 1 milestone · 1 task · checked
-   Goal: Add a README paragraph about installation
-     M1 Installation paragraph  (after: —)
-       T1 Write the installation paragraph in README.md · 2 checks
-   [a] approve  [r] revise  [i] requirements and checks  [q] back
-   ```
-
-   `i` shows every requirement, slice and check and how the plan was argued: the critic's verdict, rounds used of
-   the limit, for each round the findings and the planner's reply, and the short digest of the configuration it was
-   checked under. A plan the critic did not accept within the rounds cannot be approved with `a`; `r` revises it,
-   `g` plans again, and `o` approves it anyway (below).
-5. `a` approves (`Plan r1 approved. Nothing was started; start with [g] on the home screen.`),
-   `r` asks for changes (type the feedback; a new revision is planned). Enter and `q` only go back.
-
-**Plans the architect writes.** When you ask the architect for a plan in the chat, it writes the plan itself and
-zplan checks it without the planner: a fresh plan reader retells the plan and a critic judges it, side by side, once.
-The plan card shows `How a fresh reader understood it: "…"`: if it is not what you asked for, say so. When the critic
-rejects the plan the architect fixes it or disputes each finding (`Architect's answer: "…"`), within `plan_rounds`
-revisions of its own; then you decide. The scheme draws the plan reader and the plan check as two blocks.
-
-Plans contain product work only: the milestone driver already runs independent reviews, repairs and resume
-for every task, so those never appear as tasks or checks unless your goal asks for them. A small goal gets a
-small plan (a README paragraph: 1 milestone, 1 task, 1-2 checks).
-
-**Approving over a rejected plan check.** When the critic rejected the plan within the rounds (`the check did not accept
-it`), `o` «approve despite the check» asks for a reason: one line, 10 to 500 characters (empty input or
-`Esc` cancels and writes nothing; a shorter or longer reason is refused). The plan becomes approved and
-milestones run from it as from an accepted plan. The critic's verdict, findings and discussion stay in the record
-unchanged and are never hidden: the plan screen keeps `The plan check did not accept it: "…"` and adds
-`Approved despite the check: "reason"`, the status reads `approved despite the check` (also on the main screen
-and in `i`), and the reason is part of what the approval is bound to. The same refusals as for `a` apply (project
-changed after planning, process settings changed since the critic ran: «the check is out of date»); a plan of the
-first execution version has no plan check and offers no override. There is no command-line path to approve or
-override a plan.
-
-If the repository changed after planning, approval is refused; `r` replans against the current tree. The same
-happens when the process settings (roles, limits, rules) changed after the critic accepted: `a` answers
-«the check is out of date», writes nothing, and `r` plans and argues again under the current settings.
-
-**Commit card (your own uncommitted files).** Planning and runs see the last commit, never uncommitted files. When the goal
-needs some, the architect can offer to commit them (`zplan_propose_commit`: paths and a message); it never commits itself,
-at any autonomy level. zplan shows the card «Commit your files»: the message, the `git diff --stat HEAD --` of those
-paths (new files listed as «new file»), the warning «the plan goes stale first; a running milestone will not see the commit», and
-«yes» / «no». «no» runs nothing. «yes» suspends the terminal as the login does (hooks and signing may ask you) and runs
-`git commit --only -- <paths>` with your identity and your hooks (never `--no-verify`). The committed paths are the
-proposal met with the live `git status` at «yes»: files only, a rename needs both sides, credential files (`.env`,
-`*.pem`, ...) are refused and named, ignored files stay out (nothing is `add -f`), other staged changes stay staged and
-out of the commit. A hook that refuses leaves HEAD and the index as they were. After the commit the card says which
-extra files the hooks changed, if any. Refused with the fix to run: no Git user, no commit yet, a detached HEAD, a merge
-(`MERGE_HEAD`) or rebase in progress, a held `index.lock`, or a merge being landed. The architect sees only the stat and
-a scrubbed, bounded diff, never raw file content, and learns the answer from its status.
-
-**Plan not sent yet, project changed.** A plan that was never sent to the planner is tied to the project as it
-was when you wrote the goal. If you commit (or otherwise change the tree) first, `p` shows:
-
-```
-The plan has not been sent yet. The project changed after it was created. The goal and settings are saved.
-[g] start the planner  [n] prepare a new plan on the current project  [q] back
-```
-
-The same screen appears, with «It was made for another Zeroshot version or state…», when the plan was
-prepared for another Zeroshot (a different toolchain, a rebuilt binary or another state directory).
-
-`g` checks readiness and, when it passes, prepares a new revision with the same goal and roles on the current
-tree and sends it in the same step (one line says «rN → rN+1»); the old revision stays as it was. If readiness
-still fails nothing is prepared or sent. `n` only prepares the new revision without calling the model; then `g`
-sends it. A plan that was already sent is never resent: if zplan
-knows the run it watches it again (`w`); if the submission is unconfirmed it says so and `i` prints how to check
-Zeroshot by hand.
-
-**Stopping the planner.** While the planner runs (or its run is observed from a previous session), the plan
-screen offers `s` «stop planning». `s` saves the stop request and force-stops the run; a refused or
-unanswered call keeps the revision as it was and says `Not done: …`, and `s` is offered again. Once the
-observation sees the run end, the plan is `stopped` and the screen shows `Plan rN stopped by you at HH:MM.` with
-`g` «start the planner again» and `i`; the stopped run is never resubmitted, `g` prepares a new revision of
-the same goal on the current project and sends it. The cause line survives reopening zplan.
-
-**Planning stopped.** The plan screen names the cause and the next step, for example
-`Planning stopped: the service rejected the authorization. Next: [l] refresh login, then [g] check readiness.`
-Limits/quota and network problems get their own lines; when the cause is not visible zplan says so and points
-to `i`. Raw logs and secrets are never shown. `g` checks readiness and plans the same goal again.
-
-## Run a milestone
-
-`g` shows what will happen before anything starts:
-
-```
-Start M1 · Export format and parser (attempt 1)
-  Worktree:        ~/.local/share/planning-kit/worktrees/...
-  Work branch:     zplan-work/...
-  Result branch:   zplan/...
-  Merge into:      main (from HEAD 3f2a9c1)
-  Roles:           planner gpt-6.1-sol/high · worker gpt-6.1-terra/max · ...
-  Limits:          3 tasks (+ up to 2 new), 2 repairs per task, 1 final repairs
-Start M1? [y/N]
-```
-
-`y` shows `starting M1…` and submits one native Zeroshot run for the milestone, then starts observing:
-
-```
-Watching M1 · Export format and parser — Ctrl-C: detach (the run continues) · k + Enter: stop
-  now: task 1/3 (T1) · ...
-```
-
-- **Ctrl-C** detaches: `Detached; the run continues. Come back with: zplan`. `zplan` later shows the state; `w` reattaches.
-- **k + Enter** asks `Stop M1? The attempt's unfinished work will not be accepted. [y/N]`; `y` requests the stop.
-
-## End screens
-
-Each screen starts with `M1 · <title> — <state>` and a line with the run status, outcome and delivery.
-`q` goes back to the home screen.
-
-| Screen | Keys |
-| --- | --- |
-| done, waiting for merge: tasks done, plan changes made by the run, diff stat against the base | `m` merge into `<branch>` (asks `Merge the result of M1 into main?`; the result branch is named under `i`; prints `Merged: M1 → main`), `d` full diff, `l` later |
-| merge conflict: conflicting files; your tree is untouched | `m` retry the merge, `d` diff, `l` later; or merge `zplan/...` by hand, commit, then `zplan` |
-| needs an answer: the question, or a proposed change to the milestone tasks | `a` accept the proposal, `t` answer (starts a new attempt), `x` leave it |
-| blocked: the reason in one line (the model's words in «…»; internal markers stay under `i`) and task notes | `t` answer and restart, `p` change the plan |
-| failed, can continue | `g` resume the same attempt in its worktree, `t` new attempt from the current HEAD (a fresh run, not a resubmission of the frozen attempt), `p` plan |
-| failed, cannot continue | `g` (or `t`) new attempt from the current HEAD of the target branch: the form explains that the model runs again, takes an optional note and starts with `Ctrl+G`; `p` plan |
-| stopped | `g` (or `t`) new attempt, `p` plan |
-| submission status unknown | `g` check: reconciles with Zeroshot, never submits a second run |
-
-Every end screen also names the keys it offers in its own «Next:» line, and then the retained journal of that
-attempt (`Journal:`, oldest entry first; `The attempt journal is empty: observation has not recorded anything yet.` when it has
-none) — `i` opens those stored entries in a read-only screen with or without a native run, `e` the tail of the
-Zeroshot log where a run exists. On a terminal of at least 80×24 the panel opens at the top of the body (no logo
-or header sits above the panes) and grows with
-its content down to the bottom of the screen, then scrolls inside; a smaller terminal keeps the centred 90%x80%
-box.
-
-Merging needs a Git identity and the target branch checked out; uncommitted changes do not block it, and zplan never pushes. After a
-merge, milestones that depended on it become `ready`.
-
-## Details (`i`)
-
-`i` (the same text in the shell and in the line UI) leads with what really happened (`M1 merged e78f740`,
-`M2 running: T3 review`), then the plan. Claims that stopped being true are dropped: after a merge the plan no longer
-says that the repository changed after approval or that nothing was implemented. Everything technical sits in
-a tail marked `For diagnosis`: milestone, plan revision, attempt, run id, status, outcome, delivery,
-worktree and branches, and the last diagnostic. For each native run (the planner's included) the tail has
-ready-to-copy commands with the exact Zeroshot executable and state the run used:
-
-```
-  Zeroshot diagnostics (root run):
-    ZEROSHOT_STATE_DIR=<root>/runs ZEROSHOT_CONFIG_DIR=<root>/config <zeroshot> status <run id>
-    ZEROSHOT_STATE_DIR=<root>/runs ZEROSHOT_CONFIG_DIR=<root>/config <zeroshot> logs <run id>
-```
-
-A resumed attempt is a successor run: it is labelled `continuation of <root run id>` and has its own run id.
 
 ## First-run checklist
 
@@ -742,16 +510,14 @@ A resumed attempt is a successor run: it is labelled `continuation of <root run 
    `~/.codex` stays as it is. zplan never copies or links those credentials (a shared refresh token can log out the
    other copy). To use your own Codex home (or another one) instead, sign in there with `codex login` and
    export `CODEX_HOME=...` before `zplan`; zplan never logs in or out of it. Never copy `auth.json` between homes. A malformed `config.toml` or an unknown provider blocks.
-3. **Run `zplan` inside the project.** In the full-screen shell Settings (`/setup`) lists anything missing; fix
-   it and press «check». The line UI's readiness screen shows the same list; there fix it and press `g`
+3. **Run `zplan` inside the project.** Settings (`/setup`) lists anything missing; fix it and press «check»
    (`zplan doctor` prints the same list).
 4. **If a run stops or looks stuck:** run `zplan`; the plan pane and `/attempt` show the state and reason, `/log`
-   the tail of the Zeroshot log. `/details` (line UI: `i`) prints the `status` / `logs` commands for the root run
-   and any successor run; copy them as printed (they carry `ZEROSHOT_STATE_DIR` / `ZEROSHOT_CONFIG_DIR` and the
-   exact executable). `failed · can continue` → «continue» (line UI: `g`) resumes; otherwise «new attempt»
-   (`t`) starts a new attempt or «to plan» (`p`) changes the plan.
-5. **Stop safely.** In the full-screen shell type `/stop` (`/stop M1` when several run); it stops at once. In the line UI use `k` + Enter while
-   observing, then `y`. The stop is recorded first; if zplan exits before Zeroshot confirms, the milestone shows
-   `stopping`, and `/run` (line UI: `g`, check) resends the stop. `Ctrl+Q`, Ctrl-C, closing the
-   terminal or `q` only detach — the run continues and costs tokens until it ends or is stopped. Do not delete
+   the tail of the Zeroshot log. `/details` prints the `status` / `logs` commands for the root run and any
+   successor run; copy them as printed (they carry `ZEROSHOT_STATE_DIR` / `ZEROSHOT_CONFIG_DIR` and the exact
+   executable). `failed · can continue` → «continue» resumes; otherwise «new attempt» starts a new attempt or
+   «to plan» changes the plan.
+5. **Stop safely.** Type `/stop` (`/stop M1` when several run); it stops at once. The stop is recorded first; if
+   zplan exits before Zeroshot confirms, the milestone shows `stopping`, and `/run` resends the stop. `Ctrl+Q`,
+   Ctrl-C or closing the terminal only detach — the run continues and costs tokens until it ends or is stopped. Do not delete
    `~/.zp`, the worktrees or `planning.json` while a milestone is running.

@@ -261,17 +261,25 @@ class ActivationCase(unittest.TestCase):
             code = cli.main(list(argv))  # a terminal is faked: the guard of `login` (L2) has its own tests
         return code, screen
 
+    def launch(self, project, argv=(), captured=None):
+        """`zplan` itself on a faked terminal: the start screen picks `project` and the full-screen run is replaced
+        by a recorder of the engine and driver the wiring hands it; returns (code, screen)."""
+        captured = [] if captured is None else captured
+
+        def run(project_arg, state_root, engine_factory=None, fixture_id=None, driver_factory=None, **kwargs):
+            authority = SimpleNamespace(project=project_arg, fixture_id=fixture_id)
+            captured.append((engine_factory("native", None), driver_factory(authority)))
+            return 0
+
+        with patch.object(cli, "tui_wanted", lambda *a, **k: True), \
+                patch.object(cli, "tui_entry", lambda: (run, lambda *a, **k: project)):
+            return self.main(list(argv))
+
     def engine_env(self, project):
         """The env `attach_tools` builds in the real `cli.main([])` wiring, observed through the captured engine
         and driver closures (the CLI planning prepare and the milestone attempt of A-4)."""
         captured = []
-
-        def session(terminal, project_arg, state_root, engine_factory, fixture_id=None, driver_factory=None, **kwargs):
-            authority = SimpleNamespace(project=project_arg, fixture_id=fixture_id)
-            captured.append((engine_factory("native", terminal), driver_factory(authority)))
-
-        with patch.object(cli, "session", session), patch.object(cli, "choose_project", lambda *a, **k: project):
-            code, screen = self.main([])
+        code, screen = self.launch(project, (), captured)
         self.assertEqual(code, 0, screen.text())
         engine_instance, driver = captured[-1]
         self.assertIsInstance(engine_instance, engine.NativeEngine)
@@ -355,13 +363,7 @@ class ExplicitBinaryTests(ActivationCase):
     def explicit_env(self, project):
         """The env the real `cli.main(["--native-binary", …])` wiring hands the engine and the driver."""
         captured = []
-
-        def session(terminal, project_arg, state_root, engine_factory, fixture_id=None, driver_factory=None, **kwargs):
-            authority = SimpleNamespace(project=project_arg, fixture_id=fixture_id)
-            captured.append((engine_factory("native", terminal), driver_factory(authority)))
-
-        with patch.object(cli, "session", session), patch.object(cli, "choose_project", lambda *a, **k: project):
-            code, screen = self.main(["--native-binary", str(self.zeroshot)])
+        code, screen = self.launch(project, ["--native-binary", str(self.zeroshot)], captured)
         self.assertEqual(code, 0, screen.text())
         engine_instance, driver = captured[-1]
         self.assertIsInstance(engine_instance, engine.NativeEngine)
@@ -442,13 +444,11 @@ class OwnerHomeAliasTests(ActivationCase):
         with self.assertRaises(Blocked) as caught:
             setup.native_environment()
         self.assertEqual(caught.exception.family, "setup.agent_home")
-        with patch.object(cli, "choose_project", lambda *a, **k: project):
-            code, screen = self.main([])                       # a fresh launch: `attach_tools` first
+        code, screen = self.launch(project, [])                       # a fresh launch: `attach_tools` first
         self.assertEqual(code, 1, screen.text())
         self.assertIn("setup.agent_home", screen.text())       # the family reaches the owner, not "tools missing"
         self.assertNotIn("readiness.tools", screen.text())
-        with patch.object(cli, "choose_project", lambda *a, **k: project):
-            code, screen = self.main(["--native-binary", str(self.zeroshot)])   # the development route too
+        code, screen = self.launch(project, ["--native-binary", str(self.zeroshot)])   # the development route too
         self.assertEqual(code, 1, screen.text())
         self.assertIn("setup.agent_home", screen.text())
         code, screen = self.main(["login"])                    # the device login writes nothing either
@@ -495,8 +495,7 @@ class OwnerHomeAliasTests(ActivationCase):
         with self.assertRaises(Blocked) as caught:
             setup.native_environment()
         self.assertEqual(caught.exception.family, "setup.agent_home")
-        with patch.object(cli, "choose_project", lambda *a, **k: project):
-            code, screen = self.main([])
+        code, screen = self.launch(project, [])
         self.assertEqual(code, 1, screen.text())
         self.assertIn("setup.agent_home", screen.text())
         code, screen = self.main(["login"])
@@ -649,8 +648,7 @@ class SurfacingTests(ActivationCase):
             self.assertIn("setup.agent_home", screen.text())          # the owner sees the family ...
             self.assertNotIn("readiness.tools", screen.text())        # ... and never `readiness.tools`
             self.assertEqual(self.spy.turns(self.codex), [])          # login spawned no Codex at all
-            with patch.object(cli, "choose_project", lambda *a, **k: project):
-                code, screen = self.main([])
+            code, screen = self.launch(project, [])
             self.assertEqual(code, 1, screen.text())
             self.assertIn("setup.agent_home", screen.text())
             self.assertNotIn("readiness.tools", screen.text())

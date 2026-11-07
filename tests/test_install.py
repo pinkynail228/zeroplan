@@ -26,8 +26,33 @@ from terminal_planner import __version__  # noqa: E402
 
 WHEELHOUSE = os.environ.get("ZPLAN_TEST_WHEELHOUSE")
 WHEELS = ("setuptools-75.8.0-py3-none-any.whl", "wheel-0.45.1-py3-none-any.whl", "textual-8.2.8-py3-none-any.whl")
-PLAN = "p\nRequested feature\n\ng\n"
-START, MERGE = "g\ny\n", "m\ny\n"
+# The installed app's own services carry a fixture plan from approval to two merges (the TUI's order, headless).
+JOURNEY = """
+import sys
+from terminal_planner.authority import Authority
+from terminal_planner.cli import App, fixture_driver
+from terminal_planner.engine import FixtureEngine, fixture_draft
+from terminal_planner.process import Profile
+from terminal_planner.tui.controller import Capture
+project, state = sys.argv[1:3]
+with Authority(state, project, fixture_id="gate") as authority:
+    profile = Profile.of(authority)
+    profile.defer()
+    app = App(Capture(), authority, lambda *_: FixtureEngine(), fixture_driver(authority),
+              authority.directory / "worktrees", profile=profile)
+    authority.begin("Requested feature", app.roles, "fixture", draft=fixture_draft(), review="goldfish",
+                    origin="plan", by="owner", response="")
+    FixtureEngine().proposal(authority, lambda _: None)
+    app.planning.approve(1)
+    print("Plan r1 approved")
+    for milestone in ("M1", "M2"):
+        run = app.delivery.start(app.delivery.preview(milestone, app.roles), app.roles)
+        mark = None
+        while run["status"] in {"submitted", "running", "stopping"}:
+            mark = app.delivery.step(run, mark).mark
+        app.delivery.end(run)
+        print(app.delivery.merge(app.delivery.latest(milestone), allow_unverified=True).line)
+"""
 
 
 def tree(root):
@@ -40,7 +65,7 @@ class VersionTests(unittest.TestCase):
         project = (ROOT / "pyproject.toml").read_text()
         self.assertIn('\nversion = "%s"\n' % __version__, project)
         self.assertEqual(install.VERSION, __version__)
-        self.assertEqual(install.VERSION, "0.14.0")
+        self.assertEqual(install.VERSION, "0.15.0")
         self.assertIn("0.9.0", install.OWNED)  # an update from the previous release replaces its launcher
         self.assertIn("0.4.0", install.OWNED)  # the 0.9.0 installer keeps recognising the 0.4.0 launcher as ours
         self.assertIn("0.6.0", install.OWNED)  # and the 0.6.0 launcher too
@@ -325,7 +350,7 @@ class InstalledGateTests(unittest.TestCase):
             self.assertFalse(str(Path(path).resolve()).startswith(str(checkout)), path)
 
     def test_launcher_prints_version_and_older_install_is_untouched(self):
-        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.14.0")
+        self.assertEqual(self.call([str(self.launcher), "--version"]).strip(), "zplan 0.15.0")
         self.assertEqual(self.launcher.resolve(), (self.app / "bin/zplan").resolve())
         after = {path: value for path, value in tree(self.root / "data").items()
                  if not path.startswith("planning-kit/app/%s/" % install.VERSION)}
@@ -357,7 +382,7 @@ class InstalledGateTests(unittest.TestCase):
         output = self.call(checker + ["check", str(manifest), "--baseline", str(baseline)])
         self.assertTrue(output.startswith("OK: "), output)
 
-    def test_installed_app_has_textual_8_2_8_and_the_plain_entry_points_stay_plain(self):
+    def test_installed_app_has_textual_8_2_8_and_the_plain_entry_points_stay_plain_or_refuse(self):
         probe = ("import importlib.metadata as m, sys; import textual; "
                  "print(m.version('textual'), sys.version_info[:2] >= (3, 11), textual.__file__)")
         version, new_enough, where = self.call([str(self.python), "-I", "-c", probe]).split(None, 2)
@@ -369,9 +394,11 @@ class InstalledGateTests(unittest.TestCase):
             output = self.call(plain[:1] + extra + plain[1:])
             self.assertNotIn("\x1b", output)
             self.assertIn("No plan.", output)
-        piped = self.call(plain, input="q\n")  # no terminal on stdin: the line UI, no escape codes
-        self.assertNotIn("\x1b", piped)
-        self.assertIn("zplan · unrelated project", piped)
+        piped = subprocess.run(plain, cwd=self.project, env=self.env, input="q\n", capture_output=True, text=True,
+                               timeout=120)  # no terminal: a refusal naming status and exec, no escape codes
+        self.assertEqual(piped.returncode, 2)
+        self.assertNotIn("\x1b", piped.stdout + piped.stderr)
+        self.assertIn("zplan status or zplan exec", piped.stderr)
         resource = ("from importlib import resources; "
                     "print(resources.files('terminal_planner.tui').joinpath('zplan.tcss').read_text()[:40])")
         self.assertTrue(self.call([str(self.python), "-I", "-c", resource]).strip())  # the stylesheet ships and reads
@@ -399,7 +426,9 @@ class InstalledGateTests(unittest.TestCase):
     def test_installed_fixture_journey_plan_two_dependent_milestones_export_merge(self):
         state = self.root / "journey-state"
         command = [str(self.launcher), "--project", str(self.project), "--state-dir", str(state), "--fixture", "gate"]
-        output = self.call(command, input="l\n" + PLAN + "a\n" + START + MERGE + START + MERGE + "q\n", timeout=600)
+        script = self.root / "journey.py"
+        script.write_text(JOURNEY, encoding="utf-8")
+        output = self.call([str(self.python), "-I", str(script), str(self.project), str(state)], timeout=600)
         self.assertIn("Plan r1 approved", output)
         self.assertIn("Merged: M1 → main", output)
         self.assertIn("Merged: M2 → main", output)
